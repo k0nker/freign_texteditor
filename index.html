@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>freign text editor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ── Toolbar ── -->
+<div id="toolbar">
+  <button id="btn-copy-raw"      title="Copy raw text (with codes)">Copy Raw</button>
+  <button id="btn-copy-rendered" title="Copy plain rendered text (no codes)">Copy Plain</button>
+  <button id="btn-strip"         title="Strip all color codes from raw">Strip Colors</button>
+  <button id="btn-undo"          title="Undo last change (Ctrl+Z)">Undo</button>
+  <div class="sep"></div>
+  <button id="btn-find"          title="Find / Replace (Ctrl+F)">Find</button>
+  <div class="sep"></div>
+  <label for="width-limit">Width:</label>
+  <input type="number" id="width-limit" min="20" max="300" step="1" title="Column width limit">
+  <label for="font-size">Font:</label>
+  <input type="number" id="font-size" min="8" max="32" step="1" title="Font size (px)">
+  <div class="sep"></div>
+  <label for="raw-bg-color" title="Raw editor background color">Raw BG:</label>
+  <input type="color" id="raw-bg-color" value="#141414" title="Raw editor background color">
+  <label for="rend-bg-color" title="Rendered editor background color">Rend BG:</label>
+  <input type="color" id="rend-bg-color" value="#121212" title="Rendered editor background color">
+  <div class="sep"></div>
+  <button id="btn-layout"  title="Toggle horizontal / vertical split">H Split</button>
+  <button id="btn-cheat"   title="Toggle color code cheat sheet">Cheat Sheet</button>
+</div>
+
+<!-- ── Find/Replace bar (hidden by default) ── -->
+<div id="find-bar" class="hidden">
+  <input type="text" id="find-input"    placeholder="Find…">
+  <button id="btn-find-prev" title="Previous match">▲</button>
+  <button id="btn-find-next" title="Next match">▼</button>
+  <span id="find-count"></span>
+  <input type="text" id="replace-input" placeholder="Replace…" style="flex:1">
+  <button id="btn-replace-one">Replace</button>
+  <button id="btn-replace-all">Replace All</button>
+  <button id="btn-find-close" title="Close">✕</button>
+</div>
+
+<!-- ── Main content ── -->
+<div id="main">
+
+  <!-- Sidebar -->
+  <div id="sidebar"></div>
+
+  <!-- Editor panes -->
+  <div id="editors">
+
+    <!-- Raw editor pane -->
+    <div class="editor-pane">
+      <div class="pane-label">RAW (with color codes)</div>
+      <div class="ruler"><canvas id="ruler-top"></canvas></div>
+      <textarea id="raw-editor" spellcheck="false" autocorrect="off" autocomplete="off"
+        placeholder="Type your MUD text here… e.g. {RHello{x} {Wworld{x}"></textarea>
+    </div>
+
+    <!-- Splitter between raw and rendered panes -->
+    <div id="pane-splitter" class="pane-splitter"></div>
+
+    <!-- Rendered pane -->
+    <div class="editor-pane">
+      <div class="pane-label">RENDERED (preview — type to edit, select + click color to apply)</div>
+      <div class="ruler"><canvas id="ruler-bot"></canvas></div>
+      <div id="rendered-output">
+        <pre id="rendered-content" contenteditable="true" spellcheck="false" autocorrect="off" autocapitalize="off"></pre>
+      </div>
+    </div>
+
+  </div><!-- #editors -->
+
+  <!-- Cheat sheet splitter -->
+  <div id="cheat-splitter" class="cheat-splitter"></div>
+
+  <!-- Cheat sheet panel -->
+  <div id="cheat-sheet">
+    <div id="cheat-sheet-header">Color Codes</div>
+    <div id="cheat-sheet-body"></div>
+  </div>
+
+</div><!-- #main -->
+
+<!-- ── Status bar ── -->
+<div id="status-bar">
+  <div class="status-item">Lines: <span id="status-line">0</span></div>
+  <div class="status-item">Chars: <span id="status-vis">0</span></div>
+  <div class="status-item"><span id="status-caret">Ln 1, Col 1</span></div>
+</div>
+
+<script src="colorCodes.js"></script>
+<script src="editor.js"></script>
+</body>
+</html>
