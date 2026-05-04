@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Forgotten Reign</title>
   <meta name="description" content="Forgotten Reign MUD - enter the realms, forge your legend." />
-  <link rel="stylesheet" href="site.css?v=6" />
+  <link rel="stylesheet" href="site.css?v=7" />
   <link rel="stylesheet" href="site-shell.css?v=1" />
 </head>
 <body data-theme="amethyst">
@@ -48,6 +48,7 @@
 
     <section class="section" aria-label="Realm status">
       <h2>realm status</h2>
+      <!-- TODO: Replace websocket-based realm probes with a lobby REST status API when available to avoid creating connection spam on the MUD. -->
       <p id="realm-status">
         <span id="realm-status-public">public: checking…</span>
         &nbsp;•&nbsp;
@@ -87,6 +88,6 @@
 
   <script src="site-themes.js?v=1" defer></script>
   <script src="site-shell.js?v=2" defer></script>
-  <script src="site.js?v=6" defer></script>
+  <script src="site.js?v=8" defer></script>
 </body>
 </html>

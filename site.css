@@ -239,6 +239,7 @@ select {
 
 .status-online  { color: var(--accent); }
 .status-offline { color: var(--muted); opacity: 0.75; }
+.status-error   { color: #d86f6f; }
 
 .footer {
   width: 100%;

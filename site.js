@@ -13,16 +13,22 @@
       var el = document.getElementById('realm-status-' + probe.id);
       if (!el) return;
       el.textContent = probe.label + ': checking\u2026';
-      probeMud(probe.wsPath, probe.host, probe.port, function (online) {
-        el.textContent = probe.label + ': ' + (online ? 'online' : 'offline');
-        el.className = online ? 'status-online' : 'status-offline';
+      probeMud(probe.wsPath, probe.host, probe.port, function (state) {
+        el.textContent = probe.label + ': ' + state;
+        if (state === 'online') {
+          el.className = 'status-online';
+          return;
+        }
+        if (state === 'error') {
+          el.className = 'status-error';
+          return;
+        }
+        el.className = 'status-offline';
       });
     });
   });
 
-  function probeMud(wsPath, cb) {
-      function probeMud(wsPath, mudHost, mudPort, cb) {
-    var origin = window.location.origin;
+  function probeMud(wsPath, mudHost, mudPort, cb) {
     var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     var host = window.location.host;
     var url = protocol + '//' + host + wsPath;
@@ -42,11 +48,11 @@
     try {
       ws = new WebSocket(url);
     } catch (_) {
-      cb(false);
+      cb('error');
       return;
     }
 
-    timer = setTimeout(function () { finish(false); }, PROBE_TIMEOUT_MS);
+    timer = setTimeout(function () { finish('error'); }, PROBE_TIMEOUT_MS);
 
     ws.addEventListener('open', function () {
     });
@@ -63,17 +69,25 @@
       }
 
       if (gotBridge && msg.type === 'status') {
-        // "Connected." = MUD is reachable. Anything else = failure.
-        finish(typeof msg.message === 'string' && msg.message.indexOf('Connected') === 0);
+        // "Connected." = MUD is reachable. Socket/probe failures are errors.
+        if (typeof msg.message === 'string' && msg.message.indexOf('Connected') === 0) {
+          finish('online');
+          return;
+        }
+        if (typeof msg.message === 'string' && msg.message.toLowerCase().indexOf('socket error') !== -1) {
+          finish('error');
+          return;
+        }
+        finish('offline');
         return;
       }
 
       if (msg.type === 'disconnected') {
-        finish(false);
+        finish('offline');
       }
     });
 
-    ws.addEventListener('error', function () { finish(false); });
-    ws.addEventListener('close', function () { finish(false); });
+    ws.addEventListener('error', function () { finish('error'); });
+    ws.addEventListener('close', function () { finish(gotBridge ? 'offline' : 'error'); });
   }
 })();
