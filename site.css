@@ -194,6 +194,13 @@ select {
   background: color-mix(in srgb, var(--input-bg) 72%, var(--accent));
   padding: 8px 12px;
   border-radius: 6px;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.btn:not(.primary):hover,
+.btn:not(.primary):focus-visible {
+  background: color-mix(in srgb, var(--input-bg) 62%, var(--accent));
+  border-color: color-mix(in srgb, var(--input-border) 72%, var(--accent));
 }
 
 .btn.primary {
@@ -239,7 +246,6 @@ select {
 
 .status-online  { color: var(--accent); }
 .status-offline { color: var(--muted); opacity: 0.75; }
-.status-error   { color: #d86f6f; }
 
 .footer {
   width: 100%;

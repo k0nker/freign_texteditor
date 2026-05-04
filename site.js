@@ -19,10 +19,6 @@
           el.className = 'status-online';
           return;
         }
-        if (state === 'error') {
-          el.className = 'status-error';
-          return;
-        }
         el.className = 'status-offline';
       });
     });
@@ -48,11 +44,11 @@
     try {
       ws = new WebSocket(url);
     } catch (_) {
-      cb('error');
+      cb('offline');
       return;
     }
 
-    timer = setTimeout(function () { finish('error'); }, PROBE_TIMEOUT_MS);
+    timer = setTimeout(function () { finish('offline'); }, PROBE_TIMEOUT_MS);
 
     ws.addEventListener('open', function () {
     });
@@ -69,13 +65,9 @@
       }
 
       if (gotBridge && msg.type === 'status') {
-        // "Connected." = MUD is reachable. Socket/probe failures are errors.
+        // "Connected." = MUD is reachable. All other failures are treated as offline.
         if (typeof msg.message === 'string' && msg.message.indexOf('Connected') === 0) {
           finish('online');
-          return;
-        }
-        if (typeof msg.message === 'string' && msg.message.toLowerCase().indexOf('socket error') !== -1) {
-          finish('error');
           return;
         }
         finish('offline');
@@ -87,7 +79,7 @@
       }
     });
 
-    ws.addEventListener('error', function () { finish('error'); });
-    ws.addEventListener('close', function () { finish(gotBridge ? 'offline' : 'error'); });
+    ws.addEventListener('error', function () { finish('offline'); });
+    ws.addEventListener('close', function () { finish('offline'); });
   }
 })();
