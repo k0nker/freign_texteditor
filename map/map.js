@@ -17,6 +17,7 @@
     var DIR_NAMES  = ['N', 'E', 'S', 'W', 'U', 'D'];
     var DIR_ARROWS = ['↑N', '→E', '↓S', '←W', '↑U', '↓D'];
 
+    var themeApi = window.FreignThemes || null;
     var THEME_PRESETS = {
         dark: {
             canvasBg: '#0a0a0e',
@@ -104,11 +105,40 @@
                 12: { name: 'Snow',        fill: '#2b3340', border: '#7e9fbe' },
                 _default: { name: 'Unknown', fill: '#222936', border: '#5f728d' },
             }
+        },
+        amethyst: {
+            canvasBg: '#19131f',
+            link: 'rgba(186,164,210,0.45)',
+            pathLink: 'rgba(241,225,255,0.92)',
+            roomLabel: '#efe4ff',
+            pathLabel: '#fff3ff',
+            areaLabel: 'rgba(235,214,255,0.96)',
+            areaLabelStroke: 'rgba(18,10,24,0.56)',
+            hoverBorder: '#b799d9',
+            originBorder: '#ddc0ff',
+            destBorder: '#b5dbff',
+            pathBorder: '#cfadea',
+            sectors: {
+                0:  { name: 'Inside',      fill: '#30273a', border: '#7d6694' },
+                1:  { name: 'City',        fill: '#3a2d35', border: '#9e7890' },
+                2:  { name: 'Field',       fill: '#2b332e', border: '#6ea187' },
+                3:  { name: 'Forest',      fill: '#233427', border: '#57926b' },
+                4:  { name: 'Hills',       fill: '#43332a', border: '#b59272' },
+                5:  { name: 'Mountain',    fill: '#3f3026', border: '#be9d79' },
+                6:  { name: 'Water',       fill: '#263d65', border: '#7eb5ff' },
+                7:  { name: 'Deep Water',  fill: '#1f3052', border: '#6698de' },
+                8:  { name: 'Swamp',       fill: '#313a33', border: '#7a8d79' },
+                9:  { name: 'Air',         fill: '#343a47', border: '#8b9ab8' },
+                10: { name: 'Desert',      fill: '#453a31', border: '#ba9e72' },
+                11: { name: 'Lava',        fill: '#4a2e2d', border: '#c7736d' },
+                12: { name: 'Snow',        fill: '#3c4352', border: '#9bb4d5' },
+                _default: { name: 'Unknown', fill: '#332d3f', border: '#8976a5' },
+            }
         }
     };
 
-    var activeTheme = 'cobalt';
-    var activePalette = THEME_PRESETS.cobalt;
+    var activeTheme = 'amethyst';
+    var activePalette = THEME_PRESETS.amethyst;
 
     // Canonical ANSI-aligned sector palette (from legacy room_color_table semantics).
     var ANSI_COLOR_HEX = {
@@ -236,7 +266,7 @@
     function drawMapPatina() {
         var w = canvas.width;
         var h = canvas.height;
-        var isDarkTheme = (activeTheme !== 'parchment');
+        var isDarkTheme = !isLightTheme(activeTheme);
 
         var pattern = getPaperPattern();
         if (pattern) {
@@ -260,7 +290,7 @@
     var wrap    = document.getElementById('canvas-wrap');
     var tooltip = document.getElementById('tooltip');
     var loading = document.getElementById('loading');
-    var themeSelect = document.getElementById('theme-select');
+    var themeSelect = document.getElementById('site-theme-select') || document.getElementById('theme-select');
 
     var rooms      = {};   // vnum -> room object (with worldX, worldY, area, sector, name, exits)
     var adjacency  = {};   // vnum -> [{v, d}]
@@ -291,11 +321,13 @@
     applyTheme(readStoredTheme());
     if (themeSelect) {
         themeSelect.value = activeTheme;
-        themeSelect.addEventListener('change', function () {
-            applyTheme(themeSelect.value);
-            buildLegend();
-        });
     }
+    window.addEventListener('freign-theme-changed', function (evt) {
+        if (!evt || !evt.detail) return;
+        applyTheme(evt.detail.themeId);
+        if (themeSelect) themeSelect.value = activeTheme;
+        buildLegend();
+    });
 
     // ---- Data loading ----
     var _worldData = null;
@@ -714,7 +746,7 @@
 
     function drawAreaBackplates(areas, zoomScale) {
         ctx.save();
-        var isDarkTheme = (activeTheme !== 'parchment');
+        var isDarkTheme = !isLightTheme(activeTheme);
         for (var i = 0; i < areas.length; i++) {
             var a = areas[i];
             var sec = sectorStyle(a.sector);
@@ -1281,21 +1313,130 @@
     }
 
     function applyTheme(name) {
-        if (!THEME_PRESETS[name]) name = 'cobalt';
-        activeTheme = name;
-        activePalette = THEME_PRESETS[name];
-        document.body.setAttribute('data-theme', name);
-        try { localStorage.setItem('freignMapTheme', name); } catch (_) {}
+        var resolved = resolveSiteTheme(name);
+        var mapped = mapPresetForTheme(resolved);
+        activeTheme = resolved;
+        if (themeApi && typeof themeApi.applyTheme === 'function') {
+            themeApi.applyTheme(resolved, { persist: false, select: themeSelect || undefined });
+        } else {
+            document.body.setAttribute('data-theme', resolved);
+        }
+        activePalette = buildThemePalette(resolved, mapped);
     }
 
     function readStoredTheme() {
         try {
-            var v = localStorage.getItem('freignMapTheme');
+            var v = themeApi ? themeApi.getThemeId() : (localStorage.getItem('freign.site.theme.v1') || localStorage.getItem('freignMapTheme'));
             if (v === 'dusk') return 'cobalt';
-            return THEME_PRESETS[v] ? v : 'cobalt';
+            return resolveSiteTheme(v);
         } catch (_) {
-            return 'cobalt';
+            return 'amethyst';
         }
+    }
+
+    function resolveSiteTheme(name) {
+        if (themeApi && typeof themeApi.resolveThemeId === 'function') {
+            return themeApi.resolveThemeId(name);
+        }
+        var raw = String(name || '').toLowerCase();
+        if (raw === 'dark') return 'onyx';
+        if (raw === 'parchment') return 'pearl';
+        return raw || 'amethyst';
+    }
+
+    function mapPresetForTheme(themeName) {
+        var map = {
+            amethyst: 'amethyst',
+            emerald: 'amethyst',
+            jade: 'amethyst',
+            cobalt: 'cobalt',
+            sapphire: 'cobalt',
+            topaz: 'cobalt',
+            onyx: 'dark',
+            obsidian: 'dark',
+            ruby: 'dark',
+            garnet: 'dark',
+            pearl: 'parchment',
+            opal: 'parchment',
+            quartz: 'parchment'
+        };
+        return map[themeName] || 'amethyst';
+    }
+
+    function buildThemePalette(themeName, presetName) {
+        var base = THEME_PRESETS[presetName] || THEME_PRESETS.amethyst;
+        var palette = clonePalette(base);
+        var theme = themeApi && typeof themeApi.getTheme === 'function' ? themeApi.getTheme(themeName) : null;
+        var vars = theme && theme.vars ? theme.vars : null;
+        var styles = getComputedStyle(document.body);
+        var bg = getThemeVar(vars, 'bg', getCssVar(styles, '--bg', base.canvasBg));
+        var panel = getThemeVar(vars, 'panel', getCssVar(styles, '--panel', bg));
+        var terminalBg = getThemeVar(vars, 'terminal-bg', getCssVar(styles, '--terminal-bg', bg));
+        var title = getThemeVar(vars, 'title', getCssVar(styles, '--title', base.areaLabel));
+        var text = getThemeVar(vars, 'text', getCssVar(styles, '--text', base.roomLabel));
+        var accent = getThemeVar(vars, 'accent', getCssVar(styles, '--accent', base.hoverBorder));
+        var lightTheme = isLightTheme(themeName);
+
+        palette.canvasBg = lightTheme
+            ? blendHex(terminalBg, '#ffffff', 0.18)
+            : blendHex(terminalBg, panel, 0.35);
+        document.body.style.setProperty('--map-canvas-bg', palette.canvasBg);
+        palette.link = hexToRgbaColor(blendHex(accent, text, 0.35), lightTheme ? 0.34 : 0.52);
+        palette.pathLink = hexToRgbaColor(blendHex(accent, '#ffffff', 0.45), 0.92);
+        palette.roomLabel = text;
+        palette.pathLabel = blendHex(title, '#ffffff', lightTheme ? 0.12 : 0.24);
+        palette.areaLabel = title;
+        palette.areaLabelStroke = hexToRgbaColor(blendHex(panel, '#000000', lightTheme ? 0.18 : 0.42), lightTheme ? 0.42 : 0.56);
+        palette.hoverBorder = blendHex(accent, '#ffffff', 0.18);
+        palette.originBorder = blendHex(title, '#ffffff', 0.24);
+        palette.destBorder = blendHex(accent, '#9ed8ff', 0.48);
+        palette.pathBorder = blendHex(accent, title, 0.4);
+        return palette;
+    }
+
+    function clonePalette(base) {
+        var out = {};
+        for (var key in base) {
+            if (!Object.prototype.hasOwnProperty.call(base, key)) continue;
+            if (key === 'sectors') {
+                out.sectors = {};
+                for (var sKey in base.sectors) {
+                    if (!Object.prototype.hasOwnProperty.call(base.sectors, sKey)) continue;
+                    out.sectors[sKey] = {
+                        name: base.sectors[sKey].name,
+                        fill: base.sectors[sKey].fill,
+                        border: base.sectors[sKey].border,
+                    };
+                }
+            } else {
+                out[key] = base[key];
+            }
+        }
+        return out;
+    }
+
+    function getCssVar(styles, name, fallback) {
+        var value = styles.getPropertyValue(name);
+        value = value ? value.trim() : '';
+        return value || fallback;
+    }
+
+    function getThemeVar(vars, key, fallback) {
+        if (!vars || !Object.prototype.hasOwnProperty.call(vars, key)) {
+            return fallback;
+        }
+        return vars[key] || fallback;
+    }
+
+    function isLightTheme(themeName) {
+        if (themeApi && typeof themeApi.isLight === 'function') {
+            return !!themeApi.isLight(themeName);
+        }
+        var attr = document.body.getAttribute('data-theme-tone');
+        if (attr) {
+            return attr === 'light';
+        }
+        return themeName === 'pearl' || themeName === 'opal' || themeName === 'quartz' || themeName === 'parchment';
     }
 
     // ---- Utility ----

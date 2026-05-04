@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Forgotten Reign</title>
+  <meta name="description" content="Forgotten Reign MUD - enter the realms, forge your legend." />
+  <link rel="stylesheet" href="site.css?v=6" />
+  <link rel="stylesheet" href="site-shell.css?v=1" />
+</head>
+<body data-theme="amethyst">
+  <div class="fr-shellbar">
+    <div class="fr-shellbar-inner">
+      <nav class="fr-nav" aria-label="Main">
+        <a href="/" class="fr-nav-item active">home</a>
+        <a href="/news/" class="fr-nav-item">news</a>
+        <a href="/forum/" class="fr-nav-item">forum</a>
+        <a href="/who/" class="fr-nav-item">who</a>
+        <div class="fr-nav-group">
+          <button type="button" class="fr-nav-item fr-nav-trigger" aria-haspopup="true">db</button>
+          <div class="fr-submenu" role="menu" aria-label="db">
+            <button type="button" class="fr-submenu-item" role="menuitem">objects</button>
+            <button type="button" class="fr-submenu-item" role="menuitem">mobiles</button>
+            <button type="button" class="fr-submenu-item" role="menuitem">help</button>
+          </div>
+        </div>
+        <a href="/map/" class="fr-nav-item">map</a>
+        <a href="/play/" class="fr-nav-item">play</a>
+      </nav>
+      <div class="fr-theme-control">
+        <label for="site-theme-select" class="fr-theme-label">theme</label>
+        <select id="site-theme-select" aria-label="Theme selector"></select>
+      </div>
+    </div>
+  </div>
+
+  <main class="page-shell">
+    <section class="hero">
+      <p class="eyebrow">Text-based MMO Roleplay</p>
+      <h1 class="brand">Forgotten Reign</h1>
+      <p class="tagline">...hold the world, but as the world.</p>
+      <p class="lead">A passion project by a group of MUD players.</p>
+      <div class="cta-row">
+        <a class="btn primary" href="/play/">Play In Browser</a>
+        <a class="btn" href="/map/">World Map</a>
+      </div>
+    </section>
+
+    <section class="section" aria-label="Realm status">
+      <h2>realm status</h2>
+      <p id="realm-status">
+        <span id="realm-status-public">public: checking…</span>
+        &nbsp;•&nbsp;
+        <span id="realm-status-test">test: checking…</span>
+        &nbsp;•&nbsp;
+        website: operational
+        &nbsp;•&nbsp;
+        mode: beta
+      </p>
+    </section>
+
+    <section class="section split" aria-label="Quick start and links">
+      <div>
+        <h2>quick start</h2>
+        <ol>
+          <li>Open the browser client.</li>
+          <li>Create or enter your account.</li>
+          <li>Select a character and begin adventuring.</li>
+        </ol>
+      </div>
+      <div>
+        <h2>links</h2>
+        <ul class="links">
+          <li><a href="/play/">play client</a></li>
+          <li><a href="/map/">interactive map</a></li>
+          <li><a href="/editor/">content editor</a></li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      Forgotten Reign • © 2026
+    </div>
+  </footer>
+
+  <script src="site-themes.js?v=1" defer></script>
+  <script src="site-shell.js?v=2" defer></script>
+  <script src="site.js?v=6" defer></script>
+</body>
+</html>

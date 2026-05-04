@@ -4,9 +4,35 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>freign text editor</title>
+  <link rel="stylesheet" href="../site-shell.css?v=1">
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body data-theme="amethyst">
+
+<div class="fr-shellbar">
+  <div class="fr-shellbar-inner">
+    <nav class="fr-nav" aria-label="Main">
+      <a href="/" class="fr-nav-item">home</a>
+      <a href="/news/" class="fr-nav-item">news</a>
+      <a href="/forum/" class="fr-nav-item">forum</a>
+      <a href="/who/" class="fr-nav-item">who</a>
+      <div class="fr-nav-group">
+        <button type="button" class="fr-nav-item fr-nav-trigger" aria-haspopup="true">db</button>
+        <div class="fr-submenu" role="menu" aria-label="db">
+          <button type="button" class="fr-submenu-item" role="menuitem">objects</button>
+          <button type="button" class="fr-submenu-item" role="menuitem">mobiles</button>
+          <button type="button" class="fr-submenu-item" role="menuitem">help</button>
+        </div>
+      </div>
+      <a href="/map/" class="fr-nav-item">map</a>
+      <a href="/play/" class="fr-nav-item">play</a>
+    </nav>
+    <div class="fr-theme-control">
+      <label for="site-theme-select" class="fr-theme-label">theme</label>
+      <select id="site-theme-select" aria-label="Theme selector"></select>
+    </div>
+  </div>
+</div>
 
 <!-- ── Toolbar ── -->
 <div id="toolbar">
@@ -93,6 +119,8 @@
 </div>
 
 <script src="colorCodes.js"></script>
+<script src="../site-themes.js?v=1"></script>
+<script src="../site-shell.js?v=2"></script>
 <script src="editor.js"></script>
 </body>
 </html>

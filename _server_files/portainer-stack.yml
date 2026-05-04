@@ -1,0 +1,37 @@
+version: "3.8"
+
+services:
+  web:
+    image: nginx:latest
+    ports:
+      - "5447:80"
+    volumes:
+      - /var/www/freign:/usr/share/nginx/html:ro
+      - /usr/share/freign_nginx/conf.d:/etc/nginx/conf.d:ro
+    depends_on:
+      - play-bridge
+    restart: always
+    networks:
+      - wekan-tier
+
+  play-bridge:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm start"
+    environment:
+      PLAY_WS_PORT: "9001"
+      PLAY_WS_PATH: "/ws"
+      PLAY_PROXY_PROTOCOL: "v2"
+      PLAY_ALLOW_HOSTS: "192.168.86.99"
+    volumes:
+      - /var/www/freign/play:/app
+    restart: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - wekan-tier
+
+  play-bridge-test:
+networks:
+  wekan-tier:
+    driver: bridge

@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FREIGN Web MUD Client</title>
+  <link rel="stylesheet" href="../site-shell.css?v=1" />
+  <link rel="stylesheet" href="styles.css?v=17" />
+</head>
+<body data-theme="amethyst">
+  <div class="fr-shellbar">
+    <div class="fr-shellbar-inner">
+      <nav class="fr-nav" aria-label="Main">
+        <a href="/" class="fr-nav-item">home</a>
+        <a href="/news/" class="fr-nav-item">news</a>
+        <a href="/forum/" class="fr-nav-item">forum</a>
+        <a href="/who/" class="fr-nav-item">who</a>
+        <div class="fr-nav-group">
+          <button type="button" class="fr-nav-item fr-nav-trigger" aria-haspopup="true">db</button>
+          <div class="fr-submenu" role="menu" aria-label="db">
+            <button type="button" class="fr-submenu-item" role="menuitem">objects</button>
+            <button type="button" class="fr-submenu-item" role="menuitem">mobiles</button>
+            <button type="button" class="fr-submenu-item" role="menuitem">help</button>
+          </div>
+        </div>
+        <a href="/map/" class="fr-nav-item">map</a>
+        <a href="/play/" class="fr-nav-item active">play</a>
+      </nav>
+      <div class="fr-theme-control">
+        <label for="site-theme-select" class="fr-theme-label">theme</label>
+        <select id="site-theme-select" aria-label="Theme selector"></select>
+      </div>
+    </div>
+  </div>
+
+  <div id="app">
+    <main id="terminal-shell">
+      <header id="terminal-header">
+        <div class="brand">FREIGN PLAY</div>
+        <div id="connection-state" class="state-offline">Offline</div>
+      </header>
+      <section id="terminal" aria-live="polite"></section>
+      <form id="input-form" autocomplete="off">
+        <label for="cmd-input" class="sr-only">Command</label>
+        <input id="cmd-input" type="text" placeholder="Type command and press Enter" />
+        <button type="submit">Send</button>
+      </form>
+      <section id="macro-bar" aria-label="Macro Bar"></section>
+    </main>
+
+    <aside id="sidebar">
+      <section class="panel">
+        <h2>Connection</h2>
+        <div class="grid two" hidden>
+          <label hidden>Saved MUD</label>
+          <select id="mud-select" hidden></select>
+
+          <label hidden>Name</label>
+          <input id="mud-name" type="text" hidden readonly />
+
+          <label hidden>Host</label>
+          <input id="mud-host" type="text" hidden readonly />
+
+          <label hidden>Port</label>
+          <input id="mud-port" type="number" min="1" max="65535" hidden readonly />
+
+          <label hidden>TLS</label>
+          <input id="mud-tls" type="checkbox" hidden disabled />
+        </div>
+        <div class="row" hidden>
+          <button id="mud-add" type="button" hidden>Add/Update</button>
+          <button id="mud-remove" type="button" hidden>Remove</button>
+        </div>
+        <div class="connection-actions">
+          <button id="connect-public-btn" type="button">Connect Public</button>
+          <button id="connect-test-btn" type="button">Connect Test</button>
+          <button id="disconnect-btn" type="button">Disconnect</button>
+          <button id="connect-btn" type="button" hidden>Connect</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Behavior</h2>
+        <div class="grid two">
+          <label>Timestamps</label>
+          <input id="timestamps" type="checkbox" checked />
+
+          <label>Wrap</label>
+          <input id="wrap-lines" type="checkbox" checked />
+
+          <label>Command Stacker</label>
+          <input id="stack-separator" type="text" maxlength="4" placeholder=";" />
+
+          <input id="bridge-url" type="hidden" />
+          <select id="theme-select" hidden aria-hidden="true"></select>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Aliases</h2>
+        <div class="table" id="aliases-table"></div>
+        <button id="add-alias" type="button">Add Alias</button>
+      </section>
+
+      <section class="panel">
+        <h2>Triggers</h2>
+        <div class="table" id="triggers-table"></div>
+        <button id="add-trigger" type="button">Add Trigger</button>
+      </section>
+
+      <section class="panel">
+        <h2>Macros</h2>
+        <div class="table" id="macros-table"></div>
+        <button id="add-macro" type="button">Add Macro</button>
+      </section>
+
+      <section class="panel">
+        <h2>ANSI Colors (0-15)</h2>
+        <div id="ansi-colors" class="ansi-grid"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Settings</h2>
+        <div class="row">
+          <button id="export-settings" type="button">Export JSON</button>
+          <button id="import-settings" type="button">Import JSON</button>
+          <button id="reset-settings" type="button" class="danger">Reset Local Settings</button>
+          <input id="import-file" type="file" accept="application/json" hidden />
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <script src="../site-themes.js?v=1" defer></script>
+  <script src="../site-shell.js?v=2" defer></script>
+  <script src="ansi.js?v=15" defer></script>
+  <script src="app.js?v=16" defer></script>
+</body>
+</html>

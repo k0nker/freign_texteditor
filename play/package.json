@@ -1,0 +1,13 @@
+{
+  "name": "freign-play-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "WebSocket to Telnet bridge for FREIGN web client",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

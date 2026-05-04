@@ -4,68 +4,47 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FREIGN World Map</title>
+<link rel="stylesheet" href="../site-shell.css?v=1" />
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-  :root {
-    --bg: #0a0a0e;
-    --text: #c8c0b0;
-    --sidebar-bg: #111118;
-    --sidebar-border: #2a2a38;
-    --title: #e0c87a;
-    --input-bg: #1a1a24;
-    --input-border: #3a3a50;
-    --card-bg: #1a1a26;
-    --card-border: #2e2e42;
-    --muted: #6a6880;
-    --hint: #4a4860;
-    --step-bg: #2a2a3a;
-    --control-hint: #3a3858;
-    --tooltip-bg: rgba(10,10,20,0.92);
-  }
-
-  body[data-theme="parchment"] {
-    --bg: #efe5cd;
-    --text: #3e3325;
-    --sidebar-bg: #f8f0db;
-    --sidebar-border: #b7a27c;
-    --title: #6f4d1f;
-    --input-bg: #fff8ea;
-    --input-border: #bda883;
-    --card-bg: #fff8e8;
-    --card-border: #c4af88;
-    --muted: #7a6543;
-    --hint: #8b7859;
-    --step-bg: #e8dcc2;
-    --control-hint: #8b7859;
-    --tooltip-bg: rgba(255,248,232,0.94);
-  }
-
-  body[data-theme="cobalt"] {
-    --bg: #111722;
-    --text: #c7d4e4;
-    --sidebar-bg: #17202e;
-    --sidebar-border: #31435b;
-    --title: #b6d8ff;
-    --input-bg: #202c3d;
-    --input-border: #3e5573;
-    --card-bg: #1d2a3b;
-    --card-border: #3b516e;
-    --muted: #8ba2bf;
-    --hint: #6f87a5;
-    --step-bg: #233348;
-    --control-hint: #6f87a5;
-    --tooltip-bg: rgba(20,30,46,0.94);
-  }
-
   body {
+    --sidebar-bg: color-mix(in srgb, var(--panel, #1b1827) 90%, var(--bg, #12101a) 10%);
+    --sidebar-border: var(--panel-border, #3d3452);
+    --title: var(--title, #d7cee8);
+    --input-bg: var(--input-bg, #232033);
+    --input-border: var(--input-border, #4a4160);
+    --card-bg: color-mix(in srgb, var(--panel, #1b1827) 78%, var(--input-bg, #232033) 22%);
+    --card-border: color-mix(in srgb, var(--panel-border, #3d3452) 88%, transparent);
+    --muted: var(--muted, #9e95b4);
+    --hint: color-mix(in srgb, var(--muted, #9e95b4) 70%, var(--text, #ddd8ea));
+    --step-bg: color-mix(in srgb, var(--input-bg, #232033) 72%, var(--accent, #7f6aa7) 28%);
+    --control-hint: var(--muted, #9e95b4);
+    --tooltip-bg: color-mix(in srgb, var(--panel, #1b1827) 85%, var(--bg, #12101a) 15%);
     background: var(--bg);
     color: var(--text);
     font-family: 'Consolas', 'Courier New', monospace;
     font-size: 13px;
     display: flex;
+    flex-direction: column;
     height: 100vh;
     overflow: hidden;
+  }
+
+  body[data-theme-tone="light"] {
+    --sidebar-bg: color-mix(in srgb, var(--panel, #f8f0db) 94%, white 6%);
+    --card-bg: color-mix(in srgb, var(--panel, #f8f0db) 70%, var(--bg, #efe5cd) 30%);
+    --card-border: color-mix(in srgb, var(--panel-border, #b7a27c) 80%, white 20%);
+    --hint: color-mix(in srgb, var(--muted, #7a6543) 82%, var(--text, #3e3325) 18%);
+    --step-bg: color-mix(in srgb, var(--accent, #9a6a2f) 18%, white 82%);
+    --control-hint: color-mix(in srgb, var(--muted, #7a6543) 88%, var(--text, #3e3325) 12%);
+    --tooltip-bg: color-mix(in srgb, var(--panel, #f8f0db) 94%, white 6%);
+  }
+
+  #map-layout {
+    flex: 1;
+    min-height: 0;
+    display: flex;
   }
 
   #canvas-wrap {
@@ -73,12 +52,14 @@
     position: relative;
     overflow: hidden;
     cursor: crosshair;
+    background: var(--map-canvas-bg, var(--terminal-bg, var(--bg)));
   }
 
   canvas {
     display: block;
     width: 100%;
     height: 100%;
+    background: transparent;
   }
 
   /* ---- Sidebar ---- */
@@ -153,7 +134,7 @@
   #search-btn {
     background: var(--step-bg);
     border: 1px solid var(--input-border);
-    color: var(--text);
+    color: var(--accent-ink, var(--text));
     padding: 5px 10px;
     cursor: pointer;
     font: inherit;
@@ -244,7 +225,7 @@
     border-radius: 2px;
     padding: 1px 0;
     font-size: 11px;
-    color: var(--title);
+    color: var(--accent-ink, var(--title));
     flex-shrink: 0;
   }
   .step-room { color: color-mix(in srgb, var(--text) 82%, transparent); }
@@ -420,7 +401,34 @@
   }
 </style>
 </head>
-<body data-theme="cobalt">
+<body data-theme="amethyst">
+
+<div class="fr-shellbar">
+  <div class="fr-shellbar-inner">
+    <nav class="fr-nav" aria-label="Main">
+      <a href="/" class="fr-nav-item">home</a>
+      <a href="/news/" class="fr-nav-item">news</a>
+      <a href="/forum/" class="fr-nav-item">forum</a>
+      <a href="/who/" class="fr-nav-item">who</a>
+      <div class="fr-nav-group">
+        <button type="button" class="fr-nav-item fr-nav-trigger" aria-haspopup="true">db</button>
+        <div class="fr-submenu" role="menu" aria-label="db">
+          <button type="button" class="fr-submenu-item" role="menuitem">objects</button>
+          <button type="button" class="fr-submenu-item" role="menuitem">mobiles</button>
+          <button type="button" class="fr-submenu-item" role="menuitem">help</button>
+        </div>
+      </div>
+      <a href="/map/" class="fr-nav-item active">map</a>
+      <a href="/play/" class="fr-nav-item">play</a>
+    </nav>
+    <div class="fr-theme-control">
+      <label for="site-theme-select" class="fr-theme-label">theme</label>
+      <select id="site-theme-select" aria-label="Theme selector"></select>
+    </div>
+  </div>
+</div>
+
+<div id="map-layout">
 
 <div id="canvas-wrap">
   <canvas id="map-canvas"></canvas>
@@ -441,16 +449,6 @@
   <div id="sidebar-header">
     <h1>FREIGN World Map</h1>
     <div id="sidebar-controls">
-      <div class="sidebar-control-row">
-        <div class="sidebar-control-label">Theme</div>
-        <div id="theme-wrap">
-          <select id="theme-select">
-            <option value="cobalt">Cobalt</option>
-            <option value="dark">Dark</option>
-            <option value="parchment">Parchment</option>
-          </select>
-        </div>
-      </div>
       <div class="sidebar-control-row">
         <div class="sidebar-control-label">View</div>
         <button id="layer-mode-btn">Layers: Collapsed</button>
@@ -498,7 +496,11 @@
   </div>
 </div>
 
-<script src="map3d.js"></script>
-<script src="map.js"></script>
+</div>
+
+<script src="../site-themes.js?v=2"></script>
+<script src="../site-shell.js?v=3"></script>
+<script src="map3d.js?v=2"></script>
+<script src="map.js?v=2"></script>
 </body>
 </html>
