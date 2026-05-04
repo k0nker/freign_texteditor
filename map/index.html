@@ -105,6 +105,33 @@
     margin-bottom: 8px;
   }
 
+  #sidebar-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .sidebar-control-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .sidebar-control-label {
+    width: 52px;
+    flex-shrink: 0;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .sidebar-control-row button,
+  .sidebar-control-row select {
+    min-width: 0;
+  }
+
   #search-wrap {
     display: flex;
     gap: 6px;
@@ -136,10 +163,10 @@
   #search-btn:hover { filter: brightness(1.08); }
 
   #theme-wrap {
-    margin-top: 8px;
     display: flex;
     align-items: center;
     gap: 8px;
+    width: 100%;
   }
 
   #theme-wrap label {
@@ -255,6 +282,72 @@
     line-height: 1.6;
   }
 
+  /* ---- Layer controls ---- */
+  #layer-mode-btn {
+    background: var(--step-bg);
+    border: 1px solid var(--input-border);
+    color: var(--muted);
+    font: inherit;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    padding: 4px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    flex: 1;
+  }
+  #layer-mode-btn:hover { filter: brightness(1.12); color: var(--text); }
+
+  #view-3d-btn {
+    background: var(--step-bg);
+    border: 1px solid var(--input-border);
+    color: var(--muted);
+    font: inherit;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    padding: 4px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    flex: 1;
+  }
+  #view-3d-btn:hover  { filter: brightness(1.12); color: var(--text); }
+  #view-3d-btn.active { background: color-mix(in srgb, #3a6fa0 80%, transparent); color: #e8f0ff; border-color: #5090c0; }
+
+  #layer-nav {
+    display: none;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 3px;
+    padding: 4px 8px;
+    width: 100%;
+  }
+  #layer-nav button {
+    background: var(--step-bg);
+    border: 1px solid var(--input-border);
+    color: var(--text);
+    font: inherit;
+    font-size: 13px;
+    width: 22px;
+    height: 22px;
+    cursor: pointer;
+    border-radius: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+  #layer-nav button:hover:not(:disabled) { filter: brightness(1.15); }
+  #layer-nav button:disabled { opacity: 0.3; cursor: default; }
+  #layer-label {
+    font-size: 11px;
+    color: var(--title);
+    min-width: 52px;
+    text-align: center;
+    letter-spacing: 0.06em;
+  }
+
   /* ---- Tooltip ---- */
   #tooltip {
     position: absolute;
@@ -316,12 +409,14 @@
 
 <div id="canvas-wrap">
   <canvas id="map-canvas"></canvas>
+  <canvas id="map-canvas-3d" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;"></canvas>
   <div id="legend">
     <div id="legend-title">Terrain Key</div>
     <div id="legend-list"></div>
   </div>
   <div id="controls-hint">
-    Scroll: zoom &nbsp;·&nbsp; Drag: pan &nbsp;·&nbsp; Click: select origin → dest
+    Scroll: zoom &nbsp;·&nbsp; Drag: pan &nbsp;·&nbsp; Click: select origin → dest<br>
+    Expanded mode: ↑ / ↓ arrows change floor
   </div>
   <div id="tooltip"></div>
   <div id="loading">Loading map data...</div>
@@ -330,17 +425,34 @@
 <div id="sidebar">
   <div id="sidebar-header">
     <h1>FREIGN World Map</h1>
+    <div id="sidebar-controls">
+      <div class="sidebar-control-row">
+        <div class="sidebar-control-label">Theme</div>
+        <div id="theme-wrap">
+          <select id="theme-select">
+            <option value="cobalt">Cobalt</option>
+            <option value="dark">Dark</option>
+            <option value="parchment">Parchment</option>
+          </select>
+        </div>
+      </div>
+      <div class="sidebar-control-row">
+        <div class="sidebar-control-label">View</div>
+        <button id="layer-mode-btn">Layers: Collapsed</button>
+        <button id="view-3d-btn">3D View</button>
+      </div>
+      <div class="sidebar-control-row">
+        <div class="sidebar-control-label">Floor</div>
+        <div id="layer-nav">
+          <button id="layer-up">↑</button>
+          <span id="layer-label">Floor 0</span>
+          <button id="layer-down">↓</button>
+        </div>
+      </div>
+    </div>
     <div id="search-wrap">
       <input id="search-input" type="text" placeholder="Jump to area or room…" autocomplete="off">
       <button id="search-btn">Go</button>
-    </div>
-    <div id="theme-wrap">
-      <label for="theme-select">Theme</label>
-      <select id="theme-select">
-        <option value="cobalt">Cobalt</option>
-        <option value="dark">Dark</option>
-        <option value="parchment">Parchment</option>
-      </select>
     </div>
   </div>
 
@@ -367,6 +479,7 @@
   </div>
 </div>
 
+<script src="map3d.js"></script>
 <script src="map.js"></script>
 </body>
 </html>

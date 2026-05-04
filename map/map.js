@@ -128,6 +128,12 @@
     var areaMap    = {};   // short_name -> area object
     var worldAreas = [];   // ordered list of area placement records
 
+    // Layer mode
+    var layerMode    = 'collapsed';  // 'collapsed' | 'expanded'
+    var currentLayer = 0;
+    var globalMinLayer = 0;
+    var globalMaxLayer = 0;
+
     // Camera
     var cam = { x: 0, y: 0, scale: 0.4 };
 
@@ -153,9 +159,49 @@
     }
 
     // ---- Data loading ----
+    var _worldData = null;
+    var canvas3d   = document.getElementById('map-canvas-3d');
+    var view3dBtn  = document.getElementById('view-3d-btn');
+    var mode3d     = false;
+
+    function enter3D() {
+        mode3d = true;
+        canvas.style.display    = 'none';
+        canvas3d.style.display  = 'block';
+        var wrap = canvas.parentElement;
+        canvas3d.width  = wrap.clientWidth;
+        canvas3d.height = wrap.clientHeight;
+        if (view3dBtn) { view3dBtn.textContent = '2D Map'; view3dBtn.classList.add('active'); }
+        if (_worldData) {
+            Map3D.init(canvas3d, _worldData);
+            sync3DSelectionState();
+        }
+    }
+
+    function exit3D() {
+        mode3d = false;
+        canvas3d.style.display = 'none';
+        canvas.style.display   = 'block';
+        if (view3dBtn) { view3dBtn.textContent = '3D View'; view3dBtn.classList.remove('active'); }
+    }
+
+    if (view3dBtn) {
+        view3dBtn.addEventListener('click', function () {
+            if (mode3d) { exit3D(); } else { enter3D(); }
+        });
+    }
+
+    window.addEventListener('resize', function () {
+        if (!mode3d || !canvas3d) return;
+        var wrap = canvas.parentElement;
+        Map3D.resize(wrap.clientWidth, wrap.clientHeight);
+    });
+
+    // ---- Data loading ----
     fetch('data/world.json')
         .then(function (r) { return r.json(); })
         .then(function (data) {
+            _worldData = data;
             buildGraph(data);
             loading.style.display = 'none';
             buildLegend();
@@ -168,6 +214,8 @@
 
     function buildGraph(data) {
         worldAreas = data.world;
+        globalMinLayer = 0;
+        globalMaxLayer = 0;
 
         for (var i = 0; i < data.world.length; i++) {
             var wa = data.world[i];
@@ -189,6 +237,8 @@
                 h:  areaH,
                 gridW: ad.w,
                 gridH: ad.h,
+                minZ: ad.minZ || 0,
+                maxZ: ad.maxZ || 0,
                 rooms: [],
             };
             areaMap[wa.n] = areaObj;
@@ -197,6 +247,10 @@
                 var rj = ad.rooms[j];
                 var wx = areaPX + rj.x * SPACING + SPACING / 2;
                 var wy = areaPY + rj.y * SPACING + SPACING / 2;
+                var rz = rj.z || 0;
+
+                if (rz < globalMinLayer) globalMinLayer = rz;
+                if (rz > globalMaxLayer) globalMaxLayer = rz;
 
                 var room = {
                     vnum:   rj.v,
@@ -205,6 +259,7 @@
                     sector: rj.s,
                     gridX:  rj.x,
                     gridY:  rj.y,
+                    gridZ:  rz,
                     worldX: wx,
                     worldY: wy,
                     exits:  rj.ex || [],
@@ -331,6 +386,9 @@
                 if (r.worldX < tl.x - margin || r.worldX > br.x + margin) continue;
                 if (r.worldY < tl.y - margin || r.worldY > br.y + margin) continue;
 
+                // In expanded mode only draw exits from the current layer
+                if (layerMode === 'expanded' && r.gridZ !== currentLayer) continue;
+
                 var rs = worldToScreen(r.worldX, r.worldY);
                 var inPath = !!pathSet[vnum];
 
@@ -340,6 +398,12 @@
                     if (!nb) continue;
                     // Only draw each connection once (lower vnum draws it)
                     if (ex.v < +vnum) continue;
+
+                    // In expanded mode: skip U/D exits (drawn as indicators) and cross-layer exits
+                    if (layerMode === 'expanded') {
+                        if (ex.d >= 4) continue;
+                        if (nb.gridZ !== currentLayer) continue;
+                    }
 
                     var ns = worldToScreen(nb.worldX, nb.worldY);
                     var inPathEdge = inPath && !!pathSet[ex.v];
@@ -365,6 +429,14 @@
             var r = rooms[vnum];
             if (r.worldX < tl.x - margin || r.worldX > br.x + margin) continue;
             if (r.worldY < tl.y - margin || r.worldY > br.y + margin) continue;
+
+            // Layer filtering in expanded mode
+            var layerDiff = 0;
+            if (layerMode === 'expanded') {
+                layerDiff = Math.abs(r.gridZ - currentLayer);
+                if (layerDiff > 1) continue;
+                ctx.globalAlpha = layerDiff === 1 ? 0.12 : 1.0;
+            }
 
             var rs   = worldToScreen(r.worldX, r.worldY);
             var sec  = sectorStyle(r.sector);
@@ -405,13 +477,36 @@
                 ctx.fill();
             }
 
+            // U/D exit indicators in expanded mode (on-layer rooms only)
+            if (layerMode === 'expanded' && layerDiff === 0 && s >= 0.18) {
+                var hasUp = false, hasDown = false;
+                for (var ei = 0; ei < r.exits.length; ei++) {
+                    var ed = r.exits[ei].d;
+                    if (ed === 4 && rooms[r.exits[ei].v]) hasUp = true;
+                    if (ed === 5 && rooms[r.exits[ei].v]) hasDown = true;
+                }
+                if (hasUp || hasDown) {
+                    var indSize = Math.max(4, cellPx * 0.32);
+                    ctx.globalAlpha = 0.82;
+                    ctx.fillStyle = activePalette.areaLabel || '#c8b87a';
+                    ctx.font = Math.max(7, Math.round(indSize * 1.1)) + 'px Consolas, monospace';
+                    ctx.textAlign = 'center';
+                    if (hasUp)   ctx.fillText('↑', rs.x, rs.y - half - 2);
+                    if (hasDown) ctx.fillText('↓', rs.x, rs.y + half + Math.max(8, indSize * 1.1));
+                    ctx.globalAlpha = 1.0;
+                }
+            }
+
             // Room name label at close zoom, with fixed readable size
-            if (s >= LABEL_ZOOM && r.name) {
+            if (s >= LABEL_ZOOM && r.name && layerDiff === 0) {
+                ctx.globalAlpha = 1.0;
                 ctx.fillStyle = isInPath ? activePalette.pathLabel : activePalette.roomLabel;
                 ctx.font = '10px Consolas, monospace';
                 ctx.textAlign = 'center';
                 ctx.fillText(r.name, rs.x, rs.y + half + 10);
             }
+
+            ctx.globalAlpha = 1.0;
         }
 
         // ---- Draw path direction arrows ----
@@ -551,6 +646,11 @@
     }
 
     // ---- Selection & pathfinding ----
+    function sync3DSelectionState() {
+        if (!window.Map3D || typeof Map3D.setSelectionState !== 'function') return;
+        Map3D.setSelectionState(selOrigin, selDest, pathVnums);
+    }
+
     function selectRoom(vnum) {
         if (!rooms[vnum]) return;
 
@@ -584,6 +684,14 @@
             for (var i = 0; i < pathVnums.length; i++) pathSet[pathVnums[i]] = true;
         }
     }
+
+    // 3D map emits this event when a room square is clicked.
+    window.addEventListener('map3d-room-click', function (e) {
+        var detail = e && e.detail;
+        var vnum = detail ? +detail.vnum : 0;
+        if (!rooms[vnum]) return;
+        selectRoom(vnum);
+    });
 
     // ---- Sidebar ----
     function roomCardHtml(vnum, cssClass) {
@@ -642,18 +750,20 @@
             secP.style.display = 'none';
             steps.innerHTML = '';
         }
+
+        sync3DSelectionState();
     }
 
     // Click on path step -> center on that room
     document.getElementById('path-steps').addEventListener('click', function (e) {
         var li = e.target.closest('li[data-vnum]');
         if (!li) return;
-        centerOnRoom(+li.dataset.vnum);
+        jumpToRoom(+li.dataset.vnum);
     });
     document.getElementById('sidebar-body').addEventListener('click', function (e) {
         var card = e.target.closest('.sb-room[data-vnum]');
         if (!card) return;
-        centerOnRoom(+card.dataset.vnum);
+        jumpToRoom(+card.dataset.vnum);
     });
 
     // ---- Search ----
@@ -722,12 +832,28 @@
 
     document.getElementById('search-results-list').addEventListener('click', function (e) {
         var card = e.target.closest('[data-vnum]');
-        if (card) { centerOnRoom(+card.dataset.vnum); return; }
+        if (card) { jumpToRoom(+card.dataset.vnum); return; }
         var acard = e.target.closest('[data-area]');
-        if (acard) { centerOnArea(acard.dataset.area); }
+        if (acard) { jumpToArea(acard.dataset.area); }
     });
 
     // ---- Camera centering ----
+    function jumpToRoom(vnum) {
+        if (mode3d && window.Map3D && typeof Map3D.focusRoom === 'function') {
+            Map3D.focusRoom(vnum);
+            return;
+        }
+        centerOnRoom(vnum);
+    }
+
+    function jumpToArea(aname) {
+        if (mode3d && window.Map3D && typeof Map3D.focusArea === 'function') {
+            Map3D.focusArea(aname);
+            return;
+        }
+        centerOnArea(aname);
+    }
+
     function centerOnRoom(vnum) {
         var r = rooms[vnum];
         if (!r) return;
@@ -822,7 +948,69 @@
             e.preventDefault();
             searchInput.focus();
         }
+        // Layer navigation (expanded mode only)
+        if (layerMode === 'expanded') {
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (currentLayer < globalMaxLayer) {
+                    currentLayer++;
+                    updateLayerNav();
+                }
+            }
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (currentLayer > globalMinLayer) {
+                    currentLayer--;
+                    updateLayerNav();
+                }
+            }
+        }
     });
+
+    // ---- Layer mode ----
+    function updateLayerNav() {
+        var nav = document.getElementById('layer-nav');
+        var lbl = document.getElementById('layer-label');
+        var upBtn  = document.getElementById('layer-up');
+        var dnBtn  = document.getElementById('layer-down');
+        if (!nav) return;
+        if (layerMode === 'expanded') {
+            nav.style.display = 'flex';
+            lbl.textContent = 'Floor ' + currentLayer;
+            if (upBtn)  upBtn.disabled  = (currentLayer >= globalMaxLayer);
+            if (dnBtn)  dnBtn.disabled  = (currentLayer <= globalMinLayer);
+        } else {
+            nav.style.display = 'none';
+        }
+    }
+
+    var layerModeBtn = document.getElementById('layer-mode-btn');
+    if (layerModeBtn) {
+        layerModeBtn.addEventListener('click', function () {
+            if (layerMode === 'collapsed') {
+                layerMode = 'expanded';
+                currentLayer = 0;
+                layerModeBtn.textContent = 'Layers: Expanded';
+            } else {
+                layerMode = 'collapsed';
+                layerModeBtn.textContent = 'Layers: Collapsed';
+            }
+            updateLayerNav();
+        });
+    }
+
+    var layerUpBtn = document.getElementById('layer-up');
+    var layerDnBtn = document.getElementById('layer-down');
+    if (layerUpBtn) {
+        layerUpBtn.addEventListener('click', function () {
+            if (currentLayer < globalMaxLayer) { currentLayer++; updateLayerNav(); }
+        });
+    }
+    if (layerDnBtn) {
+        layerDnBtn.addEventListener('click', function () {
+            if (currentLayer > globalMinLayer) { currentLayer--; updateLayerNav(); }
+        });
+    }
 
     // ---- Legend ----
     function buildLegend() {
