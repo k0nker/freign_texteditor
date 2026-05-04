@@ -31,7 +31,6 @@ services:
     networks:
       - wekan-tier
 
-  play-bridge-test:
 networks:
   wekan-tier:
     driver: bridge

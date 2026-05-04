@@ -472,7 +472,7 @@
     try {
       state.ws = new WebSocket(url);
     } catch (err) {
-      appendSystem('WebSocket open failed: ' + err.message);
+      appendSystem('WebSocket open failed.');
       return;
     }
 

@@ -103,7 +103,7 @@ function openMudConnection(ws, state, msg) {
   }
 
   if (!isAllowedHost(host)) {
-    ws.send(json({ type: 'status', message: `Host not allowed: ${host}` }));
+    ws.send(json({ type: 'status', message: 'Requested destination is not allowed.' }));
     return;
   }
 
@@ -130,8 +130,7 @@ function openMudConnection(ws, state, msg) {
   });
 
   sock.on('error', (err) => {
-    const detail = [err.code, err.message].filter(Boolean).join(' ') || 'unknown error';
-    ws.send(json({ type: 'status', message: `Socket error: ${detail}` }));
+    ws.send(json({ type: 'status', message: socketErrorMessage(err) }));
   });
 
   sock.on('close', () => {
@@ -269,6 +268,14 @@ function resolveTarget(msg) {
     port: clampInt(msg && msg.port, 1, 65535, 0),
     tls: !!(msg && msg.tls),
   };
+}
+
+function socketErrorMessage(err) {
+  const code = String(err && err.code ? err.code : '').toUpperCase();
+  if (code === 'ECONNREFUSED') return 'Socket error: connection refused.';
+  if (code === 'ETIMEDOUT') return 'Socket error: connection timed out.';
+  if (code === 'EHOSTUNREACH' || code === 'ENETUNREACH') return 'Socket error: destination unreachable.';
+  return 'Socket error: connection failed.';
 }
 
 function getClientInfo(req) {

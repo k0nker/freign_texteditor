@@ -4,8 +4,8 @@
   var PROBE_TIMEOUT_MS = 5000;
 
   var PROBES = [
-    { id: 'public', label: 'public', wsPath: '/play/ws' },
-    { id: 'test',   label: 'test',   wsPath: '/play/ws-test' },
+    { id: 'public', label: 'public', wsPath: '/play/ws', host: '192.168.86.99', port: 25555 },
+    { id: 'test',   label: 'test',   wsPath: '/play/ws', host: '192.168.86.99', port: 25556 },
   ];
 
   document.addEventListener('DOMContentLoaded', function () {
@@ -13,7 +13,7 @@
       var el = document.getElementById('realm-status-' + probe.id);
       if (!el) return;
       el.textContent = probe.label + ': checking\u2026';
-      probeMud(probe.wsPath, function (online) {
+      probeMud(probe.wsPath, probe.host, probe.port, function (online) {
         el.textContent = probe.label + ': ' + (online ? 'online' : 'offline');
         el.className = online ? 'status-online' : 'status-offline';
       });
@@ -21,6 +21,7 @@
   });
 
   function probeMud(wsPath, cb) {
+      function probeMud(wsPath, mudHost, mudPort, cb) {
     var origin = window.location.origin;
     var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     var host = window.location.host;
@@ -48,8 +49,6 @@
     timer = setTimeout(function () { finish(false); }, PROBE_TIMEOUT_MS);
 
     ws.addEventListener('open', function () {
-      // Bridge sends a status message first; we reply with connect after that arrives.
-      // Sending now is fine — the bridge queues nothing before our message fires.
     });
 
     var gotBridge = false;
@@ -58,9 +57,8 @@
       try { msg = JSON.parse(evt.data); } catch (_) { return; }
 
       if (!gotBridge && msg.type === 'status') {
-        // "Bridge connected. Send connect command." — send probe connect.
         gotBridge = true;
-        ws.send(JSON.stringify({ type: 'connect' }));
+        ws.send(JSON.stringify({ type: 'connect', host: mudHost, port: mudPort }));
         return;
       }
 
