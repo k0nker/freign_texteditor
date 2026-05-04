@@ -20,6 +20,8 @@
     var roomIndex = {};   // vnum -> rooms3d entry
     var areaLabels = [];  // {name, sector, x, y, z, minX, maxX, minY, maxY, minZ, maxZ}
     var areaIndex = {};   // shortName -> {x, y, z, minX, maxX, minY, maxY, minZ, maxZ}
+    var sourceData = null;
+    var trueMappingEnabled = false;
 
     var SPACING = 14;     // world units per grid cell (matches world.json scale)
 
@@ -135,19 +137,31 @@
         return document.body.getAttribute('data-theme') || 'cobalt';
     }
 
+    // Shared sector color table — matches map.js ANSI_COLOR_HEX + sectorAnsiCode
+    var SECTOR_COLOR = {
+        0:  '#b8b8b8', // inside     (gray)
+        1:  '#b07898', // city       (mauve-pink)
+        2:  '#a38a2a', // field      (yellow)
+        3:  '#2f7a2f', // forest     (green)
+        4:  '#8c5a1e', // hills      (orange-brown)
+        5:  '#6b3f1e', // mountain   (brown)
+        6:  '#4f92ff', // water_swim (bright blue)
+        7:  '#3157b0', // water_deep (dark blue)
+        8:  '#58c35d', // swamp      (bright green)
+        9:  '#4db7c8', // air        (cyan)
+        10: '#f0cf63', // desert     (bright yellow)
+        11: '#cf4a4a', // lava       (red)
+        12: '#f2f2f2', // snow       (white)
+    };
+
     function sectorStyle(sector) {
-        var palettes = {
+        var themeUi = {
             dark: {
                 link: '#586072',
                 areaLabel: '#f0dfab',
                 areaLabelStroke: 'rgba(8,8,12,0.45)',
                 canvasBg: '#0a0a0e',
                 areaLabelBg: 'rgba(10,14,20,0.44)',
-                minLightness: 0.46,
-                saturationBoost: 1.65,
-                sectors: {
-                    0:'#1e1e26',1:'#241e14',2:'#141e14',3:'#0e160e',4:'#1e1e14',5:'#1a1818',6:'#101828',7:'#0c1020',8:'#141a10',9:'#141820',10:'#22180a',11:'#1e0c06',12:'#1a1e22',_default:'#181820'
-                }
             },
             parchment: {
                 link: '#8a7756',
@@ -155,11 +169,6 @@
                 areaLabelStroke: 'rgba(255,245,226,0.55)',
                 canvasBg: '#efe5cd',
                 areaLabelBg: 'rgba(255,248,232,0.84)',
-                minLightness: 0.60,
-                saturationBoost: 1.18,
-                sectors: {
-                    0:'#e4dbc6',1:'#d9c8a7',2:'#ced9b0',3:'#c2cfaa',4:'#ddd6ac',5:'#cfc7ba',6:'#b9cfe6',7:'#a8c2df',8:'#c3cda9',9:'#dbe4ed',10:'#e6d29e',11:'#d4b09e',12:'#eef3f8',_default:'#dfd7c8'
-                }
             },
             cobalt: {
                 link: '#637898',
@@ -167,24 +176,18 @@
                 areaLabelStroke: 'rgba(10,16,28,0.54)',
                 canvasBg: '#111722',
                 areaLabelBg: 'rgba(10,16,28,0.44)',
-                minLightness: 0.48,
-                saturationBoost: 1.70,
-                sectors: {
-                    0:'#1f2634',1:'#2c2930',2:'#1d2a26',3:'#1a2524',4:'#2a2d26',5:'#262731',6:'#1a2638',7:'#172236',8:'#232a25',9:'#262e3b',10:'#322c23',11:'#3a2520',12:'#2b3340',_default:'#222936'
-                }
-            }
+            },
         };
-        var theme = palettes[themeName()] || palettes.cobalt;
-        var baseFill = theme.sectors.hasOwnProperty(sector) ? theme.sectors[sector] : theme.sectors._default;
-        var fill = liftSectorHex(baseFill, theme.minLightness, theme.saturationBoost);
+        var ui = themeUi[themeName()] || themeUi.cobalt;
+        var fill = SECTOR_COLOR.hasOwnProperty(sector) ? SECTOR_COLOR[sector] : SECTOR_COLOR[0];
         return {
             fill: fill,
-            border: brightenHex(fill, 0.34),
-            link: liftSectorHex(theme.link, Math.min(0.62, theme.minLightness + 0.04), 1.12),
-            areaLabel: theme.areaLabel,
-            areaLabelStroke: theme.areaLabelStroke,
-            canvasBg: theme.canvasBg,
-            areaLabelBg: theme.areaLabelBg,
+            border: brightenHex(fill, 0.22),
+            link: ui.link,
+            areaLabel: ui.areaLabel,
+            areaLabelStroke: ui.areaLabelStroke,
+            canvasBg: ui.canvasBg,
+            areaLabelBg: ui.areaLabelBg,
         };
     }
 
@@ -216,6 +219,101 @@
         return isActive() && !isTextEntryFocused();
     }
 
+    function directionDelta(d) {
+        if (d === 0) return { dx: 0, dz: -SPACING }; // north
+        if (d === 1) return { dx: SPACING, dz: 0 };  // east
+        if (d === 2) return { dx: 0, dz: SPACING };  // south
+        if (d === 3) return { dx: -SPACING, dz: 0 }; // west
+        return { dx: 0, dz: 0 }; // up/down do not change planar position
+    }
+
+    function findAsiynAnchor(data) {
+        for (var i = 0; i < data.world.length; i++) {
+            var wa = data.world[i];
+            var ad = data.areas[wa.n];
+            if (!ad || !ad.rooms || !ad.rooms.length) continue;
+            var shortHit = (wa.n || '').toLowerCase().indexOf('asiyn') !== -1;
+            var nameHit = (ad.name || '').toLowerCase().indexOf('asiyn') !== -1;
+            if (shortHit || nameHit) return ad.rooms[0].v;
+        }
+        return null;
+    }
+
+    function computeTrueMappingPositions(data) {
+        var byVnum = Object.create(null);
+        var areaShortByVnum = Object.create(null);
+
+        for (var i = 0; i < data.world.length; i++) {
+            var wa = data.world[i];
+            var ad = data.areas[wa.n];
+            if (!ad) continue;
+            var areaPX = wa.wx * SPACING;
+            var areaPZ = wa.wy * SPACING;
+            for (var j = 0; j < ad.rooms.length; j++) {
+                var rj = ad.rooms[j];
+                byVnum[rj.v] = {
+                    vnum: rj.v,
+                    x0: areaPX + rj.x * SPACING,
+                    z0: areaPZ + rj.y * SPACING,
+                    y: (rj.z || 0) * SPACING,
+                    exits: rj.ex || [],
+                };
+                areaShortByVnum[rj.v] = wa.n;
+            }
+        }
+
+        var pos = Object.create(null);
+        var visited = Object.create(null);
+        var queue = [];
+
+        function enqueueSeed(seedVnum, sx, sz) {
+            if (!byVnum[seedVnum] || visited[seedVnum]) return;
+            pos[seedVnum] = { x: sx, z: sz };
+            visited[seedVnum] = true;
+            queue.push(seedVnum);
+        }
+
+        var anchor = findAsiynAnchor(data);
+        if (anchor && byVnum[anchor]) {
+            enqueueSeed(anchor, byVnum[anchor].x0, byVnum[anchor].z0);
+        }
+
+        function runBfs() {
+            while (queue.length) {
+                var curV = queue.shift();
+                var curRoom = byVnum[curV];
+                if (!curRoom) continue;
+                var curPos = pos[curV];
+                for (var ei = 0; ei < curRoom.exits.length; ei++) {
+                    var ex = curRoom.exits[ei];
+                    if (!byVnum[ex.v]) continue;
+                    if (visited[ex.v]) continue;
+                    var d = directionDelta(ex.d);
+                    enqueueSeed(ex.v, curPos.x + d.dx, curPos.z + d.dz);
+                }
+            }
+        }
+
+        // Asiyn component first, then branch out through disconnected components.
+        runBfs();
+
+        for (var v in byVnum) {
+            var seed = +v;
+            if (visited[seed]) continue;
+            var seedRoom = byVnum[seed];
+
+            // Place new disconnected islands near their original location.
+            enqueueSeed(seed, seedRoom.x0, seedRoom.z0);
+            runBfs();
+        }
+
+        return {
+            pos: pos,
+            byVnum: byVnum,
+            areaShortByVnum: areaShortByVnum,
+        };
+    }
+
     // ---- Build geometry ----
     function build(data) {
         rooms3d    = [];
@@ -223,6 +321,8 @@
         roomIndex  = {};
         areaLabels = [];
         areaIndex  = {};
+
+        var trueMap = trueMappingEnabled ? computeTrueMappingPositions(data) : null;
 
         for (var i = 0; i < data.world.length; i++) {
             var wa = data.world[i];
@@ -238,14 +338,20 @@
 
             for (var j = 0; j < ad.rooms.length; j++) {
                 var rj = ad.rooms[j];
+                var tx = areaPX + rj.x * SPACING;
+                var tz = areaPZ + rj.y * SPACING;
+                if (trueMap && trueMap.pos[rj.v]) {
+                    tx = trueMap.pos[rj.v].x;
+                    tz = trueMap.pos[rj.v].z;
+                }
                 var rm = {
                     vnum:  rj.v,
                     name:  rj.n,
                     areaShort: wa.n,
                     areaName: ad.name || wa.n,
-                    x:     areaPX + rj.x * SPACING,
+                    x:     tx,
                     y:     (rj.z || 0) * SPACING,       // vertical axis
-                    z:     areaPZ + rj.y * SPACING,
+                    z:     tz,
                     sector: rj.s,
                     exits: rj.ex || [],
                 };
@@ -320,7 +426,7 @@
         var cy = sy / rooms3d.length;
         var cz = sz / rooms3d.length;
         var startAz = Math.PI / 5;
-        var startEl = Math.PI / 7;
+        var startEl = -Math.PI / 7;
         var fwdX0 = Math.cos(startEl) * Math.sin(startAz);
         var fwdY0 = Math.sin(startEl);
         var fwdZ0 = -Math.cos(startEl) * Math.cos(startAz);
@@ -810,6 +916,7 @@
             canvas = canvasEl;
             ctx    = canvas.getContext('2d');
             tooltipEl = document.getElementById('tooltip');
+            sourceData = data;
             build(data);
             if (!initialized) {
                 canvas.addEventListener('mousedown',   onDown);
@@ -824,6 +931,15 @@
             }
             if (!animFrame) animFrame = window.requestAnimationFrame(stepFlight);
             render();
+        },
+        setTrueMapping: function (enabled) {
+            trueMappingEnabled = !!enabled;
+            if (!sourceData || !canvas) return;
+            build(sourceData);
+            render();
+        },
+        isTrueMappingEnabled: function () {
+            return !!trueMappingEnabled;
         },
         resize: function (w, h) {
             if (!canvas) return;

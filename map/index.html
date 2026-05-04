@@ -312,6 +312,21 @@
   #view-3d-btn:hover  { filter: brightness(1.12); color: var(--text); }
   #view-3d-btn.active { background: color-mix(in srgb, #3a6fa0 80%, transparent); color: #e8f0ff; border-color: #5090c0; }
 
+  #true-map-btn {
+    background: var(--step-bg);
+    border: 1px solid var(--input-border);
+    color: var(--muted);
+    font: inherit;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    padding: 4px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    width: 100%;
+  }
+  #true-map-btn:hover { filter: brightness(1.12); color: var(--text); }
+  #true-map-btn.active { background: color-mix(in srgb, #6c8f54 70%, transparent); color: #ebf9de; border-color: #7da760; }
+
   #layer-nav {
     display: none;
     flex-direction: row;
@@ -448,6 +463,10 @@
           <span id="layer-label">Floor 0</span>
           <button id="layer-down">↓</button>
         </div>
+      </div>
+      <div class="sidebar-control-row">
+        <div class="sidebar-control-label">3D</div>
+        <button id="true-map-btn">True Mapping: Off</button>
       </div>
     </div>
     <div id="search-wrap">

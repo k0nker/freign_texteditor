@@ -20,11 +20,11 @@
     var THEME_PRESETS = {
         dark: {
             canvasBg: '#0a0a0e',
-            link: 'rgba(80,80,110,0.35)',
-            pathLink: 'rgba(224,200,100,0.72)',
-            roomLabel: '#8f8470',
-            pathLabel: '#e0c87a',
-            areaLabel: 'rgba(196,170,110,0.78)',
+            link: 'rgba(122,140,178,0.52)',
+            pathLink: 'rgba(244,220,126,0.90)',
+            roomLabel: '#d6c9ad',
+            pathLabel: '#f1db98',
+            areaLabel: 'rgba(232,208,148,0.96)',
             areaLabelStroke: 'rgba(8,8,12,0.45)',
             hoverBorder: '#707090',
             originBorder: '#e0c87a',
@@ -34,11 +34,11 @@
                 0:  { name: 'Inside',      fill: '#1e1e26', border: '#4a4a60' },
                 1:  { name: 'City',        fill: '#241e14', border: '#907848' },
                 2:  { name: 'Field',       fill: '#141e14', border: '#407840' },
-                3:  { name: 'Forest',      fill: '#0e160e', border: '#286828' },
-                4:  { name: 'Hills',       fill: '#1e1e14', border: '#787840' },
-                5:  { name: 'Mountain',    fill: '#1a1818', border: '#706060' },
-                6:  { name: 'Water',       fill: '#101828', border: '#284878' },
-                7:  { name: 'Deep Water',  fill: '#0c1020', border: '#1e3060' },
+                3:  { name: 'Forest',      fill: '#0f1d0f', border: '#296725' },
+                4:  { name: 'Hills',       fill: '#2a2612', border: '#b1954a' },
+                5:  { name: 'Mountain',    fill: '#2d2411', border: '#c9ab54' },
+                6:  { name: 'Water',       fill: '#10254a', border: '#3e80d6' },
+                7:  { name: 'Deep Water',  fill: '#0b1b3e', border: '#2f66bf' },
                 8:  { name: 'Swamp',       fill: '#141a10', border: '#3a5030' },
                 9:  { name: 'Air',         fill: '#141820', border: '#3a4858' },
                 10: { name: 'Desert',      fill: '#22180a', border: '#806030' },
@@ -78,11 +78,11 @@
         },
         cobalt: {
             canvasBg: '#111722',
-            link: 'rgba(99,120,152,0.33)',
-            pathLink: 'rgba(187,214,255,0.76)',
-            roomLabel: '#9fb5d1',
-            pathLabel: '#d8e9ff',
-            areaLabel: 'rgba(157,192,235,0.72)',
+            link: 'rgba(132,162,204,0.52)',
+            pathLink: 'rgba(220,238,255,0.92)',
+            roomLabel: '#d7e6fa',
+            pathLabel: '#f0f7ff',
+            areaLabel: 'rgba(196,224,255,0.96)',
             areaLabelStroke: 'rgba(10,16,28,0.54)',
             hoverBorder: '#86a2c8',
             originBorder: '#c1dcff',
@@ -92,11 +92,11 @@
                 0:  { name: 'Inside',      fill: '#1f2634', border: '#5c7191' },
                 1:  { name: 'City',        fill: '#2c2930', border: '#8b7a8c' },
                 2:  { name: 'Field',       fill: '#1d2a26', border: '#4b7e73' },
-                3:  { name: 'Forest',      fill: '#1a2524', border: '#427568' },
-                4:  { name: 'Hills',       fill: '#2a2d26', border: '#7f8661' },
-                5:  { name: 'Mountain',    fill: '#262731', border: '#70758b' },
-                6:  { name: 'Water',       fill: '#1a2638', border: '#4f79a7' },
-                7:  { name: 'Deep Water',  fill: '#172236', border: '#466d97' },
+                3:  { name: 'Forest',      fill: '#15281f', border: '#3d7442' },
+                4:  { name: 'Hills',       fill: '#36321e', border: '#c2ab5d' },
+                5:  { name: 'Mountain',    fill: '#302816', border: '#d1b262' },
+                6:  { name: 'Water',       fill: '#143463', border: '#5aa4ff' },
+                7:  { name: 'Deep Water',  fill: '#10284f', border: '#4b89db' },
                 8:  { name: 'Swamp',       fill: '#232a25', border: '#63765f' },
                 9:  { name: 'Air',         fill: '#262e3b', border: '#70849f' },
                 10: { name: 'Desert',      fill: '#322c23', border: '#9a8054' },
@@ -110,9 +110,81 @@
     var activeTheme = 'cobalt';
     var activePalette = THEME_PRESETS.cobalt;
 
+    // Canonical ANSI-aligned sector palette (from legacy room_color_table semantics).
+    var ANSI_COLOR_HEX = {
+        w: '#b8b8b8',
+        W: '#f2f2f2',
+        mp: '#b07898',
+        y: '#a38a2a',
+        Y: '#f0cf63',
+        g: '#2f7a2f',
+        G: '#58c35d',
+        b: '#3157b0',
+        B: '#4f92ff',
+        c: '#4db7c8',
+        R: '#cf4a4a',
+        br: '#6b3f1e',
+        ob: '#8c5a1e',
+    };
+
+    function sectorAnsiCode(sector) {
+        switch (sector) {
+            case 0: return 'w'; // inside
+            case 1: return 'mp'; // city (mauve-pink)
+            case 2: return 'y'; // field
+            case 3: return 'g'; // forest
+            case 4: return 'ob'; // hills (orange-brown)
+            case 5: return 'br'; // mountain (brown)
+            case 6: return 'B'; // water_swim
+            case 7: return 'b'; // water_noswim
+            case 8: return 'G'; // swamp
+            case 9: return 'c'; // air
+            case 10: return 'Y'; // desert
+            case 11: return 'R'; // lava
+            case 12: return 'W'; // snow
+            default: return 'w';
+        }
+    }
+
+    function hexToRgb(hex) {
+        var h = hex.slice(1);
+        if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+        return {
+            r: parseInt(h.slice(0, 2), 16),
+            g: parseInt(h.slice(2, 4), 16),
+            b: parseInt(h.slice(4, 6), 16),
+        };
+    }
+
+    function rgbToHex(r, g, b) {
+        return '#'
+            + Math.max(0, Math.min(255, Math.round(r))).toString(16).padStart(2, '0')
+            + Math.max(0, Math.min(255, Math.round(g))).toString(16).padStart(2, '0')
+            + Math.max(0, Math.min(255, Math.round(b))).toString(16).padStart(2, '0');
+    }
+
+    function blendHex(a, b, t) {
+        var ca = hexToRgb(a);
+        var cb = hexToRgb(b);
+        return rgbToHex(
+            ca.r + (cb.r - ca.r) * t,
+            ca.g + (cb.g - ca.g) * t,
+            ca.b + (cb.b - ca.b) * t
+        );
+    }
+
     function sectorStyle(s) {
         var map = activePalette.sectors;
-        return map[s] || map._default;
+        var sec = map[s] || map._default;
+        var ansiBase = ANSI_COLOR_HEX[sectorAnsiCode(s)] || ANSI_COLOR_HEX.w;
+        var fill = ansiBase;
+        var border = blendHex(ansiBase, '#000000', 0.28);
+
+        return {
+            name: sec.name,
+            fill: fill,
+            border: border,
+        };
     }
 
     function hexToRgbaColor(hex, alpha) {
@@ -169,126 +241,17 @@
         var pattern = getPaperPattern();
         if (pattern) {
             ctx.save();
-            ctx.globalCompositeOperation = isDarkTheme ? 'screen' : 'multiply';
-            ctx.globalAlpha = isDarkTheme ? 0.07 : 0.06;
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.globalAlpha = isDarkTheme ? 0.012 : 0.04;
             ctx.fillStyle = pattern;
             ctx.fillRect(0, 0, w, h);
             ctx.restore();
         }
     }
 
-    function getHazeNoisePattern() {
-        if (getHazeNoisePattern._pattern) return getHazeNoisePattern._pattern;
-
-        var noiseCanvas = document.createElement('canvas');
-        noiseCanvas.width = 96;
-        noiseCanvas.height = 96;
-        var nctx = noiseCanvas.getContext('2d');
-        var img = nctx.createImageData(noiseCanvas.width, noiseCanvas.height);
-
-        // Tiny monochrome grain to dither smooth gradients and reduce visible banding.
-        for (var i = 0; i < img.data.length; i += 4) {
-            var v = 114 + Math.floor(Math.random() * 26);
-            var a = 6 + Math.floor(Math.random() * 14);
-            img.data[i] = v;
-            img.data[i + 1] = v;
-            img.data[i + 2] = v;
-            img.data[i + 3] = a;
-        }
-
-        nctx.putImageData(img, 0, 0);
-        getHazeNoisePattern._pattern = ctx.createPattern(noiseCanvas, 'repeat');
-        return getHazeNoisePattern._pattern;
-    }
-
-    function visibleSectorProfile(tl, br, margin) {
-        var counts = Object.create(null);
-        var total = 0;
-        for (var vnum in rooms) {
-            var r = rooms[vnum];
-            if (r.worldX < tl.x - margin || r.worldX > br.x + margin) continue;
-            if (r.worldY < tl.y - margin || r.worldY > br.y + margin) continue;
-            if (layerMode === 'expanded' && r.gridZ !== currentLayer) continue;
-            counts[r.sector] = (counts[r.sector] || 0) + 1;
-            total++;
-        }
-        if (!total) return null;
-
-        var ranked = [];
-        for (var s in counts) ranked.push({ sector: +s, count: counts[s] });
-        ranked.sort(function (a, b) { return b.count - a.count; });
-
-        return {
-            total: total,
-            primary: ranked[0] ? ranked[0].sector : null,
-            secondary: ranked[1] ? ranked[1].sector : null,
-            tertiary: ranked[2] ? ranked[2].sector : null,
-        };
-    }
-
-    function drawSectorHaze(profile) {
-        var w = canvas.width;
-        var h = canvas.height;
-        ctx.fillStyle = activePalette.canvasBg;
-        ctx.fillRect(0, 0, w, h);
-
-        if (!profile || profile.primary === null) return;
-
-        var p1 = sectorStyle(profile.primary);
-        var p2 = sectorStyle(profile.secondary !== null ? profile.secondary : profile.primary);
-        var p3 = sectorStyle(profile.tertiary !== null ? profile.tertiary : profile.secondary !== null ? profile.secondary : profile.primary);
-
-        // Layered wash keeps atmosphere while avoiding sharp gradient bands.
-        var wash = ctx.createLinearGradient(w * 0.1, 0, w * 0.9, h);
-        wash.addColorStop(0.00, hexToRgbaColor(p1.fill, 0.08));
-        wash.addColorStop(0.30, hexToRgbaColor(p2.fill, 0.06));
-        wash.addColorStop(0.60, hexToRgbaColor(p3.fill, 0.07));
-        wash.addColorStop(1.00, hexToRgbaColor(p1.fill, 0.05));
-        ctx.fillStyle = wash;
-        ctx.fillRect(0, 0, w, h);
-
-        var wash2 = ctx.createLinearGradient(0, h * 0.15, w, h * 0.85);
-        wash2.addColorStop(0.00, hexToRgbaColor(p3.border, 0.04));
-        wash2.addColorStop(0.50, hexToRgbaColor(p2.border, 0.03));
-        wash2.addColorStop(1.00, hexToRgbaColor(p1.border, 0.04));
-        ctx.fillStyle = wash2;
-        ctx.fillRect(0, 0, w, h);
-
-        // Soft sector haze blooms
-        var g1 = ctx.createRadialGradient(w * 0.20, h * 0.28, w * 0.02, w * 0.20, h * 0.28, w * 0.58);
-        g1.addColorStop(0.00, hexToRgbaColor(p1.border, 0.12));
-        g1.addColorStop(1.00, hexToRgbaColor(p1.border, 0.00));
-        ctx.fillStyle = g1;
-        ctx.fillRect(0, 0, w, h);
-
-        var g2 = ctx.createRadialGradient(w * 0.78, h * 0.24, w * 0.01, w * 0.78, h * 0.24, w * 0.46);
-        g2.addColorStop(0.00, hexToRgbaColor(p2.border, 0.10));
-        g2.addColorStop(1.00, hexToRgbaColor(p2.border, 0.00));
-        ctx.fillStyle = g2;
-        ctx.fillRect(0, 0, w, h);
-
-        var g3 = ctx.createRadialGradient(w * 0.50, h * 0.92, h * 0.01, w * 0.50, h * 0.92, h * 0.62);
-        g3.addColorStop(0.00, hexToRgbaColor(p3.fill, 0.09));
-        g3.addColorStop(1.00, hexToRgbaColor(p3.fill, 0.00));
-        ctx.fillStyle = g3;
-        ctx.fillRect(0, 0, w, h);
-
-        // Grain pass acts as dithering to mask monitor/compositor banding.
-        var noise = getHazeNoisePattern();
-        if (noise) {
-            ctx.save();
-            ctx.globalAlpha = 0.08;
-            ctx.fillStyle = noise;
-            ctx.fillRect(0, 0, w, h);
-            ctx.restore();
-        }
-
-        // Subtle vignette keeps center readable while preserving atmosphere.
-        var vignette = ctx.createRadialGradient(w * 0.5, h * 0.45, Math.min(w, h) * 0.18, w * 0.5, h * 0.45, Math.max(w, h) * 0.86);
-        vignette.addColorStop(0.00, 'rgba(0,0,0,0.00)');
-        vignette.addColorStop(1.00, 'rgba(0,0,0,0.16)');
-        ctx.fillStyle = vignette;
-        ctx.fillRect(0, 0, w, h);
+    function paintBackdropLayers(visibleAreas, zoomScale) {
+        drawMapPatina();
+        drawAreaBackplates(visibleAreas, zoomScale);
     }
 
     // ---- State ----
@@ -338,7 +301,20 @@
     var _worldData = null;
     var canvas3d   = document.getElementById('map-canvas-3d');
     var view3dBtn  = document.getElementById('view-3d-btn');
+    var trueMapBtn = document.getElementById('true-map-btn');
     var mode3d     = false;
+    var trueMapping3d = false;
+
+    function updateTrueMapButton() {
+        if (!trueMapBtn) return;
+        trueMapBtn.textContent = 'True Mapping: ' + (trueMapping3d ? 'On' : 'Off');
+        trueMapBtn.classList.toggle('active', !!trueMapping3d);
+    }
+
+    function apply3DTrueMappingMode() {
+        if (!window.Map3D || typeof Map3D.setTrueMapping !== 'function') return;
+        Map3D.setTrueMapping(trueMapping3d);
+    }
 
     function enter3D() {
         mode3d = true;
@@ -350,6 +326,7 @@
         if (view3dBtn) { view3dBtn.textContent = '2D Map'; view3dBtn.classList.add('active'); }
         if (_worldData) {
             Map3D.init(canvas3d, _worldData);
+            apply3DTrueMappingMode();
             sync3DSelectionState();
         }
     }
@@ -364,6 +341,15 @@
     if (view3dBtn) {
         view3dBtn.addEventListener('click', function () {
             if (mode3d) { exit3D(); } else { enter3D(); }
+        });
+    }
+
+    updateTrueMapButton();
+    if (trueMapBtn) {
+        trueMapBtn.addEventListener('click', function () {
+            trueMapping3d = !trueMapping3d;
+            updateTrueMapButton();
+            if (mode3d) apply3DTrueMappingMode();
         });
     }
 
@@ -540,6 +526,7 @@
 
         // Ensure no alpha carry-over between frames.
         ctx.globalAlpha = 1.0;
+        ctx.globalCompositeOperation = 'source-over';
 
         // Compute visible world bounds
         var tl = screenToWorld(0, 0);
@@ -549,7 +536,6 @@
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.fillStyle = activePalette.canvasBg;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        drawMapPatina();
 
         // ---- Gather visible areas ----
         var visibleAreas = [];
@@ -562,7 +548,7 @@
             visibleAreas.push(a);
         }
 
-        drawAreaBackplates(visibleAreas, s);
+        paintBackdropLayers(visibleAreas, s);
 
         // ---- Draw exit lines ----
         if (s >= 0.18) {
@@ -609,6 +595,11 @@
             }
         }
 
+        // ---- Draw area labels BEHIND rooms (pinned top-left mode only) ----
+        if (s >= AREA_LABEL_ZOOM) {
+            drawAreaLabels(visibleAreas, s, 'pinned');
+        }
+
         // ---- Draw rooms ----
         var half = cellPx / 2;
         for (var vnum in rooms) {
@@ -632,7 +623,7 @@
             var isHovered = (r.vnum === hoveredVnum);
 
             // Room square
-            ctx.fillStyle = isInPath ? '#2a2010' : sec.fill;
+            ctx.fillStyle = isInPath ? '#2a2010' : hexToRgbaColor(sec.fill, 0.90);
             ctx.fillRect(rs.x - half, rs.y - half, cellPx, cellPx);
 
             // Border
@@ -715,9 +706,9 @@
             }
         }
 
-        // ---- Draw area labels on top of rooms ----
+        // ---- Draw area labels on top of rooms (centered mode only) ----
         if (s >= AREA_LABEL_ZOOM) {
-            drawAreaLabels(visibleAreas, s);
+            drawAreaLabels(visibleAreas, s, 'centered');
         }
     }
 
@@ -733,8 +724,8 @@
             // Footprint-tint follows room layout; no global haze and no circular blooms.
             var tile = Math.max(8, CELL * zoomScale * 1.75);
             var halfTile = tile * 0.5;
-            var fillAlpha = isDarkTheme ? 0.15 : 0.12;
-            var edgeAlpha = isDarkTheme ? 0.24 : 0.20;
+            var fillAlpha = isDarkTheme ? 0.075 : 0.10;
+            var edgeAlpha = isDarkTheme ? 0.12 : 0.16;
 
             ctx.fillStyle = hexToRgbaColor(sec.fill, fillAlpha);
             for (var ri = 0; ri < roomList.length; ri++) {
@@ -773,7 +764,7 @@
         ctx.restore();
     }
 
-    function drawAreaLabels(areas, zoomScale) {
+    function drawAreaLabels(areas, zoomScale, mode) {
         for (var i = 0; i < areas.length; i++) {
             var a = areas[i];
             var secStyle = sectorStyle(a.sector);
@@ -786,35 +777,39 @@
             var boxH = a.h * zoomScale;
             var lx = sp.x + boxW / 2;
             var ly = sp.y + boxH / 2;
-            var zoomedInMode = zoomScale >= 0.95;
+            var zoomedInMode = zoomScale >= 0.55;
+
+            if (zoomedInMode && mode === 'centered') { continue; }
+            if (!zoomedInMode && mode === 'pinned') { continue; }
 
             ctx.save();
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
 
             if (zoomedInMode) {
-                // Zoomed in: pin label to top edge of area bounds.
-                var fontTop = Math.max(8, Math.min(14, 10 + Math.log(areaWeight + 1) * 0.8));
+                // Zoomed in: pin label to top-left of area bounds.
+                var fontTop = Math.max(10, Math.min(18, 13 + Math.log(areaWeight + 1) * 1.0));
                 ctx.font = '700 ' + fontTop.toFixed(1) + 'px "Trebuchet MS", "Segoe UI", sans-serif';
 
                 var topTextW = ctx.measureText(labelText).width;
                 var topPadX = Math.max(4, fontTop * 0.34);
                 var topPadY = Math.max(2, fontTop * 0.2);
-                var maxTopW = Math.max(18, boxW - 8);
+                var maxTopW = Math.max(18, boxW * 0.9);
                 var desiredTopW = topTextW + topPadX * 2;
                 if (desiredTopW > maxTopW) {
                     var scaleTop = maxTopW / desiredTopW;
-                    fontTop = Math.max(7, fontTop * scaleTop);
+                    fontTop = Math.max(9, fontTop * scaleTop);
                     ctx.font = '700 ' + fontTop.toFixed(1) + 'px "Trebuchet MS", "Segoe UI", sans-serif';
                     topTextW = ctx.measureText(labelText).width;
                     topPadX = Math.max(3, fontTop * 0.30);
                 }
                 var topW = Math.min(maxTopW, topTextW + topPadX * 2);
                 var topH = fontTop + topPadY * 2;
-                var topX = Math.max(sp.x + 2, Math.min(sp.x + boxW - topW - 2, lx - topW / 2));
-                var topY = sp.y + 2;
+                var topX = sp.x;                       // left edge of area bounds
+                var topY = sp.y - topH - 1;            // just above the area bounds
                 var topR = Math.max(3, topH * 0.24);
 
+                ctx.textAlign = 'left';
                 ctx.globalAlpha = 0.62;
                 ctx.fillStyle = activePalette.canvasBg;
                 roundedRect(ctx, topX, topY, topW, topH, topR);
@@ -828,7 +823,7 @@
 
                 ctx.globalAlpha = 0.96;
                 ctx.fillStyle = labelColor;
-                ctx.fillText(labelText, topX + topW / 2, topY + topH / 2 + 0.5);
+                ctx.fillText(labelText, topX + topPadX, topY + topH / 2 + 0.5);
             } else {
                 // Zoomed out: large centered badges over room names.
                 var baseSize = 12 + Math.min(16, Math.log(areaWeight + 1) * 3.2);
@@ -865,7 +860,7 @@
                 roundedRect(ctx, bx, by, bw, bh, rr);
                 ctx.stroke();
 
-                ctx.globalAlpha = Math.max(0.7, Math.min(1.0, 0.58 + zoomScale * 0.6));
+                ctx.globalAlpha = Math.max(0.9, Math.min(1.0, 0.86 + zoomScale * 0.2));
                 ctx.fillStyle = labelColor;
                 ctx.fillText(labelText, bx + bw / 2, by + bh / 2 + 0.5);
             }
