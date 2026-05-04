@@ -18,7 +18,7 @@
     var rooms3d   = [];   // {vnum, x, y, z, sector, exits:[{v}]}
     var edges3d   = [];   // {ax,ay,az, bx,by,bz, color}
     var roomIndex = {};   // vnum -> rooms3d entry
-    var areaLabels = [];  // {name, sector, x, y, z}
+    var areaLabels = [];  // {name, sector, x, y, z, minX, maxX, minY, maxY, minZ, maxZ}
     var areaIndex = {};   // shortName -> {x, y, z, minX, maxX, minY, maxY, minZ, maxZ}
 
     var SPACING = 14;     // world units per grid cell (matches world.json scale)
@@ -277,6 +277,12 @@
                     x: (areaMinX + areaMaxX) * 0.5,
                     y: areaMaxY + SPACING * 3,
                     z: (areaMinZ + areaMaxZ) * 0.5,
+                    minX: areaMinX,
+                    maxX: areaMaxX,
+                    minY: areaMinY,
+                    maxY: areaMaxY,
+                    minZ: areaMinZ,
+                    maxZ: areaMaxZ,
                 });
             }
         }
@@ -313,21 +319,46 @@
         var cx = sx / rooms3d.length;
         var cy = sy / rooms3d.length;
         var cz = sz / rooms3d.length;
-        var startRadius = 5000;
         var startAz = Math.PI / 5;
         var startEl = Math.PI / 7;
-        cam.x = cx + startRadius * Math.cos(startEl) * Math.sin(startAz);
-        cam.y = cy + startRadius * Math.sin(startEl);
-        cam.z = cz + startRadius * Math.cos(startEl) * Math.cos(startAz);
-        var dirX = cx - cam.x;
-        var dirY = cy - cam.y;
-        var dirZ = cz - cam.z;
-        var dirLen = Math.sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ) || 1;
-        dirX /= dirLen;
-        dirY /= dirLen;
-        dirZ /= dirLen;
-        cam.az = Math.atan2(dirX, -dirZ);
-        cam.el = Math.asin(dirY);
+        var fwdX0 = Math.cos(startEl) * Math.sin(startAz);
+        var fwdY0 = Math.sin(startEl);
+        var fwdZ0 = -Math.cos(startEl) * Math.cos(startAz);
+        var rgtX0 = -fwdZ0, rgtY0 = 0, rgtZ0 = fwdX0;
+        var rl0 = Math.sqrt(rgtX0 * rgtX0 + rgtZ0 * rgtZ0) || 1;
+        rgtX0 /= rl0;
+        rgtZ0 /= rl0;
+        var upX0 = rgtY0 * fwdZ0 - rgtZ0 * fwdY0;
+        var upY0 = rgtZ0 * fwdX0 - rgtX0 * fwdZ0;
+        var upZ0 = rgtX0 * fwdY0 - rgtY0 * fwdX0;
+
+        var vw = (canvas && canvas.width) ? canvas.width : 1600;
+        var vh = (canvas && canvas.height) ? canvas.height : 900;
+        var aspect = Math.max(0.5, vw / Math.max(1, vh));
+        var tan = Math.tan((55 * Math.PI / 180) / 2);
+        var fitD = 1;
+        for (var fi = 0; fi < rooms3d.length; fi++) {
+            var rr = rooms3d[fi];
+            var qx = rr.x - cx;
+            var qy = rr.y - cy;
+            var qz = rr.z - cz;
+            var qRight = qx * rgtX0 + qy * rgtY0 + qz * rgtZ0;
+            var qUp = qx * upX0 + qy * upY0 + qz * upZ0;
+            var qFwd = qx * fwdX0 + qy * fwdY0 + qz * fwdZ0;
+            var needX = Math.abs(qRight) / (tan * aspect) - qFwd;
+            var needY = Math.abs(qUp) / tan - qFwd;
+            var needZ = -qFwd + 1;
+            if (needX > fitD) fitD = needX;
+            if (needY > fitD) fitD = needY;
+            if (needZ > fitD) fitD = needZ;
+        }
+        fitD *= 1.10;
+
+        cam.az = startAz;
+        cam.el = startEl;
+        cam.x = cx - fwdX0 * fitD;
+        cam.y = cy - fwdY0 * fitD;
+        cam.z = cz - fwdZ0 * fitD;
         cam.fov = 55;
     }
 
@@ -501,19 +532,53 @@
             var lp = proj(label.x, label.y, label.z);
             if (!lp) continue;
             if (lp.x < -80 || lp.x > W + 80 || lp.y < -20 || lp.y > H + 20) continue;
-            var fontSize = Math.max(10, Math.min(20, 3200 / lp.depth));
+
+            var corners = [
+                [label.minX, label.minY, label.minZ], [label.minX, label.minY, label.maxZ],
+                [label.minX, label.maxY, label.minZ], [label.minX, label.maxY, label.maxZ],
+                [label.maxX, label.minY, label.minZ], [label.maxX, label.minY, label.maxZ],
+                [label.maxX, label.maxY, label.minZ], [label.maxX, label.maxY, label.maxZ]
+            ];
+            var bMinX = Infinity, bMinY = Infinity, bMaxX = -Infinity, bMaxY = -Infinity;
+            var visibleCornerCount = 0;
+            for (var ci = 0; ci < corners.length; ci++) {
+                var cp = proj(corners[ci][0], corners[ci][1], corners[ci][2]);
+                if (!cp) continue;
+                visibleCornerCount++;
+                if (cp.x < bMinX) bMinX = cp.x;
+                if (cp.y < bMinY) bMinY = cp.y;
+                if (cp.x > bMaxX) bMaxX = cp.x;
+                if (cp.y > bMaxY) bMaxY = cp.y;
+            }
+            if (visibleCornerCount < 2) continue;
+
+            var projectedW = Math.max(24, bMaxX - bMinX);
+            var projectedH = Math.max(18, bMaxY - bMinY);
+            var labelX = (bMinX + bMaxX) * 0.5;
+            var labelY = bMinY + Math.min(projectedH * 0.30, 18);
+
+            var fontSize = Math.max(8, Math.min(20, 3200 / lp.depth));
             var labelStyle = sectorStyle(label.sector);
-            var textW = label.name.length * fontSize * 0.62;
-            var padX = 8;
-            var padY = 4;
+            var text = label.name.toUpperCase();
             ctx.font = 'bold ' + Math.round(fontSize) + 'px Consolas, monospace';
+            var textW = ctx.measureText(text).width;
+            var maxTextW = Math.max(14, projectedW - 16);
+            if (textW > maxTextW) {
+                var scale = maxTextW / textW;
+                fontSize = Math.max(8, fontSize * scale);
+                ctx.font = 'bold ' + Math.round(fontSize) + 'px Consolas, monospace';
+                textW = ctx.measureText(text).width;
+            }
+
+            var padX = 6;
+            var padY = 4;
             ctx.fillStyle = hexToRgba(labelStyle.canvasBg, 0.62);
-            ctx.fillRect(lp.x - textW / 2 - padX, lp.y - fontSize + 2, textW + padX * 2, fontSize + padY * 2);
+            ctx.fillRect(labelX - textW / 2 - padX, labelY - fontSize + 2, textW + padX * 2, fontSize + padY * 2);
             ctx.strokeStyle = labelStyle.areaLabelStroke;
             ctx.lineWidth = 1;
-            ctx.strokeRect(lp.x - textW / 2 - padX, lp.y - fontSize + 2, textW + padX * 2, fontSize + padY * 2);
+            ctx.strokeRect(labelX - textW / 2 - padX, labelY - fontSize + 2, textW + padX * 2, fontSize + padY * 2);
             ctx.fillStyle = labelStyle.border;
-            ctx.fillText(label.name.toUpperCase(), lp.x, lp.y + 1);
+            ctx.fillText(text, labelX, labelY + 1);
         }
 
         // -- HUD: controls --

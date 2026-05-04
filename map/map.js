@@ -115,6 +115,182 @@
         return map[s] || map._default;
     }
 
+    function hexToRgbaColor(hex, alpha) {
+        if (!hex || hex.charAt(0) !== '#') return hex;
+        var h = hex.slice(1);
+        if (h.length === 3) {
+            h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+        }
+        var r = parseInt(h.slice(0, 2), 16);
+        var g = parseInt(h.slice(2, 4), 16);
+        var b = parseInt(h.slice(4, 6), 16);
+        return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+    }
+
+    function getPaperPattern() {
+        if (getPaperPattern._pattern) return getPaperPattern._pattern;
+
+        var noiseCanvas = document.createElement('canvas');
+        noiseCanvas.width = 128;
+        noiseCanvas.height = 128;
+        var nctx = noiseCanvas.getContext('2d');
+        var img = nctx.createImageData(noiseCanvas.width, noiseCanvas.height);
+
+        for (var i = 0; i < img.data.length; i += 4) {
+            var base = 118 + Math.floor(Math.random() * 20);
+            var grainA = 5 + Math.floor(Math.random() * 10);
+            img.data[i] = base;
+            img.data[i + 1] = base - 2;
+            img.data[i + 2] = base - 6;
+            img.data[i + 3] = grainA;
+        }
+        nctx.putImageData(img, 0, 0);
+
+        // Very light fiber streaks to suggest old paper texture.
+        nctx.strokeStyle = 'rgba(170,140,96,0.06)';
+        nctx.lineWidth = 1;
+        for (var l = 0; l < 18; l++) {
+            var y = Math.floor(Math.random() * noiseCanvas.height);
+            nctx.beginPath();
+            nctx.moveTo(0, y + Math.random() * 2 - 1);
+            nctx.lineTo(noiseCanvas.width, y + Math.random() * 2 - 1);
+            nctx.stroke();
+        }
+
+        getPaperPattern._pattern = ctx.createPattern(noiseCanvas, 'repeat');
+        return getPaperPattern._pattern;
+    }
+
+    function drawMapPatina() {
+        var w = canvas.width;
+        var h = canvas.height;
+        var isDarkTheme = (activeTheme !== 'parchment');
+
+        var pattern = getPaperPattern();
+        if (pattern) {
+            ctx.save();
+            ctx.globalCompositeOperation = isDarkTheme ? 'screen' : 'multiply';
+            ctx.globalAlpha = isDarkTheme ? 0.07 : 0.06;
+            ctx.fillStyle = pattern;
+            ctx.fillRect(0, 0, w, h);
+            ctx.restore();
+        }
+    }
+
+    function getHazeNoisePattern() {
+        if (getHazeNoisePattern._pattern) return getHazeNoisePattern._pattern;
+
+        var noiseCanvas = document.createElement('canvas');
+        noiseCanvas.width = 96;
+        noiseCanvas.height = 96;
+        var nctx = noiseCanvas.getContext('2d');
+        var img = nctx.createImageData(noiseCanvas.width, noiseCanvas.height);
+
+        // Tiny monochrome grain to dither smooth gradients and reduce visible banding.
+        for (var i = 0; i < img.data.length; i += 4) {
+            var v = 114 + Math.floor(Math.random() * 26);
+            var a = 6 + Math.floor(Math.random() * 14);
+            img.data[i] = v;
+            img.data[i + 1] = v;
+            img.data[i + 2] = v;
+            img.data[i + 3] = a;
+        }
+
+        nctx.putImageData(img, 0, 0);
+        getHazeNoisePattern._pattern = ctx.createPattern(noiseCanvas, 'repeat');
+        return getHazeNoisePattern._pattern;
+    }
+
+    function visibleSectorProfile(tl, br, margin) {
+        var counts = Object.create(null);
+        var total = 0;
+        for (var vnum in rooms) {
+            var r = rooms[vnum];
+            if (r.worldX < tl.x - margin || r.worldX > br.x + margin) continue;
+            if (r.worldY < tl.y - margin || r.worldY > br.y + margin) continue;
+            if (layerMode === 'expanded' && r.gridZ !== currentLayer) continue;
+            counts[r.sector] = (counts[r.sector] || 0) + 1;
+            total++;
+        }
+        if (!total) return null;
+
+        var ranked = [];
+        for (var s in counts) ranked.push({ sector: +s, count: counts[s] });
+        ranked.sort(function (a, b) { return b.count - a.count; });
+
+        return {
+            total: total,
+            primary: ranked[0] ? ranked[0].sector : null,
+            secondary: ranked[1] ? ranked[1].sector : null,
+            tertiary: ranked[2] ? ranked[2].sector : null,
+        };
+    }
+
+    function drawSectorHaze(profile) {
+        var w = canvas.width;
+        var h = canvas.height;
+        ctx.fillStyle = activePalette.canvasBg;
+        ctx.fillRect(0, 0, w, h);
+
+        if (!profile || profile.primary === null) return;
+
+        var p1 = sectorStyle(profile.primary);
+        var p2 = sectorStyle(profile.secondary !== null ? profile.secondary : profile.primary);
+        var p3 = sectorStyle(profile.tertiary !== null ? profile.tertiary : profile.secondary !== null ? profile.secondary : profile.primary);
+
+        // Layered wash keeps atmosphere while avoiding sharp gradient bands.
+        var wash = ctx.createLinearGradient(w * 0.1, 0, w * 0.9, h);
+        wash.addColorStop(0.00, hexToRgbaColor(p1.fill, 0.08));
+        wash.addColorStop(0.30, hexToRgbaColor(p2.fill, 0.06));
+        wash.addColorStop(0.60, hexToRgbaColor(p3.fill, 0.07));
+        wash.addColorStop(1.00, hexToRgbaColor(p1.fill, 0.05));
+        ctx.fillStyle = wash;
+        ctx.fillRect(0, 0, w, h);
+
+        var wash2 = ctx.createLinearGradient(0, h * 0.15, w, h * 0.85);
+        wash2.addColorStop(0.00, hexToRgbaColor(p3.border, 0.04));
+        wash2.addColorStop(0.50, hexToRgbaColor(p2.border, 0.03));
+        wash2.addColorStop(1.00, hexToRgbaColor(p1.border, 0.04));
+        ctx.fillStyle = wash2;
+        ctx.fillRect(0, 0, w, h);
+
+        // Soft sector haze blooms
+        var g1 = ctx.createRadialGradient(w * 0.20, h * 0.28, w * 0.02, w * 0.20, h * 0.28, w * 0.58);
+        g1.addColorStop(0.00, hexToRgbaColor(p1.border, 0.12));
+        g1.addColorStop(1.00, hexToRgbaColor(p1.border, 0.00));
+        ctx.fillStyle = g1;
+        ctx.fillRect(0, 0, w, h);
+
+        var g2 = ctx.createRadialGradient(w * 0.78, h * 0.24, w * 0.01, w * 0.78, h * 0.24, w * 0.46);
+        g2.addColorStop(0.00, hexToRgbaColor(p2.border, 0.10));
+        g2.addColorStop(1.00, hexToRgbaColor(p2.border, 0.00));
+        ctx.fillStyle = g2;
+        ctx.fillRect(0, 0, w, h);
+
+        var g3 = ctx.createRadialGradient(w * 0.50, h * 0.92, h * 0.01, w * 0.50, h * 0.92, h * 0.62);
+        g3.addColorStop(0.00, hexToRgbaColor(p3.fill, 0.09));
+        g3.addColorStop(1.00, hexToRgbaColor(p3.fill, 0.00));
+        ctx.fillStyle = g3;
+        ctx.fillRect(0, 0, w, h);
+
+        // Grain pass acts as dithering to mask monitor/compositor banding.
+        var noise = getHazeNoisePattern();
+        if (noise) {
+            ctx.save();
+            ctx.globalAlpha = 0.08;
+            ctx.fillStyle = noise;
+            ctx.fillRect(0, 0, w, h);
+            ctx.restore();
+        }
+
+        // Subtle vignette keeps center readable while preserving atmosphere.
+        var vignette = ctx.createRadialGradient(w * 0.5, h * 0.45, Math.min(w, h) * 0.18, w * 0.5, h * 0.45, Math.max(w, h) * 0.86);
+        vignette.addColorStop(0.00, 'rgba(0,0,0,0.00)');
+        vignette.addColorStop(1.00, 'rgba(0,0,0,0.16)');
+        ctx.fillStyle = vignette;
+        ctx.fillRect(0, 0, w, h);
+    }
+
     // ---- State ----
     var canvas  = document.getElementById('map-canvas');
     var ctx     = canvas.getContext('2d');
@@ -205,6 +381,7 @@
             buildGraph(data);
             loading.style.display = 'none';
             buildLegend();
+            resizeCanvas();
             centerView();
             requestAnimationFrame(renderLoop);
         })
@@ -240,6 +417,7 @@
                 minZ: ad.minZ || 0,
                 maxZ: ad.maxZ || 0,
                 rooms: [],
+                roomKeySet: Object.create(null),
             };
             areaMap[wa.n] = areaObj;
 
@@ -266,6 +444,7 @@
                 };
                 rooms[rj.v] = room;
                 areaObj.rooms.push(room);
+                areaObj.roomKeySet[rj.x + ',' + rj.y] = true;
 
                 adjacency[rj.v] = rj.ex || [];
             }
@@ -336,8 +515,9 @@
         }
         cam.x = (minX + maxX) / 2;
         cam.y = (minY + maxY) / 2;
-        var scaleX = canvas.width  / (maxX - minX + SPACING * 6);
-        var scaleY = canvas.height / (maxY - minY + SPACING * 6);
+        var pad = SPACING * 2.5;
+        var scaleX = (canvas.width * 0.96)  / Math.max(1, (maxX - minX + pad * 2));
+        var scaleY = (canvas.height * 0.96) / Math.max(1, (maxY - minY + pad * 2));
         cam.scale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.min(scaleX, scaleY)));
     }
 
@@ -354,18 +534,22 @@
     }
 
     function render() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = activePalette.canvasBg;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
         var s = cam.scale;
         var cellPx = CELL * s;
         var spacPx = SPACING * s;
+
+        // Ensure no alpha carry-over between frames.
+        ctx.globalAlpha = 1.0;
 
         // Compute visible world bounds
         var tl = screenToWorld(0, 0);
         var br = screenToWorld(canvas.width, canvas.height);
         var margin = SPACING * 5;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = activePalette.canvasBg;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        drawMapPatina();
 
         // ---- Gather visible areas ----
         var visibleAreas = [];
@@ -377,6 +561,8 @@
             if (a.py - margin > br.y) continue;
             visibleAreas.push(a);
         }
+
+        drawAreaBackplates(visibleAreas, s);
 
         // ---- Draw exit lines ----
         if (s >= 0.18) {
@@ -435,7 +621,7 @@
             if (layerMode === 'expanded') {
                 layerDiff = Math.abs(r.gridZ - currentLayer);
                 if (layerDiff > 1) continue;
-                ctx.globalAlpha = layerDiff === 1 ? 0.12 : 1.0;
+                ctx.globalAlpha = layerDiff === 1 ? 0.36 : 1.0;
             }
 
             var rs   = worldToScreen(r.worldX, r.worldY);
@@ -535,12 +721,65 @@
         }
     }
 
+    function drawAreaBackplates(areas, zoomScale) {
+        ctx.save();
+        var isDarkTheme = (activeTheme !== 'parchment');
+        for (var i = 0; i < areas.length; i++) {
+            var a = areas[i];
+            var sec = sectorStyle(a.sector);
+            var roomList = a.rooms || [];
+            if (!roomList.length) continue;
+
+            // Footprint-tint follows room layout; no global haze and no circular blooms.
+            var tile = Math.max(8, CELL * zoomScale * 1.75);
+            var halfTile = tile * 0.5;
+            var fillAlpha = isDarkTheme ? 0.15 : 0.12;
+            var edgeAlpha = isDarkTheme ? 0.24 : 0.20;
+
+            ctx.fillStyle = hexToRgbaColor(sec.fill, fillAlpha);
+            for (var ri = 0; ri < roomList.length; ri++) {
+                var rr = roomList[ri];
+                var rs = worldToScreen(rr.worldX, rr.worldY);
+                if (rs.x < -tile || rs.x > canvas.width + tile) continue;
+                if (rs.y < -tile || rs.y > canvas.height + tile) continue;
+                ctx.fillRect(rs.x - halfTile, rs.y - halfTile, tile, tile);
+            }
+
+            // Faint contour ink along exposed room edges adds old-map character.
+            var edgeHalf = Math.max(halfTile, SPACING * zoomScale * 0.45);
+            var keySet = a.roomKeySet || Object.create(null);
+            ctx.strokeStyle = hexToRgbaColor(sec.border, edgeAlpha);
+            ctx.lineWidth = Math.max(0.6, zoomScale * 0.45);
+            ctx.beginPath();
+
+            for (var ei = 0; ei < roomList.length; ei++) {
+                var er = roomList[ei];
+                var es = worldToScreen(er.worldX, er.worldY);
+                if (es.x < -edgeHalf || es.x > canvas.width + edgeHalf) continue;
+                if (es.y < -edgeHalf || es.y > canvas.height + edgeHalf) continue;
+
+                var x0 = es.x - edgeHalf;
+                var x1 = es.x + edgeHalf;
+                var y0 = es.y - edgeHalf;
+                var y1 = es.y + edgeHalf;
+
+                if (!keySet[(er.gridX - 1) + ',' + er.gridY]) { ctx.moveTo(x0, y0); ctx.lineTo(x0, y1); }
+                if (!keySet[(er.gridX + 1) + ',' + er.gridY]) { ctx.moveTo(x1, y0); ctx.lineTo(x1, y1); }
+                if (!keySet[er.gridX + ',' + (er.gridY - 1)]) { ctx.moveTo(x0, y0); ctx.lineTo(x1, y0); }
+                if (!keySet[er.gridX + ',' + (er.gridY + 1)]) { ctx.moveTo(x0, y1); ctx.lineTo(x1, y1); }
+            }
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+
     function drawAreaLabels(areas, zoomScale) {
         for (var i = 0; i < areas.length; i++) {
             var a = areas[i];
             var secStyle = sectorStyle(a.sector);
             var labelColor = secStyle.border;
             var areaWeight = Math.sqrt(Math.max(1, a.gridW * a.gridH));
+            var labelText = (a.name || '').toUpperCase();
 
             var sp = worldToScreen(a.px, a.py);
             var boxW = a.w * zoomScale;
@@ -555,15 +794,24 @@
 
             if (zoomedInMode) {
                 // Zoomed in: pin label to top edge of area bounds.
-                var fontTop = Math.max(10, Math.min(14, 10 + Math.log(areaWeight + 1) * 0.8));
+                var fontTop = Math.max(8, Math.min(14, 10 + Math.log(areaWeight + 1) * 0.8));
                 ctx.font = '700 ' + fontTop.toFixed(1) + 'px "Trebuchet MS", "Segoe UI", sans-serif';
 
-                var topTextW = ctx.measureText(a.name).width;
-                var topPadX = Math.max(6, fontTop * 0.42);
+                var topTextW = ctx.measureText(labelText).width;
+                var topPadX = Math.max(4, fontTop * 0.34);
                 var topPadY = Math.max(2, fontTop * 0.2);
-                var topW = topTextW + topPadX * 2;
+                var maxTopW = Math.max(18, boxW - 8);
+                var desiredTopW = topTextW + topPadX * 2;
+                if (desiredTopW > maxTopW) {
+                    var scaleTop = maxTopW / desiredTopW;
+                    fontTop = Math.max(7, fontTop * scaleTop);
+                    ctx.font = '700 ' + fontTop.toFixed(1) + 'px "Trebuchet MS", "Segoe UI", sans-serif';
+                    topTextW = ctx.measureText(labelText).width;
+                    topPadX = Math.max(3, fontTop * 0.30);
+                }
+                var topW = Math.min(maxTopW, topTextW + topPadX * 2);
                 var topH = fontTop + topPadY * 2;
-                var topX = lx - topW / 2;
+                var topX = Math.max(sp.x + 2, Math.min(sp.x + boxW - topW - 2, lx - topW / 2));
                 var topY = sp.y + 2;
                 var topR = Math.max(3, topH * 0.24);
 
@@ -580,21 +828,30 @@
 
                 ctx.globalAlpha = 0.96;
                 ctx.fillStyle = labelColor;
-                ctx.fillText(a.name.toUpperCase(), lx, topY + topH / 2 + 0.5);
+                ctx.fillText(labelText, topX + topW / 2, topY + topH / 2 + 0.5);
             } else {
                 // Zoomed out: large centered badges over room names.
                 var baseSize = 12 + Math.min(16, Math.log(areaWeight + 1) * 3.2);
                 var zoomOutBoost = Math.max(0.85, Math.min(1.45, Math.pow(1 / Math.max(zoomScale, 0.08), 0.2)));
-                var fontCenter = Math.max(12, Math.min(28, baseSize * zoomOutBoost));
+                var fontCenter = Math.max(8, Math.min(28, baseSize * zoomOutBoost));
                 ctx.font = '700 ' + fontCenter.toFixed(1) + 'px "Trebuchet MS", "Segoe UI", sans-serif';
 
-                var textW = ctx.measureText(a.name).width;
-                var padX = Math.max(6, fontCenter * 0.35);
+                var textW = ctx.measureText(labelText).width;
+                var padX = Math.max(4, fontCenter * 0.30);
                 var padY = Math.max(3, fontCenter * 0.22);
-                var bw = textW + padX * 2;
+                var maxBw = Math.max(20, boxW - 6);
+                var desiredBw = textW + padX * 2;
+                if (desiredBw > maxBw) {
+                    var scaleCenter = maxBw / desiredBw;
+                    fontCenter = Math.max(7, fontCenter * scaleCenter);
+                    ctx.font = '700 ' + fontCenter.toFixed(1) + 'px "Trebuchet MS", "Segoe UI", sans-serif';
+                    textW = ctx.measureText(labelText).width;
+                    padX = Math.max(3, fontCenter * 0.25);
+                }
+                var bw = Math.min(maxBw, textW + padX * 2);
                 var bh = fontCenter + padY * 2;
-                var bx = lx - bw / 2;
-                var by = ly - bh / 2;
+                var bx = Math.max(sp.x + 2, Math.min(sp.x + boxW - bw - 2, lx - bw / 2));
+                var by = Math.max(sp.y + 2, Math.min(sp.y + boxH - bh - 2, ly - bh / 2));
                 var rr = Math.max(4, bh * 0.28);
 
                 ctx.globalAlpha = Math.max(0.35, Math.min(0.75, 0.3 + zoomScale * 0.9));
@@ -610,7 +867,7 @@
 
                 ctx.globalAlpha = Math.max(0.7, Math.min(1.0, 0.58 + zoomScale * 0.6));
                 ctx.fillStyle = labelColor;
-                ctx.fillText(a.name.toUpperCase(), lx, ly + 0.5);
+                ctx.fillText(labelText, bx + bw / 2, by + bh / 2 + 0.5);
             }
 
             ctx.restore();
