@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FREIGN Play</title>
+  <link rel="stylesheet" href="../site-shell.css?v=2" />
+  <link rel="stylesheet" href="style.css?v=2" />
+</head>
+<body data-theme="amethyst">
+  <div id="fr-shellbar-mount" data-active-nav="play"></div>
+
+  <!--
+    Layout:
+      [left-rail] [workspace: center-terminal] [right-rail]
+    Left rail  = collapsible panels (map, channels, party, custom GMCP panels)
+    Right rail = icon strip that opens a slide-out settings drawer
+  -->
+  <div id="workspace">
+
+    <!-- ══ LEFT PANEL RAIL ══════════════════════════════════════ -->
+    <div id="left-rail">
+
+      <!-- Panel launch icons -->
+      <nav id="left-nav" aria-label="Panels">
+        <button class="lnav-btn active" data-panel="map" type="button" title="Map">
+          <span class="lnav-icon" aria-hidden="true">⊞</span>
+          <span class="lnav-label">Map</span>
+        </button>
+        <button class="lnav-btn" data-panel="channels" type="button" title="Channels">
+          <span class="lnav-icon" aria-hidden="true">≋</span>
+          <span class="lnav-label">Channels</span>
+        </button>
+        <button class="lnav-btn" data-panel="party" type="button" title="Party">
+          <span class="lnav-icon" aria-hidden="true">⁕</span>
+          <span class="lnav-label">Party</span>
+        </button>
+        <!-- Dynamically added GMCP panels appear here via JS -->
+        <div id="gmcp-panel-btns"></div>
+      </nav>
+
+      <!-- Panel content area -->
+      <div id="left-panels">
+
+        <!-- Map panel -->
+        <div class="lpanel active" id="lpanel-map">
+          <div class="lpanel-head">
+            <span>Map</span>
+            <button class="lpanel-close" data-panel="map" type="button" title="Close">✕</button>
+          </div>
+          <div class="lpanel-body map-placeholder">
+            <div class="placeholder-icon" aria-hidden="true">⊞</div>
+            <div class="placeholder-text">Mapper</div>
+            <div class="placeholder-sub">Awaiting GMCP<br>room data</div>
+          </div>
+        </div>
+
+        <!-- Channels panel -->
+        <div class="lpanel" id="lpanel-channels">
+          <div class="lpanel-head">
+            <span>Channels</span>
+            <button class="lpanel-close" data-panel="channels" type="button" title="Close">✕</button>
+          </div>
+          <div class="lpanel-body" id="channels-log" aria-live="polite"></div>
+        </div>
+
+        <!-- Party panel -->
+        <div class="lpanel" id="lpanel-party">
+          <div class="lpanel-head">
+            <span>Party</span>
+            <button class="lpanel-close" data-panel="party" type="button" title="Close">✕</button>
+          </div>
+          <div class="lpanel-body" id="party-list">
+            <div class="placeholder-icon" aria-hidden="true">⁕</div>
+            <div class="placeholder-text">Party</div>
+            <div class="placeholder-sub">Awaiting GMCP<br>group data</div>
+          </div>
+        </div>
+
+        <!-- Dynamic GMCP panels injected by JS -->
+        <div id="gmcp-panels"></div>
+
+      </div><!-- /left-panels -->
+    </div><!-- /left-rail -->
+
+    <!-- ══ CENTER: TERMINAL ══════════════════════════════════════ -->
+    <div id="center">
+
+      <!-- Top bar: brand / vitals / connection -->
+      <header id="topbar">
+        <div id="topbar-left">
+          <span class="brand-text">FREIGN</span>
+          <span class="brand-sep" aria-hidden="true">//</span>
+
+          <!-- GMCP vitals strip — shows when connected & data arrives -->
+          <div id="vitals-strip" aria-label="Vitals" hidden>
+            <div class="vital" id="v-hp" title="Hit Points">
+              <span class="vital-label">HP</span>
+              <span class="vital-val" id="v-hp-val">—</span>
+            </div>
+            <div class="vital-sep" aria-hidden="true"></div>
+            <div class="vital" id="v-mp" title="Mana">
+              <span class="vital-label">MP</span>
+              <span class="vital-val" id="v-mp-val">—</span>
+            </div>
+            <div class="vital-sep" aria-hidden="true"></div>
+            <div class="vital" id="v-mv" title="Movement">
+              <span class="vital-label">MV</span>
+              <span class="vital-val" id="v-mv-val">—</span>
+            </div>
+          </div>
+        </div>
+
+        <div id="topbar-right">
+          <div id="conn-status" class="offline" aria-live="polite">● Offline</div>
+          <button id="btn-public"     type="button" class="hdr-btn">Public</button>
+          <button id="btn-test"       type="button" class="hdr-btn">Test</button>
+          <button id="btn-disconnect" type="button" class="hdr-btn danger">Disconnect</button>
+        </div>
+      </header>
+
+      <!-- Terminal output -->
+      <div id="terminal" role="log" aria-live="polite" aria-label="Game output"></div>
+
+      <!-- Macro bar (hidden when empty) -->
+      <div id="macro-bar" aria-label="Macro shortcuts"></div>
+
+      <!-- Command input -->
+      <form id="cmd-form" autocomplete="off" aria-label="Command input">
+        <label for="cmd-input" class="sr-only">Command</label>
+        <div id="cmd-prompt" aria-hidden="true">›</div>
+        <input id="cmd-input" type="text" placeholder="Enter command…"
+               spellcheck="false" autocomplete="off" autocorrect="off" />
+        <button id="btn-repeat" type="button" title="Repeat last command">↺</button>
+        <button id="cmd-send"   type="submit">Send</button>
+      </form>
+
+    </div><!-- /center -->
+
+    <!-- ══ RIGHT RAIL: SETTINGS ══════════════════════════════════ -->
+    <div id="right-rail">
+
+      <!-- Icon strip -->
+      <nav id="right-nav" aria-label="Settings panels">
+        <button class="rnav-btn" data-drawer="connect" type="button" title="Connection">
+          <span class="rnav-icon" aria-hidden="true">⚡</span>
+          <span class="rnav-label">Connect</span>
+        </button>
+        <button class="rnav-btn" data-drawer="config" type="button" title="Config">
+          <span class="rnav-icon" aria-hidden="true">⚙</span>
+          <span class="rnav-label">Config</span>
+        </button>
+        <button class="rnav-btn" data-drawer="aliases" type="button" title="Aliases">
+          <span class="rnav-icon" aria-hidden="true">⇌</span>
+          <span class="rnav-label">Aliases</span>
+        </button>
+        <button class="rnav-btn" data-drawer="triggers" type="button" title="Triggers">
+          <span class="rnav-icon" aria-hidden="true">◎</span>
+          <span class="rnav-label">Triggers</span>
+        </button>
+        <button class="rnav-btn" data-drawer="macros" type="button" title="Macros">
+          <span class="rnav-icon" aria-hidden="true">⌘</span>
+          <span class="rnav-label">Macros</span>
+        </button>
+        <button class="rnav-btn" data-drawer="colors" type="button" title="ANSI Colors">
+          <span class="rnav-icon" aria-hidden="true">◈</span>
+          <span class="rnav-label">Colors</span>
+        </button>
+      </nav>
+
+      <!-- Settings drawer (slides in over the terminal, closes on outside click) -->
+      <div id="settings-drawer" aria-label="Settings" hidden>
+        <div id="drawer-header">
+          <span id="drawer-title">Settings</span>
+          <button id="drawer-close" type="button" title="Close">✕</button>
+        </div>
+        <div id="drawer-body">
+
+          <!-- CONNECT -->
+          <div class="drawer-pane" id="dpane-connect">
+            <div class="dpane-section">
+              <div class="dpane-label">Server</div>
+              <div class="stacked-btns">
+                <button id="sp-public"     type="button" class="full-btn">Connect — Public</button>
+                <button id="sp-test"       type="button" class="full-btn">Connect — Test</button>
+                <button id="sp-disconnect" type="button" class="full-btn danger">Disconnect</button>
+              </div>
+            </div>
+            <div class="dpane-section">
+              <div class="dpane-label">Settings File</div>
+              <div class="row-btns">
+                <button id="export-settings" type="button">Export JSON</button>
+                <button id="import-settings" type="button">Import JSON</button>
+              </div>
+              <button id="reset-settings" type="button" class="full-btn danger" style="margin-top:6px">Reset to Defaults</button>
+              <input id="import-file" type="file" accept="application/json" hidden />
+            </div>
+          </div>
+
+          <!-- CONFIG -->
+          <div class="drawer-pane" id="dpane-config">
+            <div class="dpane-section">
+              <div class="dpane-label">Display</div>
+              <div class="field-row">
+                <label for="cfg-timestamps">Timestamps</label>
+                <input id="cfg-timestamps" type="checkbox" />
+              </div>
+              <div class="field-row">
+                <label for="cfg-wrap">Line Wrap</label>
+                <input id="cfg-wrap" type="checkbox" />
+              </div>
+            </div>
+            <div class="dpane-section">
+              <div class="dpane-label">Input</div>
+              <div class="field-row">
+                <label for="cfg-stack-sep">Stack Separator</label>
+                <input id="cfg-stack-sep" type="text" maxlength="4" placeholder=";" />
+              </div>
+            </div>
+            <div class="dpane-section">
+              <div class="dpane-label">GMCP Panels</div>
+              <p class="hint-text">Add custom panels that display data from GMCP packages. Each panel has a name and a GMCP package path to listen on.</p>
+              <div id="gmcp-panel-list" class="item-list"></div>
+              <button id="add-gmcp-panel" type="button" class="add-btn">+ Add Panel</button>
+            </div>
+          </div>
+
+          <!-- ALIASES -->
+          <div class="drawer-pane" id="dpane-aliases">
+            <div class="dpane-section">
+              <div class="dpane-label">Aliases</div>
+              <p class="hint-text">Pattern is matched as a regular expression against the command you type.</p>
+              <div id="alias-list" class="item-list"></div>
+              <button id="add-alias" type="button" class="add-btn">+ Add Alias</button>
+            </div>
+          </div>
+
+          <!-- TRIGGERS -->
+          <div class="drawer-pane" id="dpane-triggers">
+            <div class="dpane-section">
+              <div class="dpane-label">Triggers</div>
+              <p class="hint-text">Pattern matched against incoming game text. Actions: highlight a line, send a command, or show a notification.</p>
+              <div id="trigger-list" class="item-list"></div>
+              <button id="add-trigger" type="button" class="add-btn">+ Add Trigger</button>
+            </div>
+          </div>
+
+          <!-- MACROS -->
+          <div class="drawer-pane" id="dpane-macros">
+            <div class="dpane-section">
+              <div class="dpane-label">Macros</div>
+              <p class="hint-text">Macros appear as buttons above the command bar. Assign a hotkey (e.g. Alt+1 or F5) to trigger them from anywhere.</p>
+              <div id="macro-list" class="item-list"></div>
+              <button id="add-macro" type="button" class="add-btn">+ Add Macro</button>
+          </div>
+        </div>
+
+        <!-- COLORS -->
+        <div class="tab-pane" id="pane-colors">
+          <div class="pane-section">
+            <div class="pane-label">ANSI Colors (0–15)</div>
+            <div id="ansi-color-grid" class="color-grid"></div>
+          </div>
+        </div>
+
+      </div><!-- /tab-panes -->
+
+    </aside>
+  </div>
+
+  <script src="../site-themes.js?v=1" defer></script>
+  <script src="../site-shell.js?v=3" defer></script>
+  <script src="../play/ansi.js?v=15" defer></script>
+  <script src="app.js?v=1" defer></script>
+</body>
+</html>
