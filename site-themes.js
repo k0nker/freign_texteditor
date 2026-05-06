@@ -83,14 +83,47 @@
       }
     },
     {
+      id: 'rhodonite',
+      label: 'Rhodonite',
+      tone: 'dark',
+      vars: {
+        bg: '#1a0d14', panel: '#281420', 'panel-border': '#6b2e4a', text: '#f0d0de',
+        muted: '#c07890', title: '#f5a0c2', 'input-bg': '#381828', 'input-border': '#7e3855',
+        accent: '#d04878', 'accent-ink': '#300a1c', 'terminal-bg': '#160a10', 'terminal-border': '#6e304c',
+        'terminal-text': '#f5deea'
+      }
+    },
+    {
       id: 'topaz',
       label: 'Topaz',
       tone: 'dark',
       vars: {
-        bg: '#1b1510', panel: '#2a2018', 'panel-border': '#5f4a35', text: '#eadac8',
-        muted: '#b6a08a', title: '#f2cb95', 'input-bg': '#3a2d22', 'input-border': '#7c6246',
-        accent: '#d59e54', 'accent-ink': '#2f1f0e', 'terminal-bg': '#18120d', 'terminal-border': '#624a31',
-        'terminal-text': '#f5e4d0'
+        bg: '#5e3608', panel: '#7a4a18', 'panel-border': '#b07028', text: '#fff4dc',
+        muted: '#d08030', title: '#ffc87c', 'input-bg': '#7c4818', 'input-border': '#c88030',
+        accent: '#e89838', 'accent-ink': '#200c00', 'terminal-bg': '#5a3208', 'terminal-border': '#a86828',
+        'terminal-text': '#ffecc8'
+      }
+    },
+    {
+      id: 'carnelian',
+      label: 'Carnelian',
+      tone: 'dark',
+      vars: {
+        bg: '#191400', panel: '#261e00', 'panel-border': '#5e4c10', text: '#eedfac',
+        muted: '#aa9840', title: '#f2cc40', 'input-bg': '#352800', 'input-border': '#706018',
+        accent: '#c8a800', 'accent-ink': '#201800', 'terminal-bg': '#141000', 'terminal-border': '#605010',
+        'terminal-text': '#f2e8b8'
+      }
+    },
+    {
+      id: 'amber',
+      label: 'Amber',
+      tone: 'dark',
+      vars: {
+        bg: '#1a1208', panel: '#281c0c', 'panel-border': '#6b4c22', text: '#edd8b8',
+        muted: '#b08c5a', title: '#d4a060', 'input-bg': '#382208', 'input-border': '#7a5428',
+        accent: '#c07038', 'accent-ink': '#241200', 'terminal-bg': '#150f05', 'terminal-border': '#6c4c20',
+        'terminal-text': '#f2e0c0'
       }
     },
     {
@@ -146,6 +179,28 @@
         muted: '#666673', title: '#40404d', 'input-bg': '#ffffff', 'input-border': '#ababba',
         accent: '#7f7f97', 'accent-ink': '#fafaff', 'terminal-bg': '#fefeff', 'terminal-border': '#b9b9c7',
         'terminal-text': '#2a2a33'
+      }
+    },
+    {
+      id: 'rose-quartz',
+      label: 'Rose Quartz',
+      tone: 'light',
+      vars: {
+        bg: '#f7ecf1', panel: '#fdf5f8', 'panel-border': '#d4a8bb', text: '#3d2430',
+        muted: '#8f6070', title: '#7a3355', 'input-bg': '#fff0f4', 'input-border': '#d0a0b5',
+        accent: '#c0558a', 'accent-ink': '#ffe8f2', 'terminal-bg': '#fdf2f6', 'terminal-border': '#d8acbf',
+        'terminal-text': '#3a2030'
+      }
+    },
+    {
+      id: 'citrine',
+      label: 'Citrine',
+      tone: 'light',
+      vars: {
+        bg: '#f6f0d5', panel: '#fdfae8', 'panel-border': '#c8b665', text: '#3a3215',
+        muted: '#7a7030', title: '#5a4a08', 'input-bg': '#fefce8', 'input-border': '#caba65',
+        accent: '#9a8818', 'accent-ink': '#fefce0', 'terminal-bg': '#fdfae0', 'terminal-border': '#ccba68',
+        'terminal-text': '#363018'
       }
     }
   ];

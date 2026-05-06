@@ -24,18 +24,19 @@
   overflow: visible;
 }
 
-.fr-nav::before {
-  content: "forgotten reign::play.freign.net:1300 |";
-  color: color-mix(in srgb, var(--muted, #9e95b4) 80%, var(--text, #ddd8ea));
+.fr-theme-addr {
+  color: var(--muted, #9e95b4);
   font-size: 14px;
   letter-spacing: 0.06em;
-  text-transform: lowercase;
   white-space: nowrap;
-  position: absolute;
-  right: calc(100% + 12px);
-  top: 50%;
-  transform: translateY(-50%);
-  pointer-events: none;
+}
+
+.fr-theme-sep {
+  color: color-mix(in srgb, var(--muted, #9e95b4) 45%, var(--bg, #12101a));
+  font-size: 14px;
+  user-select: none;
+  white-space: nowrap;
+  display: inline-block;
 }
 
 .fr-nav-item {
@@ -128,6 +129,7 @@
   right: 8px;
   top: 50%;
   transform: translateY(-50%);
+  white-space: nowrap;
 }
 
 .fr-theme-label {
@@ -145,6 +147,10 @@
   border: 1px solid var(--input-border, #4a4160);
   background: var(--input-bg, #232033);
   color: var(--text, #ddd8ea);
+}
+
+.fr-theme-control #site-theme-select {
+  width: auto;
 }
 
 @media (max-width: 700px) {
