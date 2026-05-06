@@ -1,15 +1,11 @@
 /* ═══════════════════════════════════════════════════════════════
    FREIGN Play v2 — Client Application
    Forgotten Reign MUD Web Client
-
-   Layout: left panel rail | center terminal | right settings rail
-   GMCP-ready panel system — panels exist now, receive data when
-   the server implements GMCP (Char.Vitals, Room.Info, etc.)
    ═══════════════════════════════════════════════════════════════ */
 (function () {
   'use strict';
 
-  var STORAGE_KEY  = 'freign.play2.settings.v1';
+  var STORAGE_KEY    = 'freign.play2.settings.v1';
   var SITE_THEME_KEY = 'freign.site.theme.v1';
   var themeApi = window.FreignThemes || null;
 
@@ -18,11 +14,24 @@
     { id: 'test',   name: 'Test',   host: '192.168.86.99', port: 25556, tls: false },
   ];
 
+  var BUILTIN_PANELS = [
+    { id: 'map',      name: 'Map',      icon: '\u229e' },
+    { id: 'channels', name: 'Channels', icon: '\u22cb' },
+    { id: 'party',    name: 'Party',    icon: '\u203f' },
+  ];
+
+  var FONTS = [
+    'JetBrains Mono', 'Fira Code', 'Source Code Pro', 'Roboto Mono',
+    'Inconsolata', 'Space Mono', 'IBM Plex Mono', 'Noto Sans Mono',
+    'PT Mono', 'Share Tech Mono', 'Azeret Mono', 'Courier Prime',
+  ];
+
   var DEFAULT_16 = window.AnsiRenderer.buildDefaultPalette16();
 
-  /* Default settings shape — extended with panel layout */
   var DEFAULT_SETTINGS = {
     theme:          'amethyst',
+    font:           'JetBrains Mono',
+    layoutStyle:    'block',
     timestamps:     true,
     wrapLines:      true,
     stackSeparator: ';',
@@ -31,9 +40,9 @@
     triggers:       [],
     macros:         [],
     palette16:      {},
-    /* Panel layout */
-    openPanels:     ['map'],        /* which left-rail panels are open */
-    gmcpPanels:     [],             /* user-defined GMCP panels */
+    openPanels:     ['map'],
+    panelSides:     { map: 'left', channels: 'left', party: 'left' },
+    gmcpPanels:     [],
   };
 
   var state = {
@@ -69,61 +78,59 @@
   }
 
   function bindEls() {
-    /* Terminal area */
-    el.terminal      = document.getElementById('terminal');
-    el.connStatus    = document.getElementById('conn-status');
-    el.macroBar      = document.getElementById('macro-bar');
-    el.cmdForm       = document.getElementById('cmd-form');
-    el.cmdInput      = document.getElementById('cmd-input');
-    el.cmdSend       = document.getElementById('cmd-send');
-    el.btnRepeat     = document.getElementById('btn-repeat');
+    el.workspace      = document.getElementById('workspace');
+    el.terminal       = document.getElementById('terminal');
+    el.connStatus     = document.getElementById('conn-status');
+    el.macroBar       = document.getElementById('macro-bar');
+    el.cmdForm        = document.getElementById('cmd-form');
+    el.cmdInput       = document.getElementById('cmd-input');
+    el.cmdSend        = document.getElementById('cmd-send');
+    el.btnRepeat      = document.getElementById('btn-repeat');
+    el.btnPublic      = document.getElementById('btn-public');
+    el.btnTest        = document.getElementById('btn-test');
+    el.btnDisconnect  = document.getElementById('btn-disconnect');
 
-    /* Header connect buttons */
-    el.btnPublic     = document.getElementById('btn-public');
-    el.btnTest       = document.getElementById('btn-test');
-    el.btnDisconnect = document.getElementById('btn-disconnect');
+    el.vitalsStrip    = document.getElementById('vitals-strip');
+    el.vHp            = document.getElementById('v-hp-val');
+    el.vMp            = document.getElementById('v-mp-val');
+    el.vMv            = document.getElementById('v-mv-val');
 
-    /* Vitals strip */
-    el.vitalsStrip   = document.getElementById('vitals-strip');
-    el.vHp           = document.getElementById('v-hp-val');
-    el.vMp           = document.getElementById('v-mp-val');
-    el.vMv           = document.getElementById('v-mv-val');
+    el.leftNav        = document.getElementById('left-nav');
+    el.leftPanels     = document.getElementById('left-panels');
+    el.leftPanelBtns  = document.getElementById('left-panel-btns');
+    el.leftGmcpPanels = document.getElementById('left-gmcp-panels');
 
-    /* Left rail */
-    el.leftPanels    = document.getElementById('left-panels');
-    el.gmcpPanelBtns = document.getElementById('gmcp-panel-btns');
-    el.gmcpPanels    = document.getElementById('gmcp-panels');
+    el.rightPanels    = document.getElementById('right-panels');
+    el.rightPanelBtns = document.getElementById('right-panel-btns');
+    el.rightGmcpPanels= document.getElementById('right-gmcp-panels');
+    el.rnavSep        = document.getElementById('rnav-sep');
 
-    /* Settings drawer */
     el.settingsDrawer = document.getElementById('settings-drawer');
     el.drawerTitle    = document.getElementById('drawer-title');
     el.drawerClose    = document.getElementById('drawer-close');
     el.drawerBody     = document.getElementById('drawer-body');
 
-    /* Drawer connect panel */
-    el.spPublic      = document.getElementById('sp-public');
-    el.spTest        = document.getElementById('sp-test');
-    el.spDisconnect  = document.getElementById('sp-disconnect');
+    el.spPublic       = document.getElementById('sp-public');
+    el.spTest         = document.getElementById('sp-test');
+    el.spDisconnect   = document.getElementById('sp-disconnect');
 
-    /* Config panel */
-    el.cfgTimestamps = document.getElementById('cfg-timestamps');
-    el.cfgWrap       = document.getElementById('cfg-wrap');
-    el.cfgStackSep   = document.getElementById('cfg-stack-sep');
-    el.gmcpPanelList = document.getElementById('gmcp-panel-list');
-    el.addGmcpPanel  = document.getElementById('add-gmcp-panel');
+    el.cfgFont        = document.getElementById('cfg-font');
+    el.cfgLayout      = document.getElementById('cfg-layout');
+    el.cfgTimestamps  = document.getElementById('cfg-timestamps');
+    el.cfgWrap        = document.getElementById('cfg-wrap');
+    el.cfgStackSep    = document.getElementById('cfg-stack-sep');
+    el.builtinPanelCfg= document.getElementById('builtin-panel-cfg');
+    el.gmcpPanelList  = document.getElementById('gmcp-panel-list');
+    el.addGmcpPanel   = document.getElementById('add-gmcp-panel');
 
-    /* Item lists */
-    el.aliasList     = document.getElementById('alias-list');
-    el.triggerList   = document.getElementById('trigger-list');
-    el.macroList     = document.getElementById('macro-list');
-    el.addAlias      = document.getElementById('add-alias');
-    el.addTrigger    = document.getElementById('add-trigger');
-    el.addMacro      = document.getElementById('add-macro');
+    el.aliasList      = document.getElementById('alias-list');
+    el.triggerList    = document.getElementById('trigger-list');
+    el.macroList      = document.getElementById('macro-list');
+    el.addAlias       = document.getElementById('add-alias');
+    el.addTrigger     = document.getElementById('add-trigger');
+    el.addMacro       = document.getElementById('add-macro');
 
-    /* Colors */
-    el.ansiColorGrid = document.getElementById('ansi-color-grid');
-
-    /* Settings I/O */
+    el.ansiColorGrid  = document.getElementById('ansi-color-grid');
     el.exportSettings = document.getElementById('export-settings');
     el.importSettings = document.getElementById('import-settings');
     el.resetSettings  = document.getElementById('reset-settings');
@@ -131,7 +138,6 @@
   }
 
   function bindUi() {
-    /* Command form */
     el.cmdForm.addEventListener('submit', function (e) {
       e.preventDefault();
       submitInputCommand(el.cmdInput.value);
@@ -139,36 +145,28 @@
 
     el.cmdInput.addEventListener('keydown', handleInputHistory);
 
-    /* Repeat-last button */
     el.btnRepeat.addEventListener('click', function () {
       if (state.lastCmd) sendCommand(state.lastCmd);
     });
 
-    /* Global macro hotkeys */
     document.addEventListener('keydown', onGlobalKeydown);
 
-    /* Header buttons */
     el.btnPublic.addEventListener('click',     function () { connectMud('public'); });
     el.btnTest.addEventListener('click',       function () { connectMud('test'); });
     el.btnDisconnect.addEventListener('click', disconnect);
+    el.spPublic.addEventListener('click',      function () { connectMud('public'); });
+    el.spTest.addEventListener('click',        function () { connectMud('test'); });
+    el.spDisconnect.addEventListener('click',  disconnect);
 
-    /* Drawer connect buttons */
-    el.spPublic.addEventListener('click',     function () { connectMud('public'); });
-    el.spTest.addEventListener('click',       function () { connectMud('test'); });
-    el.spDisconnect.addEventListener('click', disconnect);
-
-    /* Right-rail icon buttons — toggle settings drawer */
+    /* Right-rail settings icon buttons */
     document.querySelectorAll('.rnav-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        var drawer = btn.dataset.drawer;
-        toggleDrawer(drawer, btn);
+        toggleDrawer(btn.dataset.drawer, btn);
       });
     });
 
-    /* Drawer close */
-    el.drawerClose.addEventListener('click', function () { closeDrawer(); });
+    el.drawerClose.addEventListener('click', closeDrawer);
 
-    /* Close drawer on outside click */
     document.addEventListener('click', function (e) {
       if (!state.activeDrawer) return;
       if (el.settingsDrawer.contains(e.target)) return;
@@ -176,21 +174,35 @@
       closeDrawer();
     });
 
-    /* Left-rail panel toggle buttons */
-    document.querySelectorAll('.lnav-btn').forEach(function (btn) {
+    /* Built-in panel nav buttons (initial binding; moved by applyPanelState later) */
+    document.querySelectorAll('.panel-nav-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        toggleLeftPanel(btn.dataset.panel);
+        togglePanel(btn.dataset.panel);
       });
     });
 
-    /* Left-panel close buttons */
-    document.querySelectorAll('.lpanel-close').forEach(function (btn) {
+    /* Built-in panel close buttons */
+    document.querySelectorAll('.panel-close').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        closeLeftPanel(btn.dataset.panel);
+        closePanel(btn.dataset.panel);
       });
     });
 
-    /* Config toggles */
+    /* Config: font */
+    el.cfgFont.addEventListener('change', function () {
+      state.settings.font = el.cfgFont.value;
+      applyFont();
+      saveSettings();
+    });
+
+    /* Config: layout style */
+    el.cfgLayout.addEventListener('change', function () {
+      state.settings.layoutStyle = el.cfgLayout.value;
+      applyLayout();
+      saveSettings();
+    });
+
+    /* Config: display toggles */
     el.cfgTimestamps.addEventListener('change', function () {
       state.settings.timestamps = !!el.cfgTimestamps.checked;
       saveSettings();
@@ -206,13 +218,11 @@
       saveSettings();
     });
 
-    /* Custom GMCP panel add button */
     el.addGmcpPanel.addEventListener('click', function () {
-      state.settings.gmcpPanels.push({ id: uid(), name: 'Panel', gmcpPath: '', enabled: true });
+      state.settings.gmcpPanels.push({ id: uid(), name: 'Panel', gmcpPath: '', enabled: true, side: 'left' });
       saveAndRefresh();
     });
 
-    /* Alias / trigger / macro add buttons */
     el.addAlias.addEventListener('click', function () {
       state.settings.aliases.push({ enabled: true, pattern: '', replacement: '' });
       saveAndRefresh();
@@ -226,13 +236,11 @@
       saveAndRefresh();
     });
 
-    /* Settings import / export / reset */
     el.exportSettings.addEventListener('click', exportSettings);
     el.importSettings.addEventListener('click', function () { el.importFile.click(); });
     el.resetSettings.addEventListener('click',  resetLocalSettings);
     el.importFile.addEventListener('change',    importSettingsFile);
 
-    /* Theme changes from the site-wide theme picker */
     window.addEventListener('freign-theme-changed', function (evt) {
       if (!evt || !evt.detail) return;
       state.settings.theme = resolveTheme(evt.detail.themeId);
@@ -241,37 +249,27 @@
   }
 
   /* ═══════════════════════════════════════════════════════════════
-     DRAWER (right-rail settings panels)
+     SETTINGS DRAWER (right-rail)
      ═══════════════════════════════════════════════════════════════ */
 
   var DRAWER_TITLES = {
-    connect:  'Connection',
-    config:   'Configuration',
-    aliases:  'Aliases',
-    triggers: 'Triggers',
-    macros:   'Macros',
-    colors:   'ANSI Colors',
+    connect: 'Connection', config: 'Configuration',
+    aliases: 'Aliases',    triggers: 'Triggers',
+    macros:  'Macros',     colors: 'ANSI Colors',
   };
 
   function toggleDrawer(id, triggerBtn) {
-    if (state.activeDrawer === id) {
-      closeDrawer();
-      return;
-    }
+    if (state.activeDrawer === id) { closeDrawer(); return; }
     openDrawer(id, triggerBtn);
   }
 
   function openDrawer(id, triggerBtn) {
-    /* Activate the right nav button */
     document.querySelectorAll('.rnav-btn').forEach(function (b) {
       b.classList.toggle('active', b === triggerBtn);
     });
-
-    /* Switch visible pane */
     document.querySelectorAll('.drawer-pane').forEach(function (p) {
       p.classList.toggle('active', p.id === 'dpane-' + id);
     });
-
     el.drawerTitle.textContent = DRAWER_TITLES[id] || id;
     el.settingsDrawer.hidden   = false;
     state.activeDrawer = id;
@@ -279,56 +277,112 @@
 
   function closeDrawer() {
     el.settingsDrawer.hidden = true;
-    document.querySelectorAll('.rnav-btn').forEach(function (b) {
-      b.classList.remove('active');
-    });
+    document.querySelectorAll('.rnav-btn').forEach(function (b) { b.classList.remove('active'); });
     state.activeDrawer = null;
   }
 
   /* ═══════════════════════════════════════════════════════════════
-     LEFT PANELS
+     PANELS — open / close / side assignment
      ═══════════════════════════════════════════════════════════════ */
 
-  function toggleLeftPanel(id) {
+  function togglePanel(id) {
     var isOpen = state.settings.openPanels.indexOf(id) >= 0;
-    if (isOpen) {
-      closeLeftPanel(id);
-    } else {
-      openLeftPanel(id);
-    }
+    if (isOpen) closePanel(id); else openPanel(id);
   }
 
-  function openLeftPanel(id) {
-    if (state.settings.openPanels.indexOf(id) < 0) {
-      state.settings.openPanels.push(id);
-    }
-    applyLeftPanelState();
+  function openPanel(id) {
+    if (state.settings.openPanels.indexOf(id) < 0) state.settings.openPanels.push(id);
+    applyPanelState();
     saveSettings();
   }
 
-  function closeLeftPanel(id) {
+  function closePanel(id) {
     state.settings.openPanels = state.settings.openPanels.filter(function (p) { return p !== id; });
-    applyLeftPanelState();
+    applyPanelState();
     saveSettings();
   }
 
-  function applyLeftPanelState() {
-    var open = state.settings.openPanels;
+  /* applyPanelState — moves panel elements AND nav buttons to the correct rail */
+  function applyPanelState() {
+    var open  = state.settings.openPanels;
+    var sides = state.settings.panelSides;
 
-    /* Built-in panels */
-    document.querySelectorAll('.lpanel').forEach(function (panel) {
-      var id = panel.id.replace('lpanel-', '');
-      panel.classList.toggle('active', open.indexOf(id) >= 0);
+    /* ── Built-in panels ─────────────────────────────────── */
+    BUILTIN_PANELS.forEach(function (bp) {
+      var panelEl = document.getElementById('panel-' + bp.id);
+      var btnEl   = document.querySelector('.panel-nav-btn[data-panel="' + bp.id + '"]');
+      var side    = sides[bp.id] || 'left';
+      var isOpen  = open.indexOf(bp.id) >= 0;
+
+      /* Move panel element to correct container */
+      var targetContainer = (side === 'right') ? el.rightPanels : el.leftPanels;
+      if (panelEl && panelEl.parentNode !== targetContainer) {
+        targetContainer.appendChild(panelEl);
+      }
+
+      /* Move nav button to correct nav */
+      if (btnEl) {
+        if (side === 'right') {
+          if (btnEl.parentNode !== el.rightPanelBtns) el.rightPanelBtns.appendChild(btnEl);
+        } else {
+          /* Back to left-nav, before the left-panel-btns div */
+          if (btnEl.parentNode !== el.leftNav) {
+            el.leftNav.insertBefore(btnEl, el.leftPanelBtns);
+          }
+        }
+      }
+
+      if (panelEl) panelEl.classList.toggle('active', isOpen);
+      if (btnEl)   btnEl.classList.toggle('active', isOpen);
     });
 
-    /* Left nav button active state */
-    document.querySelectorAll('.lnav-btn').forEach(function (btn) {
-      btn.classList.toggle('active', open.indexOf(btn.dataset.panel) >= 0);
+    /* ── Custom GMCP panels (handled in renderGmcpPanels, just set active) ── */
+    state.settings.gmcpPanels.forEach(function (p) {
+      if (!p.enabled) return;
+      var panelId = 'gmcp-' + p.id;
+      var panelEl = document.getElementById('panel-' + panelId);
+      var btnEl   = document.querySelector('.panel-nav-btn[data-panel="' + panelId + '"]');
+      var isOpen  = open.indexOf(panelId) >= 0;
+      if (panelEl) panelEl.classList.toggle('active', isOpen);
+      if (btnEl)   btnEl.classList.toggle('active', isOpen);
     });
 
-    /* Toggle has-active class for :has fallback */
-    var anyOpen = open.length > 0;
-    el.leftPanels.classList.toggle('has-active', anyOpen);
+    /* ── has-active state on containers ─────────────────── */
+    var leftHasActive  = false;
+    var rightHasActive = false;
+
+    open.forEach(function (id) {
+      if (id.indexOf('gmcp-') === 0) {
+        var cid = id.slice(5);
+        var cp  = state.settings.gmcpPanels.find(function (p) { return p.id === cid; });
+        if (cp) {
+          if ((cp.side || 'left') === 'right') rightHasActive = true;
+          else leftHasActive = true;
+        }
+      } else {
+        if ((sides[id] || 'left') === 'right') rightHasActive = true;
+        else leftHasActive = true;
+      }
+    });
+
+    el.leftPanels.classList.toggle('has-active', leftHasActive);
+    el.rightPanels.classList.toggle('has-active', rightHasActive);
+
+    /* ── Separator visibility ────────────────────────────── */
+    el.rnavSep.hidden = !el.rightPanelBtns.children.length;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     APPLY APPEARANCE
+     ═══════════════════════════════════════════════════════════════ */
+
+  function applyFont() {
+    var font = state.settings.font || 'JetBrains Mono';
+    document.documentElement.style.setProperty('--terminal-font', "'" + font + "', monospace");
+  }
+
+  function applyLayout() {
+    el.workspace.dataset.layout = state.settings.layoutStyle || 'block';
   }
 
   /* ═══════════════════════════════════════════════════════════════
@@ -348,14 +402,8 @@
     rebuildPalette();
   }
 
-  function saveSettings() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state.settings));
-  }
-
-  function saveAndRefresh() {
-    saveSettings();
-    renderAll();
-  }
+  function saveSettings()    { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.settings)); }
+  function saveAndRefresh()  { saveSettings(); renderAll(); }
 
   /* ═══════════════════════════════════════════════════════════════
      RENDER
@@ -369,14 +417,21 @@
       document.body.setAttribute('data-theme', state.settings.theme || 'amethyst');
     }
 
+    applyFont();
+    applyLayout();
+
+    el.cfgFont.value         = state.settings.font || 'JetBrains Mono';
+    el.cfgLayout.value       = state.settings.layoutStyle || 'block';
     el.cfgTimestamps.checked = !!state.settings.timestamps;
     el.cfgWrap.checked       = !!state.settings.wrapLines;
     el.cfgStackSep.value     = sanitizeStackSep(state.settings.stackSeparator);
 
     el.terminal.classList.toggle('nowrap', !state.settings.wrapLines);
 
-    applyLeftPanelState();
+    renderBuiltinPanelCfg();
     renderGmcpPanels();
+    applyPanelState();
+
     renderAliases();
     renderTriggers();
     renderMacros();
@@ -384,72 +439,138 @@
     renderAnsiColors();
   }
 
-  /* ── GMCP panels ─────────────────────────────────────────── */
+  /* ── Built-in panel side config (in Config drawer) ──────── */
+
+  function renderBuiltinPanelCfg() {
+    el.builtinPanelCfg.innerHTML = '';
+    var sides = state.settings.panelSides;
+
+    BUILTIN_PANELS.forEach(function (bp) {
+      var row = document.createElement('div');
+      row.className = 'panel-side-row';
+
+      var lbl = document.createElement('label');
+      lbl.textContent = bp.name;
+
+      var sel = document.createElement('select');
+      ['left', 'right'].forEach(function (s) {
+        var o = document.createElement('option');
+        o.value = s;
+        o.textContent = s.charAt(0).toUpperCase() + s.slice(1);
+        sel.appendChild(o);
+      });
+      sel.value = sides[bp.id] || 'left';
+
+      (function (bpId, select) {
+        select.addEventListener('change', function () {
+          state.settings.panelSides[bpId] = select.value;
+          saveSettings();
+          applyPanelState();
+        });
+      })(bp.id, sel);
+
+      row.appendChild(lbl);
+      row.appendChild(sel);
+      el.builtinPanelCfg.appendChild(row);
+    });
+  }
+
+  /* ── Custom GMCP panels ──────────────────────────────────── */
 
   function renderGmcpPanels() {
-    /* Render the config list in the drawer */
+    /* Rebuild config list in drawer */
     el.gmcpPanelList.innerHTML = '';
     state.settings.gmcpPanels.forEach(function (panel, idx) {
       var card = makeItemCard('panel', !!panel.enabled, idx, state.settings.gmcpPanels);
 
       card.appendChild(makeItemField('Name', 'text', panel.name || '', function (v) {
-        panel.name = v;
-        saveAndRefresh();
+        panel.name = v; saveAndRefresh();
       }));
       card.appendChild(makeItemField('GMCP Path', 'text', panel.gmcpPath || '', function (v) {
-        panel.gmcpPath = v;
-        saveSettings();
+        panel.gmcpPath = v; saveSettings();
       }));
+
+      /* Side selector for custom panels */
+      var sideRow = document.createElement('div');
+      sideRow.className = 'item-card-row';
+      var sideLbl = document.createElement('label');
+      sideLbl.textContent = 'Side';
+      var sideSel = document.createElement('select');
+      ['left', 'right'].forEach(function (s) {
+        var o = document.createElement('option');
+        o.value = s; o.textContent = s.charAt(0).toUpperCase() + s.slice(1);
+        sideSel.appendChild(o);
+      });
+      sideSel.value = panel.side || 'left';
+      (function (p, sel) {
+        sel.addEventListener('change', function () { p.side = sel.value; saveAndRefresh(); });
+      })(panel, sideSel);
+      sideRow.appendChild(sideLbl);
+      sideRow.appendChild(sideSel);
+      card.appendChild(sideRow);
 
       el.gmcpPanelList.appendChild(card);
     });
 
-    /* Rebuild the left-rail nav buttons and panel elements for custom panels */
-    el.gmcpPanelBtns.innerHTML = '';
-    el.gmcpPanels.innerHTML    = '';
+    /* Rebuild custom panel DOM elements */
+    /* Clear old custom panel buttons from both navs */
+    el.leftPanelBtns.innerHTML  = '';
+    el.rightPanelBtns.innerHTML = '';
+    /* Clear old custom panel elements */
+    el.leftGmcpPanels.innerHTML  = '';
+    el.rightGmcpPanels.innerHTML = '';
 
     state.settings.gmcpPanels.forEach(function (panel) {
       if (!panel.enabled) return;
       var panelId = 'gmcp-' + panel.id;
+      var side    = panel.side || 'left';
 
       /* Nav button */
       var btn = document.createElement('button');
-      btn.className       = 'lnav-btn';
-      btn.dataset.panel   = panelId;
-      btn.type            = 'button';
-      btn.title           = panel.name;
-      btn.innerHTML       = '<span class="lnav-icon" aria-hidden="true">◇</span>' +
-                            '<span class="lnav-label">' + escHtml(panel.name) + '</span>';
-      btn.addEventListener('click', function () { toggleLeftPanel(panelId); });
-      el.gmcpPanelBtns.appendChild(btn);
+      btn.className     = 'panel-nav-btn';
+      btn.dataset.panel = panelId;
+      btn.type          = 'button';
+      btn.title         = panel.name;
+      btn.innerHTML     = '<span class="pnav-icon" aria-hidden="true">&#9671;</span>' +
+                          '<span class="pnav-label">' + escHtml(panel.name) + '</span>';
+      btn.addEventListener('click', function () { togglePanel(panelId); });
+
+      if (side === 'right') {
+        el.rightPanelBtns.appendChild(btn);
+      } else {
+        el.leftPanelBtns.appendChild(btn);
+      }
 
       /* Panel element */
-      var div = document.createElement('div');
-      div.className = 'lpanel';
-      div.id        = 'lpanel-' + panelId;
+      var div  = document.createElement('div');
+      div.className = 'panel';
+      div.id        = 'panel-' + panelId;
 
       var head = document.createElement('div');
-      head.className = 'lpanel-head';
+      head.className = 'panel-head';
       head.innerHTML = '<span>' + escHtml(panel.name) + '</span>' +
-                       '<button class="lpanel-close" type="button" title="Close">&#x2715;</button>';
-      head.querySelector('.lpanel-close').addEventListener('click', function () {
-        closeLeftPanel(panelId);
-      });
+                       '<button class="panel-close" type="button" title="Close">&#x2715;</button>';
+      head.querySelector('.panel-close').addEventListener('click', function () { closePanel(panelId); });
 
       var body = document.createElement('div');
-      body.className  = 'lpanel-body ph-centered';
+      body.className = 'panel-body ph-centered';
       body.dataset.gmcpPanelId = panel.id;
-      body.innerHTML  = '<div class="ph-icon" aria-hidden="true">&#9671;</div>' +
-                        '<div class="ph-title">' + escHtml(panel.name) + '</div>' +
-                        '<div class="ph-sub">Awaiting GMCP<br>' + escHtml(panel.gmcpPath || 'no path set') + '</div>';
+      body.innerHTML = '<div class="ph-icon" aria-hidden="true">&#9671;</div>' +
+                       '<div class="ph-title">' + escHtml(panel.name) + '</div>' +
+                       '<div class="ph-sub">Awaiting GMCP<br>' + escHtml(panel.gmcpPath || 'no path set') + '</div>';
 
       div.appendChild(head);
       div.appendChild(body);
-      el.gmcpPanels.appendChild(div);
+
+      if (side === 'right') {
+        el.rightGmcpPanels.appendChild(div);
+      } else {
+        el.leftGmcpPanels.appendChild(div);
+      }
     });
 
-    /* Re-apply open/close state so new panels honour saved setting */
-    applyLeftPanelState();
+    /* Separator visibility (applyPanelState also handles this, but set it here too) */
+    el.rnavSep.hidden = !el.rightPanelBtns.children.length;
   }
 
   /* ── Aliases ─────────────────────────────────────────────── */
@@ -458,12 +579,8 @@
     el.aliasList.innerHTML = '';
     state.settings.aliases.forEach(function (a, idx) {
       var card = makeItemCard('alias', !!a.enabled, idx, state.settings.aliases);
-      card.appendChild(makeItemField('Pattern (regex)', 'text', a.pattern || '', function (v) {
-        a.pattern = v; saveSettings();
-      }));
-      card.appendChild(makeItemField('Replacement', 'text', a.replacement || '', function (v) {
-        a.replacement = v; saveSettings();
-      }));
+      card.appendChild(makeItemField('Pattern (regex)', 'text', a.pattern || '', function (v) { a.pattern = v; saveSettings(); }));
+      card.appendChild(makeItemField('Replacement', 'text', a.replacement || '', function (v) { a.replacement = v; saveSettings(); }));
       el.aliasList.appendChild(card);
     });
   }
@@ -474,13 +591,8 @@
     el.triggerList.innerHTML = '';
     state.settings.triggers.forEach(function (t, idx) {
       var card = makeItemCard('trigger', !!t.enabled, idx, state.settings.triggers);
-
-      card.appendChild(makeItemField('Pattern (regex)', 'text', t.pattern || '', function (v) {
-        t.pattern = v; saveSettings();
-      }));
-      card.appendChild(makeItemField('Flags', 'text', t.flags || '', function (v) {
-        t.flags = v; saveSettings();
-      }));
+      card.appendChild(makeItemField('Pattern (regex)', 'text', t.pattern || '', function (v) { t.pattern = v; saveSettings(); }));
+      card.appendChild(makeItemField('Flags', 'text', t.flags || '', function (v) { t.flags = v; saveSettings(); }));
 
       var row = document.createElement('div');
       row.className = 'item-card-row';
@@ -498,10 +610,7 @@
       row.appendChild(sel);
       card.appendChild(row);
 
-      card.appendChild(makeItemField('Value', 'text', t.value || '', function (v) {
-        t.value = v; saveSettings();
-      }));
-
+      card.appendChild(makeItemField('Value', 'text', t.value || '', function (v) { t.value = v; saveSettings(); }));
       el.triggerList.appendChild(card);
     });
   }
@@ -512,15 +621,9 @@
     el.macroList.innerHTML = '';
     state.settings.macros.forEach(function (m, idx) {
       var card = makeItemCard('macro', !!m.enabled, idx, state.settings.macros);
-      card.appendChild(makeItemField('Label', 'text', m.label || '', function (v) {
-        m.label = v; saveAndRefresh();
-      }));
-      card.appendChild(makeItemField('Command', 'text', m.command || '', function (v) {
-        m.command = v; saveAndRefresh();
-      }));
-      card.appendChild(makeItemField('Hotkey (e.g. Alt+1)', 'text', m.hotkey || '', function (v) {
-        m.hotkey = normalizeHotkey(v); saveAndRefresh();
-      }));
+      card.appendChild(makeItemField('Label',   'text', m.label   || '', function (v) { m.label   = v; saveAndRefresh(); }));
+      card.appendChild(makeItemField('Command', 'text', m.command || '', function (v) { m.command = v; saveAndRefresh(); }));
+      card.appendChild(makeItemField('Hotkey',  'text', m.hotkey  || '', function (v) { m.hotkey  = normalizeHotkey(v); saveAndRefresh(); }));
       el.macroList.appendChild(card);
     });
   }
@@ -530,7 +633,7 @@
     state.settings.macros.forEach(function (m) {
       if (!m.enabled || !m.command) return;
       var btn = document.createElement('button');
-      btn.type      = 'button';
+      btn.type = 'button';
       btn.className = 'macro-btn';
       btn.textContent = m.label || m.command;
       if (m.hotkey) btn.title = m.hotkey + ': ' + m.command;
@@ -560,7 +663,7 @@
       })(i, pick);
 
       var lbl = document.createElement('div');
-      lbl.className   = 'color-swatch-label';
+      lbl.className = 'color-swatch-label';
       lbl.textContent = String(i);
 
       wrap.appendChild(pick);
@@ -570,7 +673,7 @@
   }
 
   /* ═══════════════════════════════════════════════════════════════
-     ITEM CARD BUILDER (shared by aliases / triggers / macros / gmcp)
+     ITEM CARD BUILDER
      ═══════════════════════════════════════════════════════════════ */
 
   function makeItemCard(type, enabled, idx, list) {
@@ -581,27 +684,17 @@
     actions.className = 'item-card-actions';
 
     var chk = document.createElement('input');
-    chk.type    = 'checkbox';
-    chk.checked = enabled;
-    chk.title   = 'Enable';
-    chk.addEventListener('change', function () {
-      list[idx].enabled = !!chk.checked;
-      saveAndRefresh();
-    });
+    chk.type = 'checkbox'; chk.checked = enabled; chk.title = 'Enable';
+    chk.addEventListener('change', function () { list[idx].enabled = !!chk.checked; saveAndRefresh(); });
 
     var lbl = document.createElement('span');
-    lbl.className   = 'item-label';
+    lbl.className = 'item-label';
     lbl.textContent = type + ' #' + (idx + 1);
 
     var rmBtn = document.createElement('button');
-    rmBtn.type      = 'button';
-    rmBtn.className = 'del';
-    rmBtn.title     = 'Delete';
+    rmBtn.type = 'button'; rmBtn.className = 'del'; rmBtn.title = 'Delete';
     rmBtn.textContent = '\u2715';
-    rmBtn.addEventListener('click', function () {
-      list.splice(idx, 1);
-      saveAndRefresh();
-    });
+    rmBtn.addEventListener('click', function () { list.splice(idx, 1); saveAndRefresh(); });
 
     actions.appendChild(chk);
     actions.appendChild(lbl);
@@ -613,16 +706,11 @@
   function makeItemField(labelText, inputType, value, onChange) {
     var row = document.createElement('div');
     row.className = 'item-card-row';
-
     var lbl = document.createElement('label');
     lbl.textContent = labelText;
-
     var inp = document.createElement('input');
-    inp.type        = inputType;
-    inp.value       = value;
-    inp.placeholder = labelText;
+    inp.type = inputType; inp.value = value; inp.placeholder = labelText;
     inp.addEventListener('change', function () { onChange(inp.value); });
-
     row.appendChild(lbl);
     row.appendChild(inp);
     return row;
@@ -641,41 +729,25 @@
   function connectMud(mudId) {
     var mud = LOCKED_MUDS.find(function (m) { return m.id === mudId; });
     if (!mud) { appendSystem('Unknown server profile.'); return; }
-
     disconnect();
     state.selectedMudId = mudId;
-
     setConnectionState('connecting');
     appendSystem('Connecting to ' + mud.name + ' (' + mud.host + ':' + mud.port + ')\u2026');
-
     try {
       state.ws = new WebSocket(bridgeUrl());
-    } catch (err) {
-      appendSystem('WebSocket open failed.');
-      setConnectionState('offline');
-      return;
+    } catch (_) {
+      appendSystem('WebSocket open failed.'); setConnectionState('offline'); return;
     }
-
     state.ws.addEventListener('open', function () {
       sendWs({ type: 'connect', host: mud.host, port: mud.port, tls: !!mud.tls });
-      setConnectionState('online');
-      startKeepalive();
+      setConnectionState('online'); startKeepalive();
     });
-
-    state.ws.addEventListener('message', function (e) {
-      handleBridgeMessage(e.data);
-    });
-
+    state.ws.addEventListener('message', function (e) { handleBridgeMessage(e.data); });
     state.ws.addEventListener('close', function () {
-      stopKeepalive();
-      setConnectionState('offline');
-      appendSystem('Bridge closed.');
-      state.ws = null;
+      stopKeepalive(); setConnectionState('offline');
+      appendSystem('Bridge closed.'); state.ws = null;
     });
-
-    state.ws.addEventListener('error', function () {
-      appendSystem('WebSocket error.');
-    });
+    state.ws.addEventListener('error', function () { appendSystem('WebSocket error.'); });
   }
 
   function disconnect() {
@@ -683,15 +755,14 @@
     if (!state.ws) return;
     try { sendWs({ type: 'disconnect' }); } catch (_) {}
     try { state.ws.close(); } catch (_) {}
-    state.ws = null;
-    setConnectionState('offline');
+    state.ws = null; setConnectionState('offline');
   }
 
   function setConnectionState(status) {
-    state.connected            = (status === 'online');
+    state.connected = (status === 'online');
     var labels = { online: '\u25CF Online', offline: '\u25CF Offline', connecting: '\u25CC Connecting\u2026' };
-    el.connStatus.textContent  = labels[status] || '\u25CF Offline';
-    el.connStatus.className    = status;
+    el.connStatus.textContent = labels[status] || '\u25CF Offline';
+    el.connStatus.className   = status;
   }
 
   function sendWs(payload) {
@@ -701,15 +772,12 @@
 
   function startKeepalive() {
     stopKeepalive();
-    state.keepaliveTimer = setInterval(function () {
-      sendWs({ type: 'ping', t: Date.now() });
-    }, 30000);
+    state.keepaliveTimer = setInterval(function () { sendWs({ type: 'ping', t: Date.now() }); }, 30000);
   }
 
   function stopKeepalive() {
     if (!state.keepaliveTimer) return;
-    clearInterval(state.keepaliveTimer);
-    state.keepaliveTimer = null;
+    clearInterval(state.keepaliveTimer); state.keepaliveTimer = null;
   }
 
   /* ═══════════════════════════════════════════════════════════════
@@ -719,33 +787,21 @@
   function handleBridgeMessage(raw) {
     var msg;
     try { msg = JSON.parse(raw); } catch (_) { appendSystem('Invalid bridge payload.'); return; }
-
     if (msg.type === 'status')       { appendSystem(msg.message || 'status'); return; }
     if (msg.type === 'data')         { ingestMudText(msg.data || ''); return; }
     if (msg.type === 'pong')         { return; }
     if (msg.type === 'disconnected') { appendSystem('MUD disconnected.'); return; }
-    /* GMCP — planned: {type:'gmcp', package:'Char.Vitals', data:{hp,mp,mv}} */
     if (msg.type === 'gmcp')         { handleGmcp(msg.package, msg.data); return; }
   }
 
-  /* ── GMCP dispatcher ─────────────────────────────────────── */
-
   function handleGmcp(pkg, data) {
     if (!pkg || !data) return;
-
-    /* Char.Vitals — HP / mana / movement */
-    if (pkg === 'Char.Vitals') {
-      updateVitals(data);
-      return;
-    }
-
-    /* Route to any matching user-defined GMCP panel */
+    if (pkg === 'Char.Vitals') { updateVitals(data); return; }
     state.settings.gmcpPanels.forEach(function (panel) {
       if (!panel.enabled || panel.gmcpPath !== pkg) return;
-      var body = el.gmcpPanels.querySelector('[data-gmcp-panel-id="' + panel.id + '"]');
+      var body = document.querySelector('[data-gmcp-panel-id="' + panel.id + '"]');
       if (!body) return;
-      /* Simple JSON display; replace with richer rendering as needed */
-      body.className  = 'lpanel-body';
+      body.className = 'panel-body';
       body.textContent = JSON.stringify(data, null, 2);
     });
   }
@@ -765,23 +821,16 @@
     var text  = state.lineCarry + chunk;
     var lines = text.split(/\r?\n/);
     var trailing = lines.pop() || '';
-
     if (state.partialRow) {
       if (lines.length > 0) {
         var first = lines.shift();
         renderRowContent(state.partialRow, first, runTriggers(first));
         state.partialRow = null;
       } else {
-        state.lineCarry = trailing;
-        upsertPartialRow(state.lineCarry);
-        return;
+        state.lineCarry = trailing; upsertPartialRow(state.lineCarry); return;
       }
     }
-
-    lines.forEach(function (line) {
-      appendAnsiLine(line, runTriggers(line));
-    });
-
+    lines.forEach(function (line) { appendAnsiLine(line, runTriggers(line)); });
     state.lineCarry = trailing;
     if (state.lineCarry) upsertPartialRow(state.lineCarry);
   }
@@ -802,7 +851,7 @@
           sendCommand(t.value, { suppressEcho: true, skipHistory: true });
           setTimeout(function () { state.triggerGuard = Math.max(0, state.triggerGuard - 1); }, 200);
         }
-      } catch (_) { /* ignore invalid user regex */ }
+      } catch (_) {}
     });
     return highlighted;
   }
@@ -821,8 +870,7 @@
     row.innerHTML = '';
     if (state.settings.timestamps) {
       var ts = document.createElement('span');
-      ts.className   = 'ts';
-      ts.textContent = '[' + nowTime() + ']';
+      ts.className = 'ts'; ts.textContent = '[' + nowTime() + ']';
       row.appendChild(ts);
     }
     row.appendChild(window.AnsiRenderer.renderAnsiLine(line, state.ansiPalette));
@@ -830,10 +878,7 @@
 
   function upsertPartialRow(line) {
     if (!line) return;
-    if (state.partialRow) {
-      renderRowContent(state.partialRow, line, false);
-      return;
-    }
+    if (state.partialRow) { renderRowContent(state.partialRow, line, false); return; }
     var row = document.createElement('div');
     renderRowContent(row, line, false);
     var atBottom = el.terminal.scrollTop + el.terminal.clientHeight >= el.terminal.scrollHeight - 40;
@@ -845,60 +890,40 @@
 
   function trimTerminal() {
     var max = 2000;
-    while (el.terminal.childNodes.length > max) {
-      el.terminal.removeChild(el.terminal.firstChild);
-    }
+    while (el.terminal.childNodes.length > max) el.terminal.removeChild(el.terminal.firstChild);
   }
 
-  function appendSystem(text) {
-    appendAnsiLine('\x1b[1;36m[system]\x1b[0m ' + text, false);
-  }
-
-  function appendOutgoing(text) {
-    appendAnsiLine('\x1b[1;35m>\x1b[0m ' + text, false);
-  }
+  function appendSystem(text)   { appendAnsiLine('\x1b[1;36m[system]\x1b[0m ' + text, false); }
+  function appendOutgoing(text) { appendAnsiLine('\x1b[1;35m>\x1b[0m ' + text, false); }
 
   /* ═══════════════════════════════════════════════════════════════
      COMMAND SENDING
      ═══════════════════════════════════════════════════════════════ */
 
   function submitInputCommand(raw) {
-    var cmd = typeof raw === 'string' ? raw : String(raw || '');
     el.cmdInput.value = '';
-    sendCommand(cmd);
+    sendCommand(String(raw || ''));
   }
 
   function sendCommand(cmd, opts) {
-    if (state.partialRow) {
-      state.partialRow = null;
-      state.lineCarry  = '';
-    }
-
+    if (state.partialRow) { state.partialRow = null; state.lineCarry = ''; }
     opts = opts || {};
-    var suppressEcho = !!opts.suppressEcho;
-    var skipHistory  = !!opts.skipHistory;
-    var skipAliases  = !!opts.skipAliases;
-
-    var source = typeof cmd === 'string' ? cmd : String(cmd || '');
-    var out    = skipAliases ? source : applyAliases(source);
+    var source = String(cmd || '');
+    var out    = opts.skipAliases ? source : applyAliases(source);
     if (typeof out !== 'string') out = String(out || '');
 
     if (source.trim() === '' && out.trim() === '') {
-      if (!suppressEcho) appendOutgoing('');
-      sendWs({ type: 'input', data: '\n' });
-      return;
+      if (!opts.suppressEcho) appendOutgoing('');
+      sendWs({ type: 'input', data: '\n' }); return;
     }
 
     var parts = splitStacked(out);
-    if (parts.length === 0) return;
+    if (!parts.length) return;
 
-    if (!skipHistory) {
-      pushHistory(source);
-      state.lastCmd = source;
-    }
+    if (!opts.skipHistory) { pushHistory(source); state.lastCmd = source; }
 
     parts.forEach(function (part) {
-      if (!suppressEcho) appendOutgoing(part);
+      if (!opts.suppressEcho) appendOutgoing(part);
       sendWs({ type: 'input', data: part + '\n' });
     });
   }
@@ -910,16 +935,15 @@
       try {
         var re = new RegExp(a.pattern);
         if (re.test(result)) result = result.replace(re, a.replacement || '');
-      } catch (_) { /* ignore invalid regex */ }
+      } catch (_) {}
     });
     return result;
   }
 
   function splitStacked(text) {
-    var raw = typeof text === 'string' ? text : String(text || '');
     var sep = sanitizeStackSep(state.settings && state.settings.stackSeparator);
-    if (!sep) return [raw];
-    return raw.split(sep).map(function (p) { return p.trim(); }).filter(Boolean);
+    if (!sep) return [String(text || '')];
+    return String(text || '').split(sep).map(function (p) { return p.trim(); }).filter(Boolean);
   }
 
   /* ═══════════════════════════════════════════════════════════════
@@ -930,7 +954,6 @@
     if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
     if (!state.cmdHistory.length) return;
     e.preventDefault();
-
     if (e.key === 'ArrowUp') {
       if (state.historyIdx < 0) state.historyIdx = state.cmdHistory.length;
       state.historyIdx = Math.max(0, state.historyIdx - 1);
@@ -938,9 +961,7 @@
       if (state.historyIdx < 0) return;
       state.historyIdx = Math.min(state.cmdHistory.length, state.historyIdx + 1);
       if (state.historyIdx === state.cmdHistory.length) {
-        state.historyIdx    = -1;
-        el.cmdInput.value   = '';
-        return;
+        state.historyIdx = -1; el.cmdInput.value = ''; return;
       }
     }
     el.cmdInput.value = state.cmdHistory[state.historyIdx] || '';
@@ -949,8 +970,7 @@
   function pushHistory(cmd) {
     var clean = String(cmd || '').trim();
     if (!clean) return;
-    var last = state.cmdHistory[state.cmdHistory.length - 1];
-    if (last === clean) { state.historyIdx = -1; return; }
+    if (state.cmdHistory[state.cmdHistory.length - 1] === clean) { state.historyIdx = -1; return; }
     state.cmdHistory.push(clean);
     if (state.cmdHistory.length > 200) state.cmdHistory.shift();
     state.historyIdx = -1;
@@ -963,16 +983,14 @@
   function onGlobalKeydown(e) {
     if (e.defaultPrevented) return;
     var active = document.activeElement;
-    var typing = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT');
-    if (typing) return;
+    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) return;
     var combo = eventToCombo(e);
     if (!combo) return;
     var hit = state.settings.macros.find(function (m) {
       return m.enabled && m.command && normalizeHotkey(m.hotkey) === combo;
     });
     if (!hit) return;
-    e.preventDefault();
-    sendCommand(hit.command);
+    e.preventDefault(); sendCommand(hit.command);
   }
 
   function eventToCombo(e) {
@@ -985,8 +1003,7 @@
     if (e.altKey)   parts.push('Alt');
     if (e.shiftKey) parts.push('Shift');
     if (e.metaKey)  parts.push('Meta');
-    parts.push(key);
-    return parts.join('+');
+    parts.push(key); return parts.join('+');
   }
 
   function normalizeHotkey(text) {
@@ -998,9 +1015,9 @@
     var key = '';
     parts.forEach(function (p) {
       var n = p.toLowerCase();
-      if (n === 'ctrl' || n === 'control')                    flags.ctrl  = true;
-      else if (n === 'alt' || n === 'option')                 flags.alt   = true;
-      else if (n === 'shift')                                  flags.shift = true;
+      if (n === 'ctrl' || n === 'control')                     flags.ctrl  = true;
+      else if (n === 'alt' || n === 'option')                  flags.alt   = true;
+      else if (n === 'shift')                                   flags.shift = true;
       else if (n === 'meta' || n === 'cmd' || n === 'command') flags.meta  = true;
       else key = p;
     });
@@ -1011,8 +1028,7 @@
     if (flags.alt)   out.push('Alt');
     if (flags.shift) out.push('Shift');
     if (flags.meta)  out.push('Meta');
-    out.push(key);
-    return out.join('+');
+    out.push(key); return out.join('+');
   }
 
   /* ═══════════════════════════════════════════════════════════════
@@ -1024,11 +1040,8 @@
     var blob = new Blob([json], { type: 'application/json' });
     var url  = URL.createObjectURL(blob);
     var a    = document.createElement('a');
-    a.href     = url;
-    a.download = 'freign-play2-settings.json';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    a.href = url; a.download = 'freign-play2-settings.json';
+    document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
   }
 
@@ -1040,33 +1053,24 @@
       try {
         var parsed = JSON.parse(String(reader.result || '{}'));
         state.settings = mergeSettings(DEFAULT_SETTINGS, parsed);
-        rebuildPalette();
-        saveAndRefresh();
+        rebuildPalette(); saveAndRefresh();
         appendSystem('Settings imported.');
-      } catch (_) {
-        appendSystem('Settings import failed: invalid JSON.');
-      }
+      } catch (_) { appendSystem('Settings import failed: invalid JSON.'); }
     };
-    reader.readAsText(file);
-    e.target.value = '';
+    reader.readAsText(file); e.target.value = '';
   }
 
   function resetLocalSettings() {
-    var ok = window.confirm('Reset all FREIGN Play 2 settings? This cannot be undone.');
-    if (!ok) return;
-    disconnect();
-    clearSavedKeys();
+    if (!window.confirm('Reset all FREIGN Play 2 settings? This cannot be undone.')) return;
+    disconnect(); clearSavedKeys();
     state.settings   = clone(DEFAULT_SETTINGS);
-    state.cmdHistory = [];
-    state.historyIdx = -1;
-    state.lineCarry  = '';
-    state.lastCmd    = '';
+    state.cmdHistory = []; state.historyIdx = -1;
+    state.lineCarry  = ''; state.lastCmd    = '';
     if (state.partialRow && state.partialRow.parentNode) {
       state.partialRow.parentNode.removeChild(state.partialRow);
     }
     state.partialRow = null;
-    rebuildPalette();
-    saveAndRefresh();
+    rebuildPalette(); saveAndRefresh();
     appendSystem('Settings reset to defaults.');
   }
 
@@ -1088,12 +1092,19 @@
     incoming = incoming || {};
 
     out.theme          = resolveTheme(incoming.theme || base.theme);
+    out.font           = (FONTS.indexOf(incoming.font) >= 0) ? incoming.font : base.font;
+    out.layoutStyle    = oneOf(incoming.layoutStyle, ['block', 'rounded'], base.layoutStyle);
     out.timestamps     = typeof incoming.timestamps === 'boolean' ? incoming.timestamps : base.timestamps;
     out.wrapLines      = typeof incoming.wrapLines   === 'boolean' ? incoming.wrapLines  : base.wrapLines;
     out.stackSeparator = sanitizeStackSep(incoming.stackSeparator);
     out.bridgeUrl      = typeof incoming.bridgeUrl   === 'string'  ? incoming.bridgeUrl  : base.bridgeUrl;
+    out.openPanels     = Array.isArray(incoming.openPanels) ? incoming.openPanels.filter(function(v) { return typeof v === 'string'; }) : clone(base.openPanels);
 
-    out.openPanels = Array.isArray(incoming.openPanels) ? incoming.openPanels : clone(base.openPanels);
+    out.panelSides = {};
+    var src = incoming.panelSides || {};
+    BUILTIN_PANELS.forEach(function (bp) {
+      out.panelSides[bp.id] = oneOf(src[bp.id], ['left', 'right'], 'left');
+    });
 
     out.aliases = Array.isArray(incoming.aliases)
       ? incoming.aliases.map(function (a) {
@@ -1104,11 +1115,8 @@
     out.triggers = Array.isArray(incoming.triggers)
       ? incoming.triggers.map(function (t) {
           return {
-            enabled: t.enabled !== false,
-            pattern: String(t.pattern || ''),
-            flags:   String(t.flags   || ''),
-            action:  oneOf(t.action, ['highlight', 'send', 'notify'], 'highlight'),
-            value:   String(t.value   || ''),
+            enabled: t.enabled !== false, pattern: String(t.pattern || ''), flags: String(t.flags || ''),
+            action: oneOf(t.action, ['highlight', 'send', 'notify'], 'highlight'), value: String(t.value || ''),
           };
         })
       : [];
@@ -1121,7 +1129,10 @@
 
     out.gmcpPanels = Array.isArray(incoming.gmcpPanels)
       ? incoming.gmcpPanels.map(function (p) {
-          return { id: p.id || uid(), name: String(p.name || 'Panel'), gmcpPath: String(p.gmcpPath || ''), enabled: p.enabled !== false };
+          return {
+            id: p.id || uid(), name: String(p.name || 'Panel'), gmcpPath: String(p.gmcpPath || ''),
+            enabled: p.enabled !== false, side: oneOf(p.side, ['left', 'right'], 'left'),
+          };
         })
       : [];
 
@@ -1138,19 +1149,14 @@
 
   function rebuildPalette() {
     var p16 = [];
-    for (var i = 0; i < 16; i++) {
-      p16[i] = state.settings.palette16[String(i)] || DEFAULT_16[i];
-    }
+    for (var i = 0; i < 16; i++) p16[i] = state.settings.palette16[String(i)] || DEFAULT_16[i];
     state.ansiPalette = window.AnsiRenderer.buildXtermPalette(p16);
   }
 
   function resolveTheme(value) {
-    if (themeApi && typeof themeApi.resolveThemeId === 'function') {
-      return themeApi.resolveThemeId(value);
-    }
+    if (themeApi && typeof themeApi.resolveThemeId === 'function') return themeApi.resolveThemeId(value);
     var raw = String(value || '').toLowerCase();
-    if (raw === 'dark')      return 'onyx';
-    if (raw === 'parchment') return 'pearl';
+    if (raw === 'dark') return 'onyx'; if (raw === 'parchment') return 'pearl';
     return raw || 'amethyst';
   }
 
@@ -1159,17 +1165,13 @@
     return s ? s.slice(0, 4) : ';';
   }
 
-  function isHexColor(v)  { return typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v); }
+  function isHexColor(v) { return typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v); }
   function oneOf(v, vals, d) { return vals.indexOf(v) >= 0 ? v : d; }
-  function clone(v)          { return JSON.parse(JSON.stringify(v)); }
-  function nowTime()         { return new Date().toLocaleTimeString('en-US', { hour12: false }); }
-  function uid()             { return Math.random().toString(36).slice(2, 10); }
-  function escHtml(s)        {
-    return String(s || '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+  function clone(v)   { return JSON.parse(JSON.stringify(v)); }
+  function nowTime()  { return new Date().toLocaleTimeString('en-US', { hour12: false }); }
+  function uid()      { return Math.random().toString(36).slice(2, 10); }
+  function escHtml(s) {
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
 })();

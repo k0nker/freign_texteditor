@@ -4,82 +4,87 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FREIGN Play</title>
+  <!-- Google Fonts: open-source monospace collection -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@400;700&family=Courier+Prime:wght@400;700&family=Fira+Code:wght@400;700&family=IBM+Plex+Mono:wght@400;700&family=Inconsolata:wght@400;700&family=JetBrains+Mono:wght@400;700&family=Noto+Sans+Mono:wght@400;700&family=PT+Mono&family=Roboto+Mono:wght@400;700&family=Share+Tech+Mono&family=Source+Code+Pro:wght@400;700&family=Space+Mono:wght@400;700&display=swap" />
   <link rel="stylesheet" href="../site-shell.css?v=2" />
-  <link rel="stylesheet" href="style.css?v=2" />
+  <link rel="stylesheet" href="style.css?v=3" />
 </head>
 <body data-theme="amethyst">
   <div id="fr-shellbar-mount" data-active-nav="play"></div>
 
   <!--
     Layout: [left-rail] [center-terminal] [right-rail]
-    Left rail  = collapsible panels (map, channels, party, GMCP panels)
-    Center     = terminal output, command input, vitals topbar
-    Right rail = narrow icon strip + slide-out settings drawer
+    Left rail  = collapsible panels (panels whose side = left)
+    Center     = terminal output, vitals bar, command input
+    Right rail = collapsible panels (side = right) + icon strip + settings drawer
+    Default: map/channels/party on left; all can be moved via Config
   -->
-  <div id="workspace">
+  <div id="workspace" data-layout="block">
 
     <!-- LEFT PANEL RAIL -->
     <div id="left-rail">
       <nav id="left-nav" aria-label="Side panels">
-        <button class="lnav-btn active" data-panel="map"      type="button" title="Map">
-          <span class="lnav-icon" aria-hidden="true">&#8862;</span>
-          <span class="lnav-label">Map</span>
+        <button class="panel-nav-btn" data-panel="map"      type="button" title="Map">
+          <span class="pnav-icon" aria-hidden="true">&#8862;</span>
+          <span class="pnav-label">Map</span>
         </button>
-        <button class="lnav-btn" data-panel="channels" type="button" title="Channels">
-          <span class="lnav-icon" aria-hidden="true">&#8779;</span>
-          <span class="lnav-label">Channels</span>
+        <button class="panel-nav-btn" data-panel="channels" type="button" title="Channels">
+          <span class="pnav-icon" aria-hidden="true">&#8779;</span>
+          <span class="pnav-label">Channels</span>
         </button>
-        <button class="lnav-btn" data-panel="party"    type="button" title="Party">
-          <span class="lnav-icon" aria-hidden="true">&#8277;</span>
-          <span class="lnav-label">Party</span>
+        <button class="panel-nav-btn" data-panel="party"    type="button" title="Party">
+          <span class="pnav-icon" aria-hidden="true">&#8277;</span>
+          <span class="pnav-label">Party</span>
         </button>
-        <!-- User-defined GMCP panel buttons appended here by JS -->
-        <div id="gmcp-panel-btns"></div>
+        <!-- Custom GMCP panel buttons injected by JS -->
+        <div id="left-panel-btns"></div>
       </nav>
 
       <div id="left-panels">
 
         <!-- Map panel (placeholder until GMCP Room.Info) -->
-        <div class="lpanel active" id="lpanel-map">
-          <div class="lpanel-head">
+        <div class="panel active" id="panel-map">
+          <div class="panel-head">
             <span>Map</span>
-            <button class="lpanel-close" data-panel="map" type="button" title="Close">&#x2715;</button>
+            <button class="panel-close" data-panel="map" type="button" title="Close">&#x2715;</button>
           </div>
-          <div class="lpanel-body map-placeholder">
+          <div class="panel-body map-placeholder">
             <div class="ph-icon" aria-hidden="true">&#8862;</div>
             <div class="ph-title">Mapper</div>
             <div class="ph-sub">Awaiting GMCP<br>room data</div>
           </div>
         </div>
 
-        <!-- Channels panel (placeholder until GMCP channel data) -->
-        <div class="lpanel" id="lpanel-channels">
-          <div class="lpanel-head">
+        <!-- Channels panel -->
+        <div class="panel" id="panel-channels">
+          <div class="panel-head">
             <span>Channels</span>
-            <button class="lpanel-close" data-panel="channels" type="button" title="Close">&#x2715;</button>
+            <button class="panel-close" data-panel="channels" type="button" title="Close">&#x2715;</button>
           </div>
-          <div class="lpanel-body ph-centered" id="channels-log" aria-live="polite">
+          <div class="panel-body ph-centered" id="channels-log" aria-live="polite">
             <div class="ph-icon" aria-hidden="true">&#8779;</div>
             <div class="ph-title">Channels</div>
             <div class="ph-sub">Awaiting GMCP<br>channel data</div>
           </div>
         </div>
 
-        <!-- Party panel (placeholder until GMCP group data) -->
-        <div class="lpanel" id="lpanel-party">
-          <div class="lpanel-head">
+        <!-- Party panel -->
+        <div class="panel" id="panel-party">
+          <div class="panel-head">
             <span>Party</span>
-            <button class="lpanel-close" data-panel="party" type="button" title="Close">&#x2715;</button>
+            <button class="panel-close" data-panel="party" type="button" title="Close">&#x2715;</button>
           </div>
-          <div class="lpanel-body ph-centered" id="party-list">
+          <div class="panel-body ph-centered" id="party-list">
             <div class="ph-icon" aria-hidden="true">&#8277;</div>
             <div class="ph-title">Party</div>
             <div class="ph-sub">Awaiting GMCP<br>group data</div>
           </div>
         </div>
 
-        <!-- User-defined GMCP panels injected by JS -->
-        <div id="gmcp-panels"></div>
+        <!-- Left-side custom GMCP panels injected by JS -->
+        <div id="left-gmcp-panels"></div>
 
       </div><!-- /left-panels -->
     </div><!-- /left-rail -->
@@ -87,31 +92,12 @@
     <!-- CENTER TERMINAL -->
     <div id="center">
 
-      <!-- Top bar: brand, GMCP vitals strip, connection status + buttons -->
+      <!-- Top bar: brand + connection status/buttons -->
       <header id="topbar">
         <div id="topbar-left">
           <span class="brand-text">FREIGN</span>
           <span class="brand-sep" aria-hidden="true">//</span>
-
-          <!-- Vitals strip: hidden until Char.Vitals GMCP data arrives -->
-          <div id="vitals-strip" aria-label="Vitals" hidden>
-            <div class="vital" title="Hit Points">
-              <span class="vital-label">HP</span>
-              <span class="vital-val" id="v-hp-val">&#8212;</span>
-            </div>
-            <div class="vital-sep" aria-hidden="true"></div>
-            <div class="vital" title="Mana">
-              <span class="vital-label">MP</span>
-              <span class="vital-val" id="v-mp-val">&#8212;</span>
-            </div>
-            <div class="vital-sep" aria-hidden="true"></div>
-            <div class="vital" title="Movement">
-              <span class="vital-label">MV</span>
-              <span class="vital-val" id="v-mv-val">&#8212;</span>
-            </div>
-          </div>
         </div>
-
         <div id="topbar-right">
           <span id="conn-status" class="offline" aria-live="polite">&#9679; Offline</span>
           <button id="btn-public"     type="button" class="hdr-btn">Public</button>
@@ -125,6 +111,24 @@
 
       <!-- Macro quick-access bar (hidden when no macros defined) -->
       <div id="macro-bar" aria-label="Macro shortcuts"></div>
+
+      <!-- Vitals bar: floats above the command input; hidden until Char.Vitals GMCP data arrives -->
+      <div id="vitals-strip" aria-label="Character Vitals" hidden>
+        <div class="vbar-vital" title="Hit Points">
+          <span class="vbar-label">HP</span>
+          <span class="vbar-val" id="v-hp-val">&#8212;</span>
+        </div>
+        <div class="vbar-sep" aria-hidden="true"></div>
+        <div class="vbar-vital" title="Mana Points">
+          <span class="vbar-label">MP</span>
+          <span class="vbar-val" id="v-mp-val">&#8212;</span>
+        </div>
+        <div class="vbar-sep" aria-hidden="true"></div>
+        <div class="vbar-vital" title="Movement">
+          <span class="vbar-label">MV</span>
+          <span class="vbar-val" id="v-mv-val">&#8212;</span>
+        </div>
+      </div>
 
       <!-- Command input -->
       <form id="cmd-form" autocomplete="off" aria-label="Command input">
@@ -141,8 +145,18 @@
     <!-- RIGHT RAIL -->
     <div id="right-rail">
 
-      <!-- Icon strip: clicking an icon opens/closes the settings drawer -->
-      <nav id="right-nav" aria-label="Settings">
+      <!-- Collapsible right-side panel area (panels whose side = right) -->
+      <div id="right-panels">
+        <!-- Right-side custom GMCP panels injected by JS -->
+        <div id="right-gmcp-panels"></div>
+      </div>
+
+      <!-- Icon strip: panel toggles (top) + settings drawers (bottom) -->
+      <nav id="right-nav" aria-label="Panels and Settings">
+        <!-- Nav buttons for right-side panels injected by JS -->
+        <div id="right-panel-btns"></div>
+        <!-- Separator: only shown when right-panel-btns has children -->
+        <div id="rnav-sep" aria-hidden="true" hidden></div>
         <button class="rnav-btn" data-drawer="connect"  type="button" title="Connection">
           <span class="rnav-icon" aria-hidden="true">&#9889;</span>
           <span class="rnav-label">Connect</span>
@@ -169,7 +183,7 @@
         </button>
       </nav>
 
-      <!-- Settings drawer: slides out over the terminal, closes on outside click -->
+      <!-- Settings drawer: slides out to the left of the icon strip -->
       <div id="settings-drawer" aria-label="Settings" hidden>
         <div id="drawer-header">
           <span id="drawer-title">Settings</span>
@@ -200,6 +214,35 @@
 
           <!-- CONFIGURATION -->
           <div class="drawer-pane" id="dpane-config">
+
+            <div class="dpane-section">
+              <div class="dpane-label">Appearance</div>
+              <div class="field-row">
+                <label for="cfg-font">Font</label>
+                <select id="cfg-font">
+                  <option value="JetBrains Mono">JetBrains Mono</option>
+                  <option value="Fira Code">Fira Code</option>
+                  <option value="Source Code Pro">Source Code Pro</option>
+                  <option value="Roboto Mono">Roboto Mono</option>
+                  <option value="Inconsolata">Inconsolata</option>
+                  <option value="Space Mono">Space Mono</option>
+                  <option value="IBM Plex Mono">IBM Plex Mono</option>
+                  <option value="Noto Sans Mono">Noto Sans Mono</option>
+                  <option value="PT Mono">PT Mono</option>
+                  <option value="Share Tech Mono">Share Tech Mono</option>
+                  <option value="Azeret Mono">Azeret Mono</option>
+                  <option value="Courier Prime">Courier Prime</option>
+                </select>
+              </div>
+              <div class="field-row">
+                <label for="cfg-layout">Layout Style</label>
+                <select id="cfg-layout">
+                  <option value="block">Block (default)</option>
+                  <option value="rounded">Rounded</option>
+                </select>
+              </div>
+            </div>
+
             <div class="dpane-section">
               <div class="dpane-label">Display</div>
               <div class="field-row">
@@ -211,6 +254,7 @@
                 <input id="cfg-wrap" type="checkbox" />
               </div>
             </div>
+
             <div class="dpane-section">
               <div class="dpane-label">Input</div>
               <div class="field-row">
@@ -218,13 +262,21 @@
                 <input id="cfg-stack-sep" type="text" maxlength="4" placeholder=";" />
               </div>
             </div>
+
+            <div class="dpane-section">
+              <div class="dpane-label">Panel Sides</div>
+              <p class="hint-text">Assign each built-in panel to the left or right side. Changes take effect immediately.</p>
+              <div id="builtin-panel-cfg"></div>
+            </div>
+
             <div class="dpane-section">
               <div class="dpane-label">Custom GMCP Panels</div>
-              <p class="hint-text">Add panels that will display data received from specific GMCP packages once the server supports it.</p>
+              <p class="hint-text">Add panels for specific GMCP packages. Choose which side each panel appears on.</p>
               <div id="gmcp-panel-list" class="item-list"></div>
               <button id="add-gmcp-panel" type="button" class="add-btn">+ Add Panel</button>
             </div>
-          </div>
+
+          </div><!-- /dpane-config -->
 
           <!-- ALIASES -->
           <div class="drawer-pane" id="dpane-aliases">
@@ -275,6 +327,6 @@
   <script src="../site-themes.js?v=1" defer></script>
   <script src="../site-shell.js?v=3" defer></script>
   <script src="../play/ansi.js?v=15" defer></script>
-  <script src="app.js?v=2" defer></script>
+  <script src="app.js?v=3" defer></script>
 </body>
 </html>
