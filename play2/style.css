@@ -175,15 +175,16 @@ html, body {
   scrollbar-color: color-mix(in srgb, var(--panel-border) 50%, transparent) transparent;
 }
 
-/* Placeholder content (shown until GMCP data arrives) */
-.lpanel-body.map-placeholder,
-.lpanel-body:has(.ph-icon) {
+/* Placeholder content */
+.map-placeholder,
+.ph-centered {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 6px;
   text-align: center;
+  height: 100%;
 }
 
 .ph-icon {
@@ -256,7 +257,7 @@ html, body {
   flex-shrink: 0;
 }
 
-/* Vitals strip (GMCP-ready, hidden until data) */
+/* Vitals strip (GMCP-ready, hidden until data arrives) */
 #vitals-strip {
   display: flex;
   align-items: center;
@@ -314,6 +315,11 @@ html, body {
 #conn-status.online {
   color: #6dcf8c;
   background: color-mix(in srgb, #3a7a50 22%, transparent);
+}
+
+#conn-status.connecting {
+  color: color-mix(in srgb, var(--accent) 80%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .hdr-btn {
@@ -411,7 +417,6 @@ html, body {
   border-top: 1px solid var(--panel-border);
   background: color-mix(in srgb, var(--panel) 40%, transparent);
   flex-shrink: 0;
-  min-height: 0;
 }
 
 #macro-bar:empty { display: none; }
@@ -589,7 +594,7 @@ html, body {
 #settings-drawer {
   position: absolute;
   top: 0;
-  right: 54px;  /* flush left of the icon rail */
+  right: 54px;
   width: 290px;
   height: 100%;
   display: flex;
@@ -659,7 +664,7 @@ html, body {
 .drawer-pane.active { display: block; }
 
 .dpane-section {
-  padding: 14px 14px 6px;
+  padding: 14px 14px 10px;
   border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 40%, transparent);
 }
 
@@ -737,7 +742,8 @@ html, body {
   gap: 6px;
 }
 
-.full-btn, .row-btns button {
+.full-btn,
+.row-btns button {
   font: inherit;
   font-size: 11px;
   font-weight: 600;
@@ -758,18 +764,21 @@ html, body {
 
 .row-btns button { flex: 1; }
 
-.full-btn:hover, .row-btns button:hover {
+.full-btn:hover,
+.row-btns button:hover {
   color: var(--text);
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
-.full-btn.danger, .row-btns button.danger {
+.full-btn.danger,
+.row-btns button.danger {
   color: #8a3535;
   border-color: #441818;
 }
 
-.full-btn.danger:hover, .row-btns button.danger:hover {
+.full-btn.danger:hover,
+.row-btns button.danger:hover {
   color: #e07070;
   border-color: #994040;
   background: color-mix(in srgb, #992222 12%, transparent);
@@ -796,9 +805,13 @@ html, body {
   background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
 
-/* ── Item cards (alias/trigger/macro/gmcp-panel) ───────────── */
+/* ── Item cards (alias / trigger / macro / gmcp-panel) ─────── */
 
-.item-list { display: flex; flex-direction: column; gap: 8px; }
+.item-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 
 .item-card {
   background: color-mix(in srgb, var(--input-bg) 60%, var(--panel));
@@ -833,8 +846,7 @@ html, body {
 }
 
 .item-card input[type="text"],
-.item-card select,
-.item-card input[type="color"] {
+.item-card select {
   flex: 1;
   font: inherit;
   font-size: 11px;
@@ -858,9 +870,9 @@ html, body {
 
 .item-card-actions {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
   gap: 5px;
-  margin-top: 2px;
+  padding-top: 4px;
 }
 
 .item-card-actions button {
@@ -890,12 +902,24 @@ html, body {
   border-color: #883030;
 }
 
-.item-card input[type="checkbox"] {
+.item-card-actions input[type="checkbox"] {
   width: 13px;
   height: 13px;
   accent-color: var(--accent);
   cursor: pointer;
   flex-shrink: 0;
+}
+
+.item-card-actions .item-label {
+  flex: 1;
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  text-transform: uppercase;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── ANSI color grid ───────────────────────────────────────── */

@@ -11,178 +11,179 @@
   <div id="fr-shellbar-mount" data-active-nav="play"></div>
 
   <!--
-    Layout:
-      [left-rail] [workspace: center-terminal] [right-rail]
-    Left rail  = collapsible panels (map, channels, party, custom GMCP panels)
-    Right rail = icon strip that opens a slide-out settings drawer
+    Layout: [left-rail] [center-terminal] [right-rail]
+    Left rail  = collapsible panels (map, channels, party, GMCP panels)
+    Center     = terminal output, command input, vitals topbar
+    Right rail = narrow icon strip + slide-out settings drawer
   -->
   <div id="workspace">
 
-    <!-- ══ LEFT PANEL RAIL ══════════════════════════════════════ -->
+    <!-- LEFT PANEL RAIL -->
     <div id="left-rail">
-
-      <!-- Panel launch icons -->
-      <nav id="left-nav" aria-label="Panels">
-        <button class="lnav-btn active" data-panel="map" type="button" title="Map">
-          <span class="lnav-icon" aria-hidden="true">⊞</span>
+      <nav id="left-nav" aria-label="Side panels">
+        <button class="lnav-btn active" data-panel="map"      type="button" title="Map">
+          <span class="lnav-icon" aria-hidden="true">&#8862;</span>
           <span class="lnav-label">Map</span>
         </button>
         <button class="lnav-btn" data-panel="channels" type="button" title="Channels">
-          <span class="lnav-icon" aria-hidden="true">≋</span>
+          <span class="lnav-icon" aria-hidden="true">&#8779;</span>
           <span class="lnav-label">Channels</span>
         </button>
-        <button class="lnav-btn" data-panel="party" type="button" title="Party">
-          <span class="lnav-icon" aria-hidden="true">⁕</span>
+        <button class="lnav-btn" data-panel="party"    type="button" title="Party">
+          <span class="lnav-icon" aria-hidden="true">&#8277;</span>
           <span class="lnav-label">Party</span>
         </button>
-        <!-- Dynamically added GMCP panels appear here via JS -->
+        <!-- User-defined GMCP panel buttons appended here by JS -->
         <div id="gmcp-panel-btns"></div>
       </nav>
 
-      <!-- Panel content area -->
       <div id="left-panels">
 
-        <!-- Map panel -->
+        <!-- Map panel (placeholder until GMCP Room.Info) -->
         <div class="lpanel active" id="lpanel-map">
           <div class="lpanel-head">
             <span>Map</span>
-            <button class="lpanel-close" data-panel="map" type="button" title="Close">✕</button>
+            <button class="lpanel-close" data-panel="map" type="button" title="Close">&#x2715;</button>
           </div>
           <div class="lpanel-body map-placeholder">
-            <div class="placeholder-icon" aria-hidden="true">⊞</div>
-            <div class="placeholder-text">Mapper</div>
-            <div class="placeholder-sub">Awaiting GMCP<br>room data</div>
+            <div class="ph-icon" aria-hidden="true">&#8862;</div>
+            <div class="ph-title">Mapper</div>
+            <div class="ph-sub">Awaiting GMCP<br>room data</div>
           </div>
         </div>
 
-        <!-- Channels panel -->
+        <!-- Channels panel (placeholder until GMCP channel data) -->
         <div class="lpanel" id="lpanel-channels">
           <div class="lpanel-head">
             <span>Channels</span>
-            <button class="lpanel-close" data-panel="channels" type="button" title="Close">✕</button>
+            <button class="lpanel-close" data-panel="channels" type="button" title="Close">&#x2715;</button>
           </div>
-          <div class="lpanel-body" id="channels-log" aria-live="polite"></div>
+          <div class="lpanel-body ph-centered" id="channels-log" aria-live="polite">
+            <div class="ph-icon" aria-hidden="true">&#8779;</div>
+            <div class="ph-title">Channels</div>
+            <div class="ph-sub">Awaiting GMCP<br>channel data</div>
+          </div>
         </div>
 
-        <!-- Party panel -->
+        <!-- Party panel (placeholder until GMCP group data) -->
         <div class="lpanel" id="lpanel-party">
           <div class="lpanel-head">
             <span>Party</span>
-            <button class="lpanel-close" data-panel="party" type="button" title="Close">✕</button>
+            <button class="lpanel-close" data-panel="party" type="button" title="Close">&#x2715;</button>
           </div>
-          <div class="lpanel-body" id="party-list">
-            <div class="placeholder-icon" aria-hidden="true">⁕</div>
-            <div class="placeholder-text">Party</div>
-            <div class="placeholder-sub">Awaiting GMCP<br>group data</div>
+          <div class="lpanel-body ph-centered" id="party-list">
+            <div class="ph-icon" aria-hidden="true">&#8277;</div>
+            <div class="ph-title">Party</div>
+            <div class="ph-sub">Awaiting GMCP<br>group data</div>
           </div>
         </div>
 
-        <!-- Dynamic GMCP panels injected by JS -->
+        <!-- User-defined GMCP panels injected by JS -->
         <div id="gmcp-panels"></div>
 
       </div><!-- /left-panels -->
     </div><!-- /left-rail -->
 
-    <!-- ══ CENTER: TERMINAL ══════════════════════════════════════ -->
+    <!-- CENTER TERMINAL -->
     <div id="center">
 
-      <!-- Top bar: brand / vitals / connection -->
+      <!-- Top bar: brand, GMCP vitals strip, connection status + buttons -->
       <header id="topbar">
         <div id="topbar-left">
           <span class="brand-text">FREIGN</span>
           <span class="brand-sep" aria-hidden="true">//</span>
 
-          <!-- GMCP vitals strip — shows when connected & data arrives -->
+          <!-- Vitals strip: hidden until Char.Vitals GMCP data arrives -->
           <div id="vitals-strip" aria-label="Vitals" hidden>
-            <div class="vital" id="v-hp" title="Hit Points">
+            <div class="vital" title="Hit Points">
               <span class="vital-label">HP</span>
-              <span class="vital-val" id="v-hp-val">—</span>
+              <span class="vital-val" id="v-hp-val">&#8212;</span>
             </div>
             <div class="vital-sep" aria-hidden="true"></div>
-            <div class="vital" id="v-mp" title="Mana">
+            <div class="vital" title="Mana">
               <span class="vital-label">MP</span>
-              <span class="vital-val" id="v-mp-val">—</span>
+              <span class="vital-val" id="v-mp-val">&#8212;</span>
             </div>
             <div class="vital-sep" aria-hidden="true"></div>
-            <div class="vital" id="v-mv" title="Movement">
+            <div class="vital" title="Movement">
               <span class="vital-label">MV</span>
-              <span class="vital-val" id="v-mv-val">—</span>
+              <span class="vital-val" id="v-mv-val">&#8212;</span>
             </div>
           </div>
         </div>
 
         <div id="topbar-right">
-          <div id="conn-status" class="offline" aria-live="polite">● Offline</div>
+          <span id="conn-status" class="offline" aria-live="polite">&#9679; Offline</span>
           <button id="btn-public"     type="button" class="hdr-btn">Public</button>
           <button id="btn-test"       type="button" class="hdr-btn">Test</button>
           <button id="btn-disconnect" type="button" class="hdr-btn danger">Disconnect</button>
         </div>
       </header>
 
-      <!-- Terminal output -->
+      <!-- Game output terminal -->
       <div id="terminal" role="log" aria-live="polite" aria-label="Game output"></div>
 
-      <!-- Macro bar (hidden when empty) -->
+      <!-- Macro quick-access bar (hidden when no macros defined) -->
       <div id="macro-bar" aria-label="Macro shortcuts"></div>
 
       <!-- Command input -->
       <form id="cmd-form" autocomplete="off" aria-label="Command input">
         <label for="cmd-input" class="sr-only">Command</label>
-        <div id="cmd-prompt" aria-hidden="true">›</div>
-        <input id="cmd-input" type="text" placeholder="Enter command…"
+        <div id="cmd-prompt" aria-hidden="true">&#8250;</div>
+        <input id="cmd-input" type="text" placeholder="Enter command&#x2026;"
                spellcheck="false" autocomplete="off" autocorrect="off" />
-        <button id="btn-repeat" type="button" title="Repeat last command">↺</button>
+        <button id="btn-repeat" type="button" title="Repeat last command">&#x21BA;</button>
         <button id="cmd-send"   type="submit">Send</button>
       </form>
 
     </div><!-- /center -->
 
-    <!-- ══ RIGHT RAIL: SETTINGS ══════════════════════════════════ -->
+    <!-- RIGHT RAIL -->
     <div id="right-rail">
 
-      <!-- Icon strip -->
-      <nav id="right-nav" aria-label="Settings panels">
-        <button class="rnav-btn" data-drawer="connect" type="button" title="Connection">
-          <span class="rnav-icon" aria-hidden="true">⚡</span>
+      <!-- Icon strip: clicking an icon opens/closes the settings drawer -->
+      <nav id="right-nav" aria-label="Settings">
+        <button class="rnav-btn" data-drawer="connect"  type="button" title="Connection">
+          <span class="rnav-icon" aria-hidden="true">&#9889;</span>
           <span class="rnav-label">Connect</span>
         </button>
-        <button class="rnav-btn" data-drawer="config" type="button" title="Config">
-          <span class="rnav-icon" aria-hidden="true">⚙</span>
+        <button class="rnav-btn" data-drawer="config"   type="button" title="Config">
+          <span class="rnav-icon" aria-hidden="true">&#9881;</span>
           <span class="rnav-label">Config</span>
         </button>
-        <button class="rnav-btn" data-drawer="aliases" type="button" title="Aliases">
-          <span class="rnav-icon" aria-hidden="true">⇌</span>
+        <button class="rnav-btn" data-drawer="aliases"  type="button" title="Aliases">
+          <span class="rnav-icon" aria-hidden="true">&#8652;</span>
           <span class="rnav-label">Aliases</span>
         </button>
         <button class="rnav-btn" data-drawer="triggers" type="button" title="Triggers">
-          <span class="rnav-icon" aria-hidden="true">◎</span>
+          <span class="rnav-icon" aria-hidden="true">&#9678;</span>
           <span class="rnav-label">Triggers</span>
         </button>
-        <button class="rnav-btn" data-drawer="macros" type="button" title="Macros">
-          <span class="rnav-icon" aria-hidden="true">⌘</span>
+        <button class="rnav-btn" data-drawer="macros"   type="button" title="Macros">
+          <span class="rnav-icon" aria-hidden="true">&#8984;</span>
           <span class="rnav-label">Macros</span>
         </button>
-        <button class="rnav-btn" data-drawer="colors" type="button" title="ANSI Colors">
-          <span class="rnav-icon" aria-hidden="true">◈</span>
+        <button class="rnav-btn" data-drawer="colors"   type="button" title="ANSI Colors">
+          <span class="rnav-icon" aria-hidden="true">&#9672;</span>
           <span class="rnav-label">Colors</span>
         </button>
       </nav>
 
-      <!-- Settings drawer (slides in over the terminal, closes on outside click) -->
+      <!-- Settings drawer: slides out over the terminal, closes on outside click -->
       <div id="settings-drawer" aria-label="Settings" hidden>
         <div id="drawer-header">
           <span id="drawer-title">Settings</span>
-          <button id="drawer-close" type="button" title="Close">✕</button>
+          <button id="drawer-close" type="button" title="Close">&#x2715;</button>
         </div>
         <div id="drawer-body">
 
-          <!-- CONNECT -->
+          <!-- CONNECTION -->
           <div class="drawer-pane" id="dpane-connect">
             <div class="dpane-section">
               <div class="dpane-label">Server</div>
               <div class="stacked-btns">
-                <button id="sp-public"     type="button" class="full-btn">Connect — Public</button>
-                <button id="sp-test"       type="button" class="full-btn">Connect — Test</button>
+                <button id="sp-public"     type="button" class="full-btn">Connect &#x2014; Public</button>
+                <button id="sp-test"       type="button" class="full-btn">Connect &#x2014; Test</button>
                 <button id="sp-disconnect" type="button" class="full-btn danger">Disconnect</button>
               </div>
             </div>
@@ -197,7 +198,7 @@
             </div>
           </div>
 
-          <!-- CONFIG -->
+          <!-- CONFIGURATION -->
           <div class="drawer-pane" id="dpane-config">
             <div class="dpane-section">
               <div class="dpane-label">Display</div>
@@ -218,8 +219,8 @@
               </div>
             </div>
             <div class="dpane-section">
-              <div class="dpane-label">GMCP Panels</div>
-              <p class="hint-text">Add custom panels that display data from GMCP packages. Each panel has a name and a GMCP package path to listen on.</p>
+              <div class="dpane-label">Custom GMCP Panels</div>
+              <p class="hint-text">Add panels that will display data received from specific GMCP packages once the server supports it.</p>
               <div id="gmcp-panel-list" class="item-list"></div>
               <button id="add-gmcp-panel" type="button" class="add-btn">+ Add Panel</button>
             </div>
@@ -229,7 +230,7 @@
           <div class="drawer-pane" id="dpane-aliases">
             <div class="dpane-section">
               <div class="dpane-label">Aliases</div>
-              <p class="hint-text">Pattern is matched as a regular expression against the command you type.</p>
+              <p class="hint-text">Pattern is matched as a regular expression against commands you type. Matching text is replaced before sending.</p>
               <div id="alias-list" class="item-list"></div>
               <button id="add-alias" type="button" class="add-btn">+ Add Alias</button>
             </div>
@@ -239,7 +240,7 @@
           <div class="drawer-pane" id="dpane-triggers">
             <div class="dpane-section">
               <div class="dpane-label">Triggers</div>
-              <p class="hint-text">Pattern matched against incoming game text. Actions: highlight a line, send a command, or show a notification.</p>
+              <p class="hint-text">Pattern matched against incoming game text. Actions: highlight the line, send a command, or show a notification.</p>
               <div id="trigger-list" class="item-list"></div>
               <button id="add-trigger" type="button" class="add-btn">+ Add Trigger</button>
             </div>
@@ -249,28 +250,31 @@
           <div class="drawer-pane" id="dpane-macros">
             <div class="dpane-section">
               <div class="dpane-label">Macros</div>
-              <p class="hint-text">Macros appear as buttons above the command bar. Assign a hotkey (e.g. Alt+1 or F5) to trigger them from anywhere.</p>
+              <p class="hint-text">Macros appear as quick-access buttons above the input bar. Assign a hotkey (e.g. Alt+1, F5) to trigger anywhere.</p>
               <div id="macro-list" class="item-list"></div>
               <button id="add-macro" type="button" class="add-btn">+ Add Macro</button>
+            </div>
           </div>
-        </div>
 
-        <!-- COLORS -->
-        <div class="tab-pane" id="pane-colors">
-          <div class="pane-section">
-            <div class="pane-label">ANSI Colors (0–15)</div>
-            <div id="ansi-color-grid" class="color-grid"></div>
+          <!-- ANSI COLORS -->
+          <div class="drawer-pane" id="dpane-colors">
+            <div class="dpane-section">
+              <div class="dpane-label">ANSI Color Palette (0&#x2013;15)</div>
+              <p class="hint-text">Customize the 16 base ANSI colors used to render game text.</p>
+              <div id="ansi-color-grid" class="color-grid"></div>
+            </div>
           </div>
-        </div>
 
-      </div><!-- /tab-panes -->
+        </div><!-- /drawer-body -->
+      </div><!-- /settings-drawer -->
 
-    </aside>
-  </div>
+    </div><!-- /right-rail -->
+
+  </div><!-- /workspace -->
 
   <script src="../site-themes.js?v=1" defer></script>
   <script src="../site-shell.js?v=3" defer></script>
   <script src="../play/ansi.js?v=15" defer></script>
-  <script src="app.js?v=1" defer></script>
+  <script src="app.js?v=2" defer></script>
 </body>
 </html>

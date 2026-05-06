@@ -1,7 +1,15 @@
+/* ═══════════════════════════════════════════════════════════════
+   FREIGN Play v2 — Client Application
+   Forgotten Reign MUD Web Client
+
+   Layout: left panel rail | center terminal | right settings rail
+   GMCP-ready panel system — panels exist now, receive data when
+   the server implements GMCP (Char.Vitals, Room.Info, etc.)
+   ═══════════════════════════════════════════════════════════════ */
 (function () {
   'use strict';
 
-  var STORAGE_KEY = 'freign.play2.settings.v1';
+  var STORAGE_KEY  = 'freign.play2.settings.v1';
   var SITE_THEME_KEY = 'freign.site.theme.v1';
   var themeApi = window.FreignThemes || null;
 
@@ -12,6 +20,7 @@
 
   var DEFAULT_16 = window.AnsiRenderer.buildDefaultPalette16();
 
+  /* Default settings shape — extended with panel layout */
   var DEFAULT_SETTINGS = {
     theme:          'amethyst',
     timestamps:     true,
@@ -22,6 +31,9 @@
     triggers:       [],
     macros:         [],
     palette16:      {},
+    /* Panel layout */
+    openPanels:     ['map'],        /* which left-rail panels are open */
+    gmcpPanels:     [],             /* user-defined GMCP panels */
   };
 
   var state = {
@@ -36,47 +48,71 @@
     cmdHistory:     [],
     historyIdx:     -1,
     keepaliveTimer: null,
+    lastCmd:        '',
+    activeDrawer:   null,
   };
 
   var el = {};
 
   document.addEventListener('DOMContentLoaded', init);
 
-  /* ── Init ──────────────────────────────────────────────────── */
+  /* ═══════════════════════════════════════════════════════════════
+     INIT
+     ═══════════════════════════════════════════════════════════════ */
 
   function init() {
     bindEls();
     bindUi();
     loadSettings();
     renderAll();
-    appendSystem('Client ready — choose Public or Test to connect.');
+    appendSystem('Client ready \u2014 choose Public or Test to connect.');
   }
 
   function bindEls() {
-    // Terminal area
+    /* Terminal area */
     el.terminal      = document.getElementById('terminal');
     el.connStatus    = document.getElementById('conn-status');
     el.macroBar      = document.getElementById('macro-bar');
     el.cmdForm       = document.getElementById('cmd-form');
     el.cmdInput      = document.getElementById('cmd-input');
     el.cmdSend       = document.getElementById('cmd-send');
+    el.btnRepeat     = document.getElementById('btn-repeat');
 
-    // Header connect buttons
+    /* Header connect buttons */
     el.btnPublic     = document.getElementById('btn-public');
     el.btnTest       = document.getElementById('btn-test');
     el.btnDisconnect = document.getElementById('btn-disconnect');
 
-    // Sidebar connect panel
+    /* Vitals strip */
+    el.vitalsStrip   = document.getElementById('vitals-strip');
+    el.vHp           = document.getElementById('v-hp-val');
+    el.vMp           = document.getElementById('v-mp-val');
+    el.vMv           = document.getElementById('v-mv-val');
+
+    /* Left rail */
+    el.leftPanels    = document.getElementById('left-panels');
+    el.gmcpPanelBtns = document.getElementById('gmcp-panel-btns');
+    el.gmcpPanels    = document.getElementById('gmcp-panels');
+
+    /* Settings drawer */
+    el.settingsDrawer = document.getElementById('settings-drawer');
+    el.drawerTitle    = document.getElementById('drawer-title');
+    el.drawerClose    = document.getElementById('drawer-close');
+    el.drawerBody     = document.getElementById('drawer-body');
+
+    /* Drawer connect panel */
     el.spPublic      = document.getElementById('sp-public');
     el.spTest        = document.getElementById('sp-test');
     el.spDisconnect  = document.getElementById('sp-disconnect');
 
-    // Config panel
+    /* Config panel */
     el.cfgTimestamps = document.getElementById('cfg-timestamps');
     el.cfgWrap       = document.getElementById('cfg-wrap');
     el.cfgStackSep   = document.getElementById('cfg-stack-sep');
+    el.gmcpPanelList = document.getElementById('gmcp-panel-list');
+    el.addGmcpPanel  = document.getElementById('add-gmcp-panel');
 
-    // Lists
+    /* Item lists */
     el.aliasList     = document.getElementById('alias-list');
     el.triggerList   = document.getElementById('trigger-list');
     el.macroList     = document.getElementById('macro-list');
@@ -84,10 +120,10 @@
     el.addTrigger    = document.getElementById('add-trigger');
     el.addMacro      = document.getElementById('add-macro');
 
-    // Colors
+    /* Colors */
     el.ansiColorGrid = document.getElementById('ansi-color-grid');
 
-    // Settings I/O
+    /* Settings I/O */
     el.exportSettings = document.getElementById('export-settings');
     el.importSettings = document.getElementById('import-settings');
     el.resetSettings  = document.getElementById('reset-settings');
@@ -95,42 +131,66 @@
   }
 
   function bindUi() {
-    // Tab switching
-    var tabBtns = document.querySelectorAll('.tab-btn');
-    tabBtns.forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        activateTab(btn.dataset.tab);
-      });
-    });
-
-    // Command form
+    /* Command form */
     el.cmdForm.addEventListener('submit', function (e) {
       e.preventDefault();
       submitInputCommand(el.cmdInput.value);
     });
 
-    // Keyboard history + force-send on Enter even when empty
     el.cmdInput.addEventListener('keydown', handleInputHistory);
-    el.cmdInput.addEventListener('keydown', function (e) {
-      if (e.key !== 'Enter') return;
-      e.preventDefault();
-      submitInputCommand(el.cmdInput.value);
+
+    /* Repeat-last button */
+    el.btnRepeat.addEventListener('click', function () {
+      if (state.lastCmd) sendCommand(state.lastCmd);
     });
 
-    // Global macro hotkeys
+    /* Global macro hotkeys */
     document.addEventListener('keydown', onGlobalKeydown);
 
-    // Header buttons
-    el.btnPublic.addEventListener('click', function () { connectMud('public'); });
-    el.btnTest.addEventListener('click',   function () { connectMud('test');   });
+    /* Header buttons */
+    el.btnPublic.addEventListener('click',     function () { connectMud('public'); });
+    el.btnTest.addEventListener('click',       function () { connectMud('test'); });
     el.btnDisconnect.addEventListener('click', disconnect);
 
-    // Sidebar connect buttons
+    /* Drawer connect buttons */
     el.spPublic.addEventListener('click',     function () { connectMud('public'); });
-    el.spTest.addEventListener('click',       function () { connectMud('test');   });
+    el.spTest.addEventListener('click',       function () { connectMud('test'); });
     el.spDisconnect.addEventListener('click', disconnect);
 
-    // Config toggles
+    /* Right-rail icon buttons — toggle settings drawer */
+    document.querySelectorAll('.rnav-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var drawer = btn.dataset.drawer;
+        toggleDrawer(drawer, btn);
+      });
+    });
+
+    /* Drawer close */
+    el.drawerClose.addEventListener('click', function () { closeDrawer(); });
+
+    /* Close drawer on outside click */
+    document.addEventListener('click', function (e) {
+      if (!state.activeDrawer) return;
+      if (el.settingsDrawer.contains(e.target)) return;
+      if (e.target.closest('.rnav-btn')) return;
+      closeDrawer();
+    });
+
+    /* Left-rail panel toggle buttons */
+    document.querySelectorAll('.lnav-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        toggleLeftPanel(btn.dataset.panel);
+      });
+    });
+
+    /* Left-panel close buttons */
+    document.querySelectorAll('.lpanel-close').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        closeLeftPanel(btn.dataset.panel);
+      });
+    });
+
+    /* Config toggles */
     el.cfgTimestamps.addEventListener('change', function () {
       state.settings.timestamps = !!el.cfgTimestamps.checked;
       saveSettings();
@@ -146,7 +206,13 @@
       saveSettings();
     });
 
-    // Alias / trigger / macro add buttons
+    /* Custom GMCP panel add button */
+    el.addGmcpPanel.addEventListener('click', function () {
+      state.settings.gmcpPanels.push({ id: uid(), name: 'Panel', gmcpPath: '', enabled: true });
+      saveAndRefresh();
+    });
+
+    /* Alias / trigger / macro add buttons */
     el.addAlias.addEventListener('click', function () {
       state.settings.aliases.push({ enabled: true, pattern: '', replacement: '' });
       saveAndRefresh();
@@ -160,13 +226,13 @@
       saveAndRefresh();
     });
 
-    // Settings import / export / reset
+    /* Settings import / export / reset */
     el.exportSettings.addEventListener('click', exportSettings);
     el.importSettings.addEventListener('click', function () { el.importFile.click(); });
     el.resetSettings.addEventListener('click',  resetLocalSettings);
     el.importFile.addEventListener('change',    importSettingsFile);
 
-    // React to site-wide theme changes dispatched by FreignThemes
+    /* Theme changes from the site-wide theme picker */
     window.addEventListener('freign-theme-changed', function (evt) {
       if (!evt || !evt.detail) return;
       state.settings.theme = resolveTheme(evt.detail.themeId);
@@ -174,18 +240,100 @@
     });
   }
 
-  /* ── Tab switching ─────────────────────────────────────────── */
+  /* ═══════════════════════════════════════════════════════════════
+     DRAWER (right-rail settings panels)
+     ═══════════════════════════════════════════════════════════════ */
 
-  function activateTab(id) {
-    document.querySelectorAll('.tab-btn').forEach(function (b) {
-      b.classList.toggle('active', b.dataset.tab === id);
-    });
-    document.querySelectorAll('.tab-pane').forEach(function (p) {
-      p.classList.toggle('active', p.id === 'pane-' + id);
-    });
+  var DRAWER_TITLES = {
+    connect:  'Connection',
+    config:   'Configuration',
+    aliases:  'Aliases',
+    triggers: 'Triggers',
+    macros:   'Macros',
+    colors:   'ANSI Colors',
+  };
+
+  function toggleDrawer(id, triggerBtn) {
+    if (state.activeDrawer === id) {
+      closeDrawer();
+      return;
+    }
+    openDrawer(id, triggerBtn);
   }
 
-  /* ── Settings persistence ──────────────────────────────────── */
+  function openDrawer(id, triggerBtn) {
+    /* Activate the right nav button */
+    document.querySelectorAll('.rnav-btn').forEach(function (b) {
+      b.classList.toggle('active', b === triggerBtn);
+    });
+
+    /* Switch visible pane */
+    document.querySelectorAll('.drawer-pane').forEach(function (p) {
+      p.classList.toggle('active', p.id === 'dpane-' + id);
+    });
+
+    el.drawerTitle.textContent = DRAWER_TITLES[id] || id;
+    el.settingsDrawer.hidden   = false;
+    state.activeDrawer = id;
+  }
+
+  function closeDrawer() {
+    el.settingsDrawer.hidden = true;
+    document.querySelectorAll('.rnav-btn').forEach(function (b) {
+      b.classList.remove('active');
+    });
+    state.activeDrawer = null;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     LEFT PANELS
+     ═══════════════════════════════════════════════════════════════ */
+
+  function toggleLeftPanel(id) {
+    var isOpen = state.settings.openPanels.indexOf(id) >= 0;
+    if (isOpen) {
+      closeLeftPanel(id);
+    } else {
+      openLeftPanel(id);
+    }
+  }
+
+  function openLeftPanel(id) {
+    if (state.settings.openPanels.indexOf(id) < 0) {
+      state.settings.openPanels.push(id);
+    }
+    applyLeftPanelState();
+    saveSettings();
+  }
+
+  function closeLeftPanel(id) {
+    state.settings.openPanels = state.settings.openPanels.filter(function (p) { return p !== id; });
+    applyLeftPanelState();
+    saveSettings();
+  }
+
+  function applyLeftPanelState() {
+    var open = state.settings.openPanels;
+
+    /* Built-in panels */
+    document.querySelectorAll('.lpanel').forEach(function (panel) {
+      var id = panel.id.replace('lpanel-', '');
+      panel.classList.toggle('active', open.indexOf(id) >= 0);
+    });
+
+    /* Left nav button active state */
+    document.querySelectorAll('.lnav-btn').forEach(function (btn) {
+      btn.classList.toggle('active', open.indexOf(btn.dataset.panel) >= 0);
+    });
+
+    /* Toggle has-active class for :has fallback */
+    var anyOpen = open.length > 0;
+    el.leftPanels.classList.toggle('has-active', anyOpen);
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     SETTINGS PERSISTENCE
+     ═══════════════════════════════════════════════════════════════ */
 
   function loadSettings() {
     try {
@@ -209,7 +357,9 @@
     renderAll();
   }
 
-  /* ── Render ────────────────────────────────────────────────── */
+  /* ═══════════════════════════════════════════════════════════════
+     RENDER
+     ═══════════════════════════════════════════════════════════════ */
 
   function renderAll() {
     state.settings.theme = resolveTheme(state.settings.theme);
@@ -225,6 +375,8 @@
 
     el.terminal.classList.toggle('nowrap', !state.settings.wrapLines);
 
+    applyLeftPanelState();
+    renderGmcpPanels();
     renderAliases();
     renderTriggers();
     renderMacros();
@@ -232,21 +384,91 @@
     renderAnsiColors();
   }
 
+  /* ── GMCP panels ─────────────────────────────────────────── */
+
+  function renderGmcpPanels() {
+    /* Render the config list in the drawer */
+    el.gmcpPanelList.innerHTML = '';
+    state.settings.gmcpPanels.forEach(function (panel, idx) {
+      var card = makeItemCard('panel', !!panel.enabled, idx, state.settings.gmcpPanels);
+
+      card.appendChild(makeItemField('Name', 'text', panel.name || '', function (v) {
+        panel.name = v;
+        saveAndRefresh();
+      }));
+      card.appendChild(makeItemField('GMCP Path', 'text', panel.gmcpPath || '', function (v) {
+        panel.gmcpPath = v;
+        saveSettings();
+      }));
+
+      el.gmcpPanelList.appendChild(card);
+    });
+
+    /* Rebuild the left-rail nav buttons and panel elements for custom panels */
+    el.gmcpPanelBtns.innerHTML = '';
+    el.gmcpPanels.innerHTML    = '';
+
+    state.settings.gmcpPanels.forEach(function (panel) {
+      if (!panel.enabled) return;
+      var panelId = 'gmcp-' + panel.id;
+
+      /* Nav button */
+      var btn = document.createElement('button');
+      btn.className       = 'lnav-btn';
+      btn.dataset.panel   = panelId;
+      btn.type            = 'button';
+      btn.title           = panel.name;
+      btn.innerHTML       = '<span class="lnav-icon" aria-hidden="true">◇</span>' +
+                            '<span class="lnav-label">' + escHtml(panel.name) + '</span>';
+      btn.addEventListener('click', function () { toggleLeftPanel(panelId); });
+      el.gmcpPanelBtns.appendChild(btn);
+
+      /* Panel element */
+      var div = document.createElement('div');
+      div.className = 'lpanel';
+      div.id        = 'lpanel-' + panelId;
+
+      var head = document.createElement('div');
+      head.className = 'lpanel-head';
+      head.innerHTML = '<span>' + escHtml(panel.name) + '</span>' +
+                       '<button class="lpanel-close" type="button" title="Close">&#x2715;</button>';
+      head.querySelector('.lpanel-close').addEventListener('click', function () {
+        closeLeftPanel(panelId);
+      });
+
+      var body = document.createElement('div');
+      body.className  = 'lpanel-body ph-centered';
+      body.dataset.gmcpPanelId = panel.id;
+      body.innerHTML  = '<div class="ph-icon" aria-hidden="true">&#9671;</div>' +
+                        '<div class="ph-title">' + escHtml(panel.name) + '</div>' +
+                        '<div class="ph-sub">Awaiting GMCP<br>' + escHtml(panel.gmcpPath || 'no path set') + '</div>';
+
+      div.appendChild(head);
+      div.appendChild(body);
+      el.gmcpPanels.appendChild(div);
+    });
+
+    /* Re-apply open/close state so new panels honour saved setting */
+    applyLeftPanelState();
+  }
+
+  /* ── Aliases ─────────────────────────────────────────────── */
+
   function renderAliases() {
     el.aliasList.innerHTML = '';
     state.settings.aliases.forEach(function (a, idx) {
       var card = makeItemCard('alias', !!a.enabled, idx, state.settings.aliases);
-
       card.appendChild(makeItemField('Pattern (regex)', 'text', a.pattern || '', function (v) {
         a.pattern = v; saveSettings();
       }));
       card.appendChild(makeItemField('Replacement', 'text', a.replacement || '', function (v) {
         a.replacement = v; saveSettings();
       }));
-
       el.aliasList.appendChild(card);
     });
   }
+
+  /* ── Triggers ────────────────────────────────────────────── */
 
   function renderTriggers() {
     el.triggerList.innerHTML = '';
@@ -260,21 +482,21 @@
         t.flags = v; saveSettings();
       }));
 
-      var actionField = document.createElement('div');
-      actionField.className = 'item-field';
-      var actionLabel = document.createElement('label');
-      actionLabel.textContent = 'Action';
-      var actionSel = document.createElement('select');
+      var row = document.createElement('div');
+      row.className = 'item-card-row';
+      var lbl = document.createElement('label');
+      lbl.textContent = 'Action';
+      var sel = document.createElement('select');
       ['highlight', 'send', 'notify'].forEach(function (v) {
         var o = document.createElement('option');
         o.value = v; o.textContent = v;
-        actionSel.appendChild(o);
+        sel.appendChild(o);
       });
-      actionSel.value = t.action || 'highlight';
-      actionSel.addEventListener('change', function () { t.action = actionSel.value; saveSettings(); });
-      actionField.appendChild(actionLabel);
-      actionField.appendChild(actionSel);
-      card.appendChild(actionField);
+      sel.value = t.action || 'highlight';
+      sel.addEventListener('change', function () { t.action = sel.value; saveSettings(); });
+      row.appendChild(lbl);
+      row.appendChild(sel);
+      card.appendChild(row);
 
       card.appendChild(makeItemField('Value', 'text', t.value || '', function (v) {
         t.value = v; saveSettings();
@@ -284,11 +506,12 @@
     });
   }
 
+  /* ── Macros ──────────────────────────────────────────────── */
+
   function renderMacros() {
     el.macroList.innerHTML = '';
     state.settings.macros.forEach(function (m, idx) {
       var card = makeItemCard('macro', !!m.enabled, idx, state.settings.macros);
-
       card.appendChild(makeItemField('Label', 'text', m.label || '', function (v) {
         m.label = v; saveAndRefresh();
       }));
@@ -298,7 +521,6 @@
       card.appendChild(makeItemField('Hotkey (e.g. Alt+1)', 'text', m.hotkey || '', function (v) {
         m.hotkey = normalizeHotkey(v); saveAndRefresh();
       }));
-
       el.macroList.appendChild(card);
     });
   }
@@ -308,7 +530,7 @@
     state.settings.macros.forEach(function (m) {
       if (!m.enabled || !m.command) return;
       var btn = document.createElement('button');
-      btn.type = 'button';
+      btn.type      = 'button';
       btn.className = 'macro-btn';
       btn.textContent = m.label || m.command;
       if (m.hotkey) btn.title = m.hotkey + ': ' + m.command;
@@ -317,18 +539,18 @@
     });
   }
 
+  /* ── ANSI color grid ─────────────────────────────────────── */
+
   function renderAnsiColors() {
     el.ansiColorGrid.innerHTML = '';
     for (var i = 0; i < 16; i++) {
-      var cell = document.createElement('label');
-      cell.className = 'color-cell';
-
-      var num = document.createElement('span');
-      num.textContent = String(i);
+      var wrap = document.createElement('div');
+      wrap.className = 'color-swatch-wrap';
 
       var pick = document.createElement('input');
-      pick.type = 'color';
+      pick.type  = 'color';
       pick.value = state.settings.palette16[String(i)] || DEFAULT_16[i];
+      pick.title = 'ANSI ' + i;
       (function (index, picker) {
         picker.addEventListener('input', function () {
           state.settings.palette16[String(index)] = picker.value;
@@ -337,69 +559,78 @@
         });
       })(i, pick);
 
-      cell.appendChild(num);
-      cell.appendChild(pick);
-      el.ansiColorGrid.appendChild(cell);
+      var lbl = document.createElement('div');
+      lbl.className   = 'color-swatch-label';
+      lbl.textContent = String(i);
+
+      wrap.appendChild(pick);
+      wrap.appendChild(lbl);
+      el.ansiColorGrid.appendChild(wrap);
     }
   }
 
-  /* ── Item card builder ─────────────────────────────────────── */
+  /* ═══════════════════════════════════════════════════════════════
+     ITEM CARD BUILDER (shared by aliases / triggers / macros / gmcp)
+     ═══════════════════════════════════════════════════════════════ */
 
   function makeItemCard(type, enabled, idx, list) {
     var card = document.createElement('div');
     card.className = 'item-card';
 
-    var header = document.createElement('div');
-    header.className = 'item-card-header';
+    var actions = document.createElement('div');
+    actions.className = 'item-card-actions';
 
     var chk = document.createElement('input');
-    chk.type = 'checkbox';
+    chk.type    = 'checkbox';
     chk.checked = enabled;
+    chk.title   = 'Enable';
     chk.addEventListener('change', function () {
       list[idx].enabled = !!chk.checked;
       saveAndRefresh();
     });
 
     var lbl = document.createElement('span');
-    lbl.className = 'item-type-label';
+    lbl.className   = 'item-label';
     lbl.textContent = type + ' #' + (idx + 1);
 
     var rmBtn = document.createElement('button');
-    rmBtn.type = 'button';
-    rmBtn.className = 'item-remove';
-    rmBtn.title = 'Remove';
-    rmBtn.textContent = '✕';
+    rmBtn.type      = 'button';
+    rmBtn.className = 'del';
+    rmBtn.title     = 'Delete';
+    rmBtn.textContent = '\u2715';
     rmBtn.addEventListener('click', function () {
       list.splice(idx, 1);
       saveAndRefresh();
     });
 
-    header.appendChild(chk);
-    header.appendChild(lbl);
-    header.appendChild(rmBtn);
-    card.appendChild(header);
+    actions.appendChild(chk);
+    actions.appendChild(lbl);
+    actions.appendChild(rmBtn);
+    card.appendChild(actions);
     return card;
   }
 
   function makeItemField(labelText, inputType, value, onChange) {
-    var wrapper = document.createElement('div');
-    wrapper.className = 'item-field';
+    var row = document.createElement('div');
+    row.className = 'item-card-row';
 
     var lbl = document.createElement('label');
     lbl.textContent = labelText;
 
     var inp = document.createElement('input');
-    inp.type = inputType;
-    inp.value = value;
+    inp.type        = inputType;
+    inp.value       = value;
     inp.placeholder = labelText;
     inp.addEventListener('change', function () { onChange(inp.value); });
 
-    wrapper.appendChild(lbl);
-    wrapper.appendChild(inp);
-    return wrapper;
+    row.appendChild(lbl);
+    row.appendChild(inp);
+    return row;
   }
 
-  /* ── WebSocket / connection ────────────────────────────────── */
+  /* ═══════════════════════════════════════════════════════════════
+     WEBSOCKET / CONNECTION
+     ═══════════════════════════════════════════════════════════════ */
 
   function bridgeUrl() {
     if (state.settings.bridgeUrl) return state.settings.bridgeUrl;
@@ -415,7 +646,7 @@
     state.selectedMudId = mudId;
 
     setConnectionState('connecting');
-    appendSystem('Connecting to ' + mud.name + ' (' + mud.host + ':' + mud.port + ')…');
+    appendSystem('Connecting to ' + mud.name + ' (' + mud.host + ':' + mud.port + ')\u2026');
 
     try {
       state.ws = new WebSocket(bridgeUrl());
@@ -457,9 +688,9 @@
   }
 
   function setConnectionState(status) {
-    state.connected = (status === 'online');
-    var labels = { online: '● Online', offline: '● Offline', connecting: '◌ Connecting…' };
-    el.connStatus.textContent  = labels[status] || '● Offline';
+    state.connected            = (status === 'online');
+    var labels = { online: '\u25CF Online', offline: '\u25CF Offline', connecting: '\u25CC Connecting\u2026' };
+    el.connStatus.textContent  = labels[status] || '\u25CF Offline';
     el.connStatus.className    = status;
   }
 
@@ -481,7 +712,9 @@
     state.keepaliveTimer = null;
   }
 
-  /* ── Bridge message handling ───────────────────────────────── */
+  /* ═══════════════════════════════════════════════════════════════
+     BRIDGE MESSAGE HANDLING
+     ═══════════════════════════════════════════════════════════════ */
 
   function handleBridgeMessage(raw) {
     var msg;
@@ -491,9 +724,42 @@
     if (msg.type === 'data')         { ingestMudText(msg.data || ''); return; }
     if (msg.type === 'pong')         { return; }
     if (msg.type === 'disconnected') { appendSystem('MUD disconnected.'); return; }
+    /* GMCP — planned: {type:'gmcp', package:'Char.Vitals', data:{hp,mp,mv}} */
+    if (msg.type === 'gmcp')         { handleGmcp(msg.package, msg.data); return; }
   }
 
-  /* ── Text ingestion & ANSI rendering ───────────────────────── */
+  /* ── GMCP dispatcher ─────────────────────────────────────── */
+
+  function handleGmcp(pkg, data) {
+    if (!pkg || !data) return;
+
+    /* Char.Vitals — HP / mana / movement */
+    if (pkg === 'Char.Vitals') {
+      updateVitals(data);
+      return;
+    }
+
+    /* Route to any matching user-defined GMCP panel */
+    state.settings.gmcpPanels.forEach(function (panel) {
+      if (!panel.enabled || panel.gmcpPath !== pkg) return;
+      var body = el.gmcpPanels.querySelector('[data-gmcp-panel-id="' + panel.id + '"]');
+      if (!body) return;
+      /* Simple JSON display; replace with richer rendering as needed */
+      body.className  = 'lpanel-body';
+      body.textContent = JSON.stringify(data, null, 2);
+    });
+  }
+
+  function updateVitals(data) {
+    if (data.hp !== undefined) el.vHp.textContent = String(data.hp);
+    if (data.mp !== undefined) el.vMp.textContent = String(data.mp);
+    if (data.mv !== undefined) el.vMv.textContent = String(data.mv);
+    el.vitalsStrip.hidden = false;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     TEXT INGESTION & ANSI RENDERING
+     ═══════════════════════════════════════════════════════════════ */
 
   function ingestMudText(chunk) {
     var text  = state.lineCarry + chunk;
@@ -555,7 +821,7 @@
     row.innerHTML = '';
     if (state.settings.timestamps) {
       var ts = document.createElement('span');
-      ts.className = 'ts';
+      ts.className   = 'ts';
       ts.textContent = '[' + nowTime() + ']';
       row.appendChild(ts);
     }
@@ -592,7 +858,9 @@
     appendAnsiLine('\x1b[1;35m>\x1b[0m ' + text, false);
   }
 
-  /* ── Command sending ───────────────────────────────────────── */
+  /* ═══════════════════════════════════════════════════════════════
+     COMMAND SENDING
+     ═══════════════════════════════════════════════════════════════ */
 
   function submitInputCommand(raw) {
     var cmd = typeof raw === 'string' ? raw : String(raw || '');
@@ -624,7 +892,11 @@
     var parts = splitStacked(out);
     if (parts.length === 0) return;
 
-    if (!skipHistory) pushHistory(source);
+    if (!skipHistory) {
+      pushHistory(source);
+      state.lastCmd = source;
+    }
+
     parts.forEach(function (part) {
       if (!suppressEcho) appendOutgoing(part);
       sendWs({ type: 'input', data: part + '\n' });
@@ -650,7 +922,9 @@
     return raw.split(sep).map(function (p) { return p.trim(); }).filter(Boolean);
   }
 
-  /* ── Command history ───────────────────────────────────────── */
+  /* ═══════════════════════════════════════════════════════════════
+     COMMAND HISTORY
+     ═══════════════════════════════════════════════════════════════ */
 
   function handleInputHistory(e) {
     if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
@@ -663,7 +937,11 @@
     } else {
       if (state.historyIdx < 0) return;
       state.historyIdx = Math.min(state.cmdHistory.length, state.historyIdx + 1);
-      if (state.historyIdx === state.cmdHistory.length) { state.historyIdx = -1; el.cmdInput.value = ''; return; }
+      if (state.historyIdx === state.cmdHistory.length) {
+        state.historyIdx    = -1;
+        el.cmdInput.value   = '';
+        return;
+      }
     }
     el.cmdInput.value = state.cmdHistory[state.historyIdx] || '';
   }
@@ -678,7 +956,9 @@
     state.historyIdx = -1;
   }
 
-  /* ── Global hotkeys ────────────────────────────────────────── */
+  /* ═══════════════════════════════════════════════════════════════
+     GLOBAL HOTKEYS
+     ═══════════════════════════════════════════════════════════════ */
 
   function onGlobalKeydown(e) {
     if (e.defaultPrevented) return;
@@ -718,10 +998,10 @@
     var key = '';
     parts.forEach(function (p) {
       var n = p.toLowerCase();
-      if (n === 'ctrl' || n === 'control')              flags.ctrl  = true;
-      else if (n === 'alt' || n === 'option')           flags.alt   = true;
-      else if (n === 'shift')                            flags.shift = true;
-      else if (n === 'meta' || n === 'cmd' || n === 'command') flags.meta = true;
+      if (n === 'ctrl' || n === 'control')                    flags.ctrl  = true;
+      else if (n === 'alt' || n === 'option')                 flags.alt   = true;
+      else if (n === 'shift')                                  flags.shift = true;
+      else if (n === 'meta' || n === 'cmd' || n === 'command') flags.meta  = true;
       else key = p;
     });
     if (!key) return '';
@@ -735,15 +1015,20 @@
     return out.join('+');
   }
 
-  /* ── Settings import / export / reset ─────────────────────── */
+  /* ═══════════════════════════════════════════════════════════════
+     SETTINGS IMPORT / EXPORT / RESET
+     ═══════════════════════════════════════════════════════════════ */
 
   function exportSettings() {
     var json = JSON.stringify(state.settings, null, 2);
     var blob = new Blob([json], { type: 'application/json' });
     var url  = URL.createObjectURL(blob);
     var a    = document.createElement('a');
-    a.href = url; a.download = 'freign-play2-settings.json';
-    document.body.appendChild(a); a.click(); a.remove();
+    a.href     = url;
+    a.download = 'freign-play2-settings.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
     URL.revokeObjectURL(url);
   }
 
@@ -771,14 +1056,15 @@
     if (!ok) return;
     disconnect();
     clearSavedKeys();
-    state.settings    = clone(DEFAULT_SETTINGS);
-    state.cmdHistory  = [];
-    state.historyIdx  = -1;
-    state.lineCarry   = '';
+    state.settings   = clone(DEFAULT_SETTINGS);
+    state.cmdHistory = [];
+    state.historyIdx = -1;
+    state.lineCarry  = '';
+    state.lastCmd    = '';
     if (state.partialRow && state.partialRow.parentNode) {
       state.partialRow.parentNode.removeChild(state.partialRow);
     }
-    state.partialRow  = null;
+    state.partialRow = null;
     rebuildPalette();
     saveAndRefresh();
     appendSystem('Settings reset to defaults.');
@@ -793,7 +1079,9 @@
     keys.forEach(function (k) { localStorage.removeItem(k); });
   }
 
-  /* ── Settings merge / helpers ──────────────────────────────── */
+  /* ═══════════════════════════════════════════════════════════════
+     SETTINGS MERGE & HELPERS
+     ═══════════════════════════════════════════════════════════════ */
 
   function mergeSettings(base, incoming) {
     var out = clone(base);
@@ -805,16 +1093,36 @@
     out.stackSeparator = sanitizeStackSep(incoming.stackSeparator);
     out.bridgeUrl      = typeof incoming.bridgeUrl   === 'string'  ? incoming.bridgeUrl  : base.bridgeUrl;
 
+    out.openPanels = Array.isArray(incoming.openPanels) ? incoming.openPanels : clone(base.openPanels);
+
     out.aliases = Array.isArray(incoming.aliases)
-      ? incoming.aliases.map(function (a) { return { enabled: a.enabled !== false, pattern: String(a.pattern || ''), replacement: String(a.replacement || '') }; })
+      ? incoming.aliases.map(function (a) {
+          return { enabled: a.enabled !== false, pattern: String(a.pattern || ''), replacement: String(a.replacement || '') };
+        })
       : [];
 
     out.triggers = Array.isArray(incoming.triggers)
-      ? incoming.triggers.map(function (t) { return { enabled: t.enabled !== false, pattern: String(t.pattern || ''), flags: String(t.flags || ''), action: oneOf(t.action, ['highlight', 'send', 'notify'], 'highlight'), value: String(t.value || '') }; })
+      ? incoming.triggers.map(function (t) {
+          return {
+            enabled: t.enabled !== false,
+            pattern: String(t.pattern || ''),
+            flags:   String(t.flags   || ''),
+            action:  oneOf(t.action, ['highlight', 'send', 'notify'], 'highlight'),
+            value:   String(t.value   || ''),
+          };
+        })
       : [];
 
     out.macros = Array.isArray(incoming.macros)
-      ? incoming.macros.map(function (m) { return { enabled: m.enabled !== false, label: String(m.label || ''), command: String(m.command || ''), hotkey: normalizeHotkey(m.hotkey) }; })
+      ? incoming.macros.map(function (m) {
+          return { enabled: m.enabled !== false, label: String(m.label || ''), command: String(m.command || ''), hotkey: normalizeHotkey(m.hotkey) };
+        })
+      : [];
+
+    out.gmcpPanels = Array.isArray(incoming.gmcpPanels)
+      ? incoming.gmcpPanels.map(function (p) {
+          return { id: p.id || uid(), name: String(p.name || 'Panel'), gmcpPath: String(p.gmcpPath || ''), enabled: p.enabled !== false };
+        })
       : [];
 
     out.palette16 = {};
@@ -848,16 +1156,20 @@
 
   function sanitizeStackSep(v) {
     var s = String(v == null ? '' : v).trim();
-    if (!s) return ';';
-    return s.slice(0, 4);
+    return s ? s.slice(0, 4) : ';';
   }
 
-  function isHexColor(v) {
-    return typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v);
-  }
-
+  function isHexColor(v)  { return typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v); }
   function oneOf(v, vals, d) { return vals.indexOf(v) >= 0 ? v : d; }
   function clone(v)          { return JSON.parse(JSON.stringify(v)); }
   function nowTime()         { return new Date().toLocaleTimeString('en-US', { hour12: false }); }
+  function uid()             { return Math.random().toString(36).slice(2, 10); }
+  function escHtml(s)        {
+    return String(s || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
 
 })();
