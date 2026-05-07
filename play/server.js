@@ -30,6 +30,19 @@ const PROXY_V2_SIGNATURE = Buffer.from([
   0x55, 0x49, 0x54, 0x0a,
 ]);
 
+/* ── Process-level error guards ────────────────────────────────────────────
+   Without these, any unhandled exception or rejected promise crashes the
+   Node process. Docker then restarts it, killing every active connection.
+*/
+process.on('uncaughtException', (err) => {
+  console.error('[play-bridge] Uncaught exception:', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[play-bridge] Unhandled rejection:', reason);
+});
+
+const WS_HEARTBEAT_INTERVAL = 25000; // 25 s — server → client WebSocket ping
+
 const wss = new WebSocketServer({ port: PORT, path: PATH });
 
 wss.on('connection', (ws, req) => {
@@ -41,6 +54,25 @@ wss.on('connection', (ws, req) => {
     cols: 120,
     rows: 40,
   };
+
+  /* ── WebSocket protocol-level heartbeat ────────────────────────────────
+     Sends a WS ping frame every 25 s. If the client (or any intermediate
+     proxy) doesn't return a pong within the next interval, the connection
+     is terminated. This prevents nginx and NAT tables from treating the
+     WebSocket as idle and silently dropping it.
+  */
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
+
+  const heartbeat = setInterval(() => {
+    if (!ws.isAlive) {
+      clearInterval(heartbeat);
+      ws.terminate();
+      return;
+    }
+    ws.isAlive = false;
+    ws.ping();
+  }, WS_HEARTBEAT_INTERVAL);
 
   ws.send(json({ type: 'status', message: `Bridge connected. Send connect command.` }));
 
@@ -87,6 +119,7 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', () => {
+    clearInterval(heartbeat);
     closeMud(state, ws, null);
   });
 });

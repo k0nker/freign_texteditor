@@ -6,6 +6,7 @@
   'use strict';
 
   var STORAGE_KEY    = 'freign.play2.settings.v1';
+  var SCROLLBACK_KEY = 'freign.play2.scrollback';
   var SITE_THEME_KEY = 'freign.site.theme.v1';
   var themeApi = window.FreignThemes || null;
 
@@ -28,6 +29,11 @@
 
   var DEFAULT_16 = window.AnsiRenderer.buildDefaultPalette16();
 
+  var ANSI_COLOR_NAMES = [
+    'Black', 'Red', 'Green', 'Yellow', 'Blue', 'Magenta', 'Cyan', 'Lt.Gray',
+    'Dk.Gray', 'Br.Red', 'Br.Green', 'Br.Yellow', 'Br.Blue', 'Br.Magenta', 'Br.Cyan', 'White',
+  ];
+
   var DEFAULT_SETTINGS = {
     theme:          'amethyst',
     font:           'JetBrains Mono',
@@ -41,8 +47,16 @@
     macros:         [],
     palette16:      {},
     openPanels:     ['map'],
-    panelSides:     { map: 'left', channels: 'left', party: 'left' },
+    panelSides:     { map: 'right', channels: 'left', party: 'left' },
+    panelWidths:    { left: 230, right: 230 },
+    keepInput:      true,
     gmcpPanels:     [],
+    wrapWidth:      120,
+    historyMax:     2500,
+    consoleWidth:   1000,
+    panelOrder:     ['map', 'channels', 'party'],
+    tsSelectable:   true,
+    logTimestamps:  true,
   };
 
   var state = {
@@ -59,6 +73,10 @@
     keepaliveTimer: null,
     lastCmd:        '',
     activeDrawer:   null,
+    scrollback:          [],   /* raw {line,highlighted,time} for session persistence */
+    userDisconnected:    false,
+    reconnectAttempts:   0,
+    reconnectTimer:      null,
   };
 
   var el = {};
@@ -74,7 +92,9 @@
     bindUi();
     loadSettings();
     renderAll();
-    appendSystem('Client ready \u2014 choose Public or Test to connect.');
+    initResizeHandles();
+    loadScrollback();
+    appendSystem('Client ready \u2014 choose a server to connect.');
   }
 
   function bindEls() {
@@ -86,8 +106,6 @@
     el.cmdInput       = document.getElementById('cmd-input');
     el.cmdSend        = document.getElementById('cmd-send');
     el.btnRepeat      = document.getElementById('btn-repeat');
-    el.btnPublic      = document.getElementById('btn-public');
-    el.btnTest        = document.getElementById('btn-test');
     el.btnDisconnect  = document.getElementById('btn-disconnect');
 
     el.vitalsStrip    = document.getElementById('vitals-strip');
@@ -103,7 +121,7 @@
     el.rightPanels    = document.getElementById('right-panels');
     el.rightPanelBtns = document.getElementById('right-panel-btns');
     el.rightGmcpPanels= document.getElementById('right-gmcp-panels');
-    el.rnavSep        = document.getElementById('rnav-sep');
+    el.rightPanelsRail= document.getElementById('right-panels-rail');
 
     el.settingsDrawer = document.getElementById('settings-drawer');
     el.drawerTitle    = document.getElementById('drawer-title');
@@ -116,8 +134,15 @@
 
     el.cfgFont        = document.getElementById('cfg-font');
     el.cfgLayout      = document.getElementById('cfg-layout');
+    el.cfgKeepInput   = document.getElementById('cfg-keep-input');
+    el.resizeLeft     = document.getElementById('resize-left');
+    el.resizeRight    = document.getElementById('resize-right');
     el.cfgTimestamps  = document.getElementById('cfg-timestamps');
     el.cfgWrap        = document.getElementById('cfg-wrap');
+    el.cfgWrapWidth   = document.getElementById('cfg-wrap-width');
+    el.cfgHistoryMax  = document.getElementById('cfg-history-max');
+    el.cfgClearHistory= document.getElementById('cfg-clear-history');
+    el.cfgConsoleWidth = document.getElementById('cfg-console-width');
     el.cfgStackSep    = document.getElementById('cfg-stack-sep');
     el.builtinPanelCfg= document.getElementById('builtin-panel-cfg');
     el.gmcpPanelList  = document.getElementById('gmcp-panel-list');
@@ -130,11 +155,18 @@
     el.addTrigger     = document.getElementById('add-trigger');
     el.addMacro       = document.getElementById('add-macro');
 
-    el.ansiColorGrid  = document.getElementById('ansi-color-grid');
     el.exportSettings = document.getElementById('export-settings');
     el.importSettings = document.getElementById('import-settings');
     el.resetSettings  = document.getElementById('reset-settings');
-    el.importFile     = document.getElementById('import-file');
+    el.importFile      = document.getElementById('import-file');
+
+    el.ansiPaletteCfg   = document.getElementById('ansi-palette-cfg');
+    el.cfgTsSelectable  = document.getElementById('cfg-ts-selectable');
+    el.btnSaveLog        = document.getElementById('btn-save-log');
+    el.logSavePopup      = document.getElementById('log-save-popup');
+    el.logPopupTs        = document.getElementById('log-popup-timestamps');
+    el.logPopupSave      = document.getElementById('log-popup-save');
+    el.logPopupClose     = document.getElementById('log-popup-close');
   }
 
   function bindUi() {
@@ -149,20 +181,43 @@
       if (state.lastCmd) sendCommand(state.lastCmd);
     });
 
-    document.addEventListener('keydown', onGlobalKeydown);
-
-    el.btnPublic.addEventListener('click',     function () { connectMud('public'); });
-    el.btnTest.addEventListener('click',       function () { connectMud('test'); });
     el.btnDisconnect.addEventListener('click', disconnect);
     el.spPublic.addEventListener('click',      function () { connectMud('public'); });
     el.spTest.addEventListener('click',        function () { connectMud('test'); });
     el.spDisconnect.addEventListener('click',  disconnect);
 
-    /* Right-rail settings icon buttons */
-    document.querySelectorAll('.rnav-btn').forEach(function (btn) {
+    /* Right settings-rail: icon buttons for drawers (only those with data-drawer) */
+    document.querySelectorAll('.rnav-btn[data-drawer]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         toggleDrawer(btn.dataset.drawer, btn);
       });
+    });
+
+    /* Save Log button — opens popup, not a drawer */
+    el.btnSaveLog.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var open = !el.logSavePopup.hidden;
+      el.logSavePopup.hidden = open;
+      if (!open) {
+        el.logPopupTs.checked = state.settings.logTimestamps !== false;
+      }
+    });
+    el.logPopupClose.addEventListener('click', function () {
+      el.logSavePopup.hidden = true;
+    });
+    el.logPopupSave.addEventListener('click', function () {
+      state.settings.logTimestamps = !!el.logPopupTs.checked;
+      saveSettings();
+      exportLog(el.logPopupTs.checked);
+      el.logSavePopup.hidden = true;
+    });
+    document.addEventListener('click', function (e) {
+      if (!el.logSavePopup.hidden &&
+          !el.logSavePopup.contains(e.target) &&
+          e.target !== el.btnSaveLog &&
+          !el.btnSaveLog.contains(e.target)) {
+        el.logSavePopup.hidden = true;
+      }
     });
 
     el.drawerClose.addEventListener('click', closeDrawer);
@@ -202,6 +257,12 @@
       saveSettings();
     });
 
+    /* Config: keep input */
+    el.cfgKeepInput.addEventListener('change', function () {
+      state.settings.keepInput = !!el.cfgKeepInput.checked;
+      saveSettings();
+    });
+
     /* Config: display toggles */
     el.cfgTimestamps.addEventListener('change', function () {
       state.settings.timestamps = !!el.cfgTimestamps.checked;
@@ -210,6 +271,30 @@
     el.cfgWrap.addEventListener('change', function () {
       state.settings.wrapLines = !!el.cfgWrap.checked;
       el.terminal.classList.toggle('nowrap', !state.settings.wrapLines);
+      applyWrapWidth();
+      saveSettings();
+    });
+    el.cfgWrapWidth.addEventListener('change', function () {
+      state.settings.wrapWidth = Math.max(0, parseInt(el.cfgWrapWidth.value, 10) || 0);
+      el.cfgWrapWidth.value = state.settings.wrapWidth;
+      applyWrapWidth();
+      saveSettings();
+    });
+    el.cfgHistoryMax.addEventListener('change', function () {
+      state.settings.historyMax = Math.max(0, parseInt(el.cfgHistoryMax.value, 10) || 0);
+      el.cfgHistoryMax.value = state.settings.historyMax;
+      trimTerminal();
+      saveSettings();
+    });
+    el.cfgClearHistory.addEventListener('click', function () {
+      el.terminal.innerHTML = '';
+      state.scrollback = [];
+      localStorage.removeItem(SCROLLBACK_KEY);
+    });
+    el.cfgConsoleWidth.addEventListener('change', function () {
+      state.settings.consoleWidth = Math.max(320, Math.min(1920, parseInt(el.cfgConsoleWidth.value, 10) || 1000));
+      el.cfgConsoleWidth.value = state.settings.consoleWidth;
+      applyLayout();
       saveSettings();
     });
     el.cfgStackSep.addEventListener('change', function () {
@@ -232,7 +317,7 @@
       saveAndRefresh();
     });
     el.addMacro.addEventListener('click', function () {
-      state.settings.macros.push({ enabled: true, label: '', command: '', hotkey: '' });
+      state.settings.macros.push({ enabled: true, label: '', command: '' });
       saveAndRefresh();
     });
 
@@ -240,6 +325,12 @@
     el.importSettings.addEventListener('click', function () { el.importFile.click(); });
     el.resetSettings.addEventListener('click',  resetLocalSettings);
     el.importFile.addEventListener('change',    importSettingsFile);
+
+    el.cfgTsSelectable.addEventListener('change', function () {
+      state.settings.tsSelectable = !!el.cfgTsSelectable.checked;
+      applyTsSelectable();
+      saveSettings();
+    });
 
     window.addEventListener('freign-theme-changed', function (evt) {
       if (!evt || !evt.detail) return;
@@ -249,13 +340,14 @@
   }
 
   /* ═══════════════════════════════════════════════════════════════
-     SETTINGS DRAWER (right-rail)
+     SETTINGS DRAWER (right-settings-rail)
      ═══════════════════════════════════════════════════════════════ */
 
   var DRAWER_TITLES = {
     connect: 'Connection', config: 'Configuration',
     aliases: 'Aliases',    triggers: 'Triggers',
-    macros:  'Macros',     colors: 'ANSI Colors',
+    macros:  'Macros',     colors:  'ANSI Colors',
+    panels:  'Panels',
   };
 
   function toggleDrawer(id, triggerBtn) {
@@ -336,6 +428,24 @@
       if (btnEl)   btnEl.classList.toggle('active', isOpen);
     });
 
+    /* ── Reorder builtin panels and nav buttons by panelOrder ──────────────── */
+    var panelOrder = state.settings.panelOrder || BUILTIN_PANELS.map(function (bp) { return bp.id; });
+    panelOrder.forEach(function (pid) {
+      var pEl  = document.getElementById('panel-' + pid);
+      var bEl  = document.querySelector('.panel-nav-btn[data-panel="' + pid + '"]');
+      if (pEl && pEl.parentNode)  pEl.parentNode.appendChild(pEl);
+      if (bEl && bEl.parentNode) {
+        if (bEl.parentNode === el.leftNav) {
+          el.leftNav.insertBefore(bEl, el.leftPanelBtns);
+        } else {
+          bEl.parentNode.appendChild(bEl);
+        }
+      }
+    });
+    /* Keep GMCP panel containers after builtin panels */
+    if (el.leftGmcpPanels  && el.leftGmcpPanels.parentNode)  el.leftGmcpPanels.parentNode.appendChild(el.leftGmcpPanels);
+    if (el.rightGmcpPanels && el.rightGmcpPanels.parentNode) el.rightGmcpPanels.parentNode.appendChild(el.rightGmcpPanels);
+
     /* ── Custom GMCP panels (handled in renderGmcpPanels, just set active) ── */
     state.settings.gmcpPanels.forEach(function (p) {
       if (!p.enabled) return;
@@ -368,8 +478,19 @@
     el.leftPanels.classList.toggle('has-active', leftHasActive);
     el.rightPanels.classList.toggle('has-active', rightHasActive);
 
-    /* ── Separator visibility ────────────────────────────── */
-    el.rnavSep.hidden = !el.rightPanelBtns.children.length;
+    /* ── Panel widths ────────────────────────────────────── */
+    var pw = state.settings.panelWidths || {};
+    el.leftPanels.style.width  = leftHasActive  ? ((pw.left  || 230) + 'px') : '0';
+    el.rightPanels.style.width = rightHasActive ? ((pw.right || 230) + 'px') : '0';
+
+    /* ── Resize handle visibility ────────────────────────── */
+    if (el.resizeLeft)  el.resizeLeft.style.display  = leftHasActive  ? 'block' : 'none';
+    if (el.resizeRight) el.resizeRight.style.display = rightHasActive ? 'block' : 'none';
+
+    /* ── Right panel rail: hide when no panels assigned to right ─ */
+    if (el.rightPanelsRail) {
+      el.rightPanelsRail.style.display = el.rightPanelBtns.children.length ? '' : 'none';
+    }
   }
 
   /* ═══════════════════════════════════════════════════════════════
@@ -383,6 +504,67 @@
 
   function applyLayout() {
     el.workspace.dataset.layout = state.settings.layoutStyle || 'block';
+    var cw = parseInt(state.settings.consoleWidth, 10);
+    if (el.workspace.dataset.layout === 'rounded' && cw > 0) {
+      el.workspace.style.setProperty('--console-width', cw + 'px');
+    } else {
+      el.workspace.style.removeProperty('--console-width');
+    }
+  }
+
+  function applyWrapWidth() {
+    var w = parseInt(state.settings.wrapWidth, 10);
+    if (!state.settings.wrapLines || !(w > 0)) {
+      el.terminal.style.removeProperty('--terminal-wrap-width');
+    } else {
+      el.terminal.style.setProperty('--terminal-wrap-width', w + 'ch');
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     PANEL RESIZE HANDLES
+     ═══════════════════════════════════════════════════════════════ */
+
+  function initResizeHandles() {
+    if (el.resizeLeft)  makeResizable(el.resizeLeft,  el.leftPanels,  'left');
+    if (el.resizeRight) makeResizable(el.resizeRight, el.rightPanels, 'right');
+  }
+
+  function makeResizable(handle, panelEl, side) {
+    handle.addEventListener('mousedown', function (e) {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      var startX = e.clientX;
+      var startW = panelEl.offsetWidth;
+      handle.classList.add('dragging');
+      document.body.style.cursor    = 'col-resize';
+      document.body.style.userSelect = 'none';
+
+      function onMove(e) {
+        var isRounded = el.workspace.dataset.layout === 'rounded';
+        var delta;
+        if (side === 'left') {
+          delta = isRounded ? (startX - e.clientX) : (e.clientX - startX);
+        } else {
+          delta = isRounded ? (e.clientX - startX) : (startX - e.clientX);
+        }
+        var newW  = clampWidth(startW + delta, startW);
+        panelEl.style.width = newW + 'px';
+        state.settings.panelWidths[side] = newW;
+      }
+
+      function onUp() {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup',  onUp);
+        handle.classList.remove('dragging');
+        document.body.style.cursor    = '';
+        document.body.style.userSelect = '';
+        saveSettings();
+      }
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup',  onUp);
+    });
   }
 
   /* ═══════════════════════════════════════════════════════════════
@@ -422,11 +604,18 @@
 
     el.cfgFont.value         = state.settings.font || 'JetBrains Mono';
     el.cfgLayout.value       = state.settings.layoutStyle || 'block';
+    el.cfgKeepInput.checked  = state.settings.keepInput !== false;
     el.cfgTimestamps.checked = !!state.settings.timestamps;
     el.cfgWrap.checked       = !!state.settings.wrapLines;
+    el.cfgWrapWidth.value    = state.settings.wrapWidth != null ? state.settings.wrapWidth : 80;
+    el.cfgHistoryMax.value   = state.settings.historyMax != null ? state.settings.historyMax : 2500;
+    el.cfgConsoleWidth.value = state.settings.consoleWidth != null ? state.settings.consoleWidth : 1000;
     el.cfgStackSep.value     = sanitizeStackSep(state.settings.stackSeparator);
+    el.cfgTsSelectable.checked  = state.settings.tsSelectable !== false;
+    applyTsSelectable();
 
     el.terminal.classList.toggle('nowrap', !state.settings.wrapLines);
+    applyWrapWidth();
 
     renderBuiltinPanelCfg();
     renderGmcpPanels();
@@ -436,7 +625,7 @@
     renderTriggers();
     renderMacros();
     renderMacroBar();
-    renderAnsiColors();
+    renderAnsiPaletteCfg();
   }
 
   /* ── Built-in panel side config (in Config drawer) ──────── */
@@ -444,10 +633,48 @@
   function renderBuiltinPanelCfg() {
     el.builtinPanelCfg.innerHTML = '';
     var sides = state.settings.panelSides;
+    var order = state.settings.panelOrder;
 
-    BUILTIN_PANELS.forEach(function (bp) {
+    order.forEach(function (panelId, orderIdx) {
+      var bp = null;
+      for (var bi = 0; bi < BUILTIN_PANELS.length; bi++) {
+        if (BUILTIN_PANELS[bi].id === panelId) { bp = BUILTIN_PANELS[bi]; break; }
+      }
+      if (!bp) return;
+
       var row = document.createElement('div');
       row.className = 'panel-side-row';
+
+      /* ↑↓ reorder buttons */
+      var orderBtns = document.createElement('div');
+      orderBtns.className = 'order-btns';
+
+      var upBtn = document.createElement('button');
+      upBtn.type = 'button'; upBtn.className = 'order-btn'; upBtn.title = 'Move up';
+      upBtn.textContent = '\u2191'; upBtn.disabled = orderIdx === 0;
+      (function (idx) {
+        upBtn.addEventListener('click', function () {
+          var tmp = state.settings.panelOrder[idx - 1];
+          state.settings.panelOrder[idx - 1] = state.settings.panelOrder[idx];
+          state.settings.panelOrder[idx] = tmp;
+          saveSettings(); renderBuiltinPanelCfg(); applyPanelState();
+        });
+      })(orderIdx);
+
+      var downBtn = document.createElement('button');
+      downBtn.type = 'button'; downBtn.className = 'order-btn'; downBtn.title = 'Move down';
+      downBtn.textContent = '\u2193'; downBtn.disabled = orderIdx === order.length - 1;
+      (function (idx) {
+        downBtn.addEventListener('click', function () {
+          var tmp = state.settings.panelOrder[idx + 1];
+          state.settings.panelOrder[idx + 1] = state.settings.panelOrder[idx];
+          state.settings.panelOrder[idx] = tmp;
+          saveSettings(); renderBuiltinPanelCfg(); applyPanelState();
+        });
+      })(orderIdx);
+
+      orderBtns.appendChild(upBtn);
+      orderBtns.appendChild(downBtn);
 
       var lbl = document.createElement('label');
       lbl.textContent = bp.name;
@@ -469,6 +696,7 @@
         });
       })(bp.id, sel);
 
+      row.appendChild(orderBtns);
       row.appendChild(lbl);
       row.appendChild(sel);
       el.builtinPanelCfg.appendChild(row);
@@ -482,6 +710,35 @@
     el.gmcpPanelList.innerHTML = '';
     state.settings.gmcpPanels.forEach(function (panel, idx) {
       var card = makeItemCard('panel', !!panel.enabled, idx, state.settings.gmcpPanels);
+
+      /* ↑/↓ reorder buttons in card actions */
+      var actions = card.querySelector('.item-card-actions');
+      if (actions) {
+        var upBtn = document.createElement('button');
+        upBtn.type = 'button'; upBtn.className = 'order-btn'; upBtn.title = 'Move up';
+        upBtn.textContent = '\u2191'; upBtn.disabled = idx === 0;
+        (function (i) {
+          upBtn.addEventListener('click', function () {
+            var tmp = state.settings.gmcpPanels[i - 1];
+            state.settings.gmcpPanels[i - 1] = state.settings.gmcpPanels[i];
+            state.settings.gmcpPanels[i] = tmp;
+            saveAndRefresh();
+          });
+        })(idx);
+        var downBtn = document.createElement('button');
+        downBtn.type = 'button'; downBtn.className = 'order-btn'; downBtn.title = 'Move down';
+        downBtn.textContent = '\u2193'; downBtn.disabled = idx === state.settings.gmcpPanels.length - 1;
+        (function (i) {
+          downBtn.addEventListener('click', function () {
+            var tmp = state.settings.gmcpPanels[i + 1];
+            state.settings.gmcpPanels[i + 1] = state.settings.gmcpPanels[i];
+            state.settings.gmcpPanels[i] = tmp;
+            saveAndRefresh();
+          });
+        })(idx);
+        actions.insertBefore(downBtn, actions.firstChild);
+        actions.insertBefore(upBtn, actions.firstChild);
+      }
 
       card.appendChild(makeItemField('Name', 'text', panel.name || '', function (v) {
         panel.name = v; saveAndRefresh();
@@ -513,9 +770,16 @@
     });
 
     /* Rebuild custom panel DOM elements */
-    /* Clear old custom panel buttons from both navs */
-    el.leftPanelBtns.innerHTML  = '';
-    el.rightPanelBtns.innerHTML = '';
+    /* Clear old custom panel buttons only (built-in buttons may be parked here) */
+    var builtinPanelIds = BUILTIN_PANELS.map(function (bp) { return bp.id; });
+    [el.leftPanelBtns, el.rightPanelBtns].forEach(function (container) {
+      var toRemove = [];
+      for (var i = 0; i < container.children.length; i++) {
+        var pid = container.children[i].dataset && container.children[i].dataset.panel;
+        if (!pid || builtinPanelIds.indexOf(pid) < 0) toRemove.push(container.children[i]);
+      }
+      toRemove.forEach(function (node) { node.parentNode.removeChild(node); });
+    });
     /* Clear old custom panel elements */
     el.leftGmcpPanels.innerHTML  = '';
     el.rightGmcpPanels.innerHTML = '';
@@ -568,9 +832,6 @@
         el.leftGmcpPanels.appendChild(div);
       }
     });
-
-    /* Separator visibility (applyPanelState also handles this, but set it here too) */
-    el.rnavSep.hidden = !el.rightPanelBtns.children.length;
   }
 
   /* ── Aliases ─────────────────────────────────────────────── */
@@ -623,7 +884,6 @@
       var card = makeItemCard('macro', !!m.enabled, idx, state.settings.macros);
       card.appendChild(makeItemField('Label',   'text', m.label   || '', function (v) { m.label   = v; saveAndRefresh(); }));
       card.appendChild(makeItemField('Command', 'text', m.command || '', function (v) { m.command = v; saveAndRefresh(); }));
-      card.appendChild(makeItemField('Hotkey',  'text', m.hotkey  || '', function (v) { m.hotkey  = normalizeHotkey(v); saveAndRefresh(); }));
       el.macroList.appendChild(card);
     });
   }
@@ -636,40 +896,9 @@
       btn.type = 'button';
       btn.className = 'macro-btn';
       btn.textContent = m.label || m.command;
-      if (m.hotkey) btn.title = m.hotkey + ': ' + m.command;
       btn.addEventListener('click', function () { sendCommand(m.command); });
       el.macroBar.appendChild(btn);
     });
-  }
-
-  /* ── ANSI color grid ─────────────────────────────────────── */
-
-  function renderAnsiColors() {
-    el.ansiColorGrid.innerHTML = '';
-    for (var i = 0; i < 16; i++) {
-      var wrap = document.createElement('div');
-      wrap.className = 'color-swatch-wrap';
-
-      var pick = document.createElement('input');
-      pick.type  = 'color';
-      pick.value = state.settings.palette16[String(i)] || DEFAULT_16[i];
-      pick.title = 'ANSI ' + i;
-      (function (index, picker) {
-        picker.addEventListener('input', function () {
-          state.settings.palette16[String(index)] = picker.value;
-          rebuildPalette();
-          saveSettings();
-        });
-      })(i, pick);
-
-      var lbl = document.createElement('div');
-      lbl.className = 'color-swatch-label';
-      lbl.textContent = String(i);
-
-      wrap.appendChild(pick);
-      wrap.appendChild(lbl);
-      el.ansiColorGrid.appendChild(wrap);
-    }
   }
 
   /* ═══════════════════════════════════════════════════════════════
@@ -726,10 +955,12 @@
     return scheme + location.host + '/play/ws';
   }
 
-  function connectMud(mudId) {
+  function connectMud(mudId, isReconnect) {
     var mud = LOCKED_MUDS.find(function (m) { return m.id === mudId; });
     if (!mud) { appendSystem('Unknown server profile.'); return; }
     disconnect();
+    state.userDisconnected = false;
+    if (!isReconnect) state.reconnectAttempts = 0;
     state.selectedMudId = mudId;
     setConnectionState('connecting');
     appendSystem('Connecting to ' + mud.name + ' (' + mud.host + ':' + mud.port + ')\u2026');
@@ -739,23 +970,50 @@
       appendSystem('WebSocket open failed.'); setConnectionState('offline'); return;
     }
     state.ws.addEventListener('open', function () {
+      state.reconnectAttempts = 0;
       sendWs({ type: 'connect', host: mud.host, port: mud.port, tls: !!mud.tls });
       setConnectionState('online'); startKeepalive();
     });
     state.ws.addEventListener('message', function (e) { handleBridgeMessage(e.data); });
     state.ws.addEventListener('close', function () {
       stopKeepalive(); setConnectionState('offline');
-      appendSystem('Bridge closed.'); state.ws = null;
+      state.ws = null;
+      if (!state.userDisconnected && state.selectedMudId) {
+        appendSystem('Bridge closed \u2014 attempting to reconnect\u2026');
+        scheduleReconnect();
+      } else {
+        appendSystem('Bridge closed.');
+      }
     });
     state.ws.addEventListener('error', function () { appendSystem('WebSocket error.'); });
   }
 
   function disconnect() {
+    state.userDisconnected = true;
+    if (state.reconnectTimer) { clearTimeout(state.reconnectTimer); state.reconnectTimer = null; }
     stopKeepalive();
     if (!state.ws) return;
     try { sendWs({ type: 'disconnect' }); } catch (_) {}
     try { state.ws.close(); } catch (_) {}
     state.ws = null; setConnectionState('offline');
+  }
+
+  function scheduleReconnect() {
+    if (state.reconnectTimer) return;
+    var MAX_ATTEMPTS = 5;
+    var delays = [3000, 6000, 12000, 24000, 30000];
+    if (state.reconnectAttempts >= MAX_ATTEMPTS) {
+      appendSystem('Auto-reconnect exhausted after ' + MAX_ATTEMPTS + ' attempts \u2014 click Connect to retry.');
+      state.reconnectAttempts = 0;
+      return;
+    }
+    var delay = delays[Math.min(state.reconnectAttempts, delays.length - 1)];
+    appendSystem('Reconnect attempt ' + (state.reconnectAttempts + 1) + '/' + MAX_ATTEMPTS + ' in ' + (delay / 1000) + 's\u2026');
+    state.reconnectTimer = setTimeout(function () {
+      state.reconnectTimer = null;
+      state.reconnectAttempts++;
+      connectMud(state.selectedMudId, true);
+    }, delay);
   }
 
   function setConnectionState(status) {
@@ -861,7 +1119,10 @@
     renderRowContent(row, line, highlighted);
     var atBottom = el.terminal.scrollTop + el.terminal.clientHeight >= el.terminal.scrollHeight - 40;
     el.terminal.appendChild(row);
+    /* track raw data for session persistence (system + game lines) */
+    state.scrollback.push({ line: line, highlighted: !!highlighted, time: nowTime() });
     trimTerminal();
+    scheduleScrollbackSave();
     if (atBottom) el.terminal.scrollTop = el.terminal.scrollHeight;
   }
 
@@ -873,7 +1134,11 @@
       ts.className = 'ts'; ts.textContent = '[' + nowTime() + ']';
       row.appendChild(ts);
     }
-    row.appendChild(window.AnsiRenderer.renderAnsiLine(line, state.ansiPalette));
+    /* Wrap game output in .game-text so --terminal-wrap-width excludes the .ts stamp */
+    var wrapper = document.createElement('span');
+    wrapper.className = 'game-text';
+    wrapper.appendChild(window.AnsiRenderer.renderAnsiLine(line, state.ansiPalette));
+    row.appendChild(wrapper);
   }
 
   function upsertPartialRow(line) {
@@ -889,20 +1154,64 @@
   }
 
   function trimTerminal() {
-    var max = 2000;
+    var max = (state.settings.historyMax > 0) ? state.settings.historyMax : Infinity;
     while (el.terminal.childNodes.length > max) el.terminal.removeChild(el.terminal.firstChild);
+    if (max !== Infinity && state.scrollback.length > max) {
+      state.scrollback = state.scrollback.slice(state.scrollback.length - max);
+    }
   }
 
   function appendSystem(text)   { appendAnsiLine('\x1b[1;36m[system]\x1b[0m ' + text, false); }
   function appendOutgoing(text) { appendAnsiLine('\x1b[1;35m>\x1b[0m ' + text, false); }
+
+  /* ── Scrollback persistence ──────────────────────────────── */
+
+  var _scrollbackTimer = null;
+  function scheduleScrollbackSave() {
+    if (_scrollbackTimer) return;
+    _scrollbackTimer = setTimeout(function () {
+      _scrollbackTimer = null;
+      try {
+        localStorage.setItem(SCROLLBACK_KEY, JSON.stringify(state.scrollback));
+      } catch (_) { /* storage full — silently skip */ }
+    }, 500);
+  }
+
+  function loadScrollback() {
+    try {
+      var raw = localStorage.getItem(SCROLLBACK_KEY);
+      if (!raw) return;
+      var items = JSON.parse(raw);
+      if (!Array.isArray(items)) return;
+      /* Rebuild in-memory scrollback directly (avoids double-push and re-triggers) */
+      state.scrollback = items.filter(function (item) {
+        return item && typeof item.line === 'string';
+      }).map(function (item) {
+        return { line: item.line, highlighted: !!item.highlighted, time: item.time || '' };
+      });
+      /* Render to DOM */
+      state.scrollback.forEach(function (item) {
+        var row = document.createElement('div');
+        renderRowContent(row, item.line, item.highlighted);
+        el.terminal.appendChild(row);
+      });
+      trimTerminal();
+      el.terminal.scrollTop = el.terminal.scrollHeight;
+    } catch (_) {}
+  }
 
   /* ═══════════════════════════════════════════════════════════════
      COMMAND SENDING
      ═══════════════════════════════════════════════════════════════ */
 
   function submitInputCommand(raw) {
-    el.cmdInput.value = '';
-    sendCommand(String(raw || ''));
+    var cmd = String(raw || '');
+    if (state.settings.keepInput !== false) {
+      requestAnimationFrame(function () { el.cmdInput.select(); });
+    } else {
+      el.cmdInput.value = '';
+    }
+    sendCommand(cmd);
   }
 
   function sendCommand(cmd, opts) {
@@ -975,62 +1284,6 @@
     if (state.cmdHistory.length > 200) state.cmdHistory.shift();
     state.historyIdx = -1;
   }
-
-  /* ═══════════════════════════════════════════════════════════════
-     GLOBAL HOTKEYS
-     ═══════════════════════════════════════════════════════════════ */
-
-  function onGlobalKeydown(e) {
-    if (e.defaultPrevented) return;
-    var active = document.activeElement;
-    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) return;
-    var combo = eventToCombo(e);
-    if (!combo) return;
-    var hit = state.settings.macros.find(function (m) {
-      return m.enabled && m.command && normalizeHotkey(m.hotkey) === combo;
-    });
-    if (!hit) return;
-    e.preventDefault(); sendCommand(hit.command);
-  }
-
-  function eventToCombo(e) {
-    var key = String(e.key || '');
-    if (!key) return '';
-    if (key === 'Control' || key === 'Shift' || key === 'Alt' || key === 'Meta') return '';
-    if (key.length === 1) key = key.toUpperCase();
-    var parts = [];
-    if (e.ctrlKey)  parts.push('Ctrl');
-    if (e.altKey)   parts.push('Alt');
-    if (e.shiftKey) parts.push('Shift');
-    if (e.metaKey)  parts.push('Meta');
-    parts.push(key); return parts.join('+');
-  }
-
-  function normalizeHotkey(text) {
-    var raw = String(text || '').trim();
-    if (!raw) return '';
-    var parts = raw.split('+').map(function (p) { return p.trim(); }).filter(Boolean);
-    if (!parts.length) return '';
-    var flags = { ctrl: false, alt: false, shift: false, meta: false };
-    var key = '';
-    parts.forEach(function (p) {
-      var n = p.toLowerCase();
-      if (n === 'ctrl' || n === 'control')                     flags.ctrl  = true;
-      else if (n === 'alt' || n === 'option')                  flags.alt   = true;
-      else if (n === 'shift')                                   flags.shift = true;
-      else if (n === 'meta' || n === 'cmd' || n === 'command') flags.meta  = true;
-      else key = p;
-    });
-    if (!key) return '';
-    if (key.length === 1) key = key.toUpperCase();
-    var out = [];
-    if (flags.ctrl)  out.push('Ctrl');
-    if (flags.alt)   out.push('Alt');
-    if (flags.shift) out.push('Shift');
-    if (flags.meta)  out.push('Meta');
-    out.push(key); return out.join('+');
-  }
-
   /* ═══════════════════════════════════════════════════════════════
      SETTINGS IMPORT / EXPORT / RESET
      ═══════════════════════════════════════════════════════════════ */
@@ -1063,6 +1316,7 @@
   function resetLocalSettings() {
     if (!window.confirm('Reset all FREIGN Play 2 settings? This cannot be undone.')) return;
     disconnect(); clearSavedKeys();
+    localStorage.removeItem(SCROLLBACK_KEY);
     state.settings   = clone(DEFAULT_SETTINGS);
     state.cmdHistory = []; state.historyIdx = -1;
     state.lineCarry  = ''; state.lastCmd    = '';
@@ -1100,6 +1354,28 @@
     out.bridgeUrl      = typeof incoming.bridgeUrl   === 'string'  ? incoming.bridgeUrl  : base.bridgeUrl;
     out.openPanels     = Array.isArray(incoming.openPanels) ? incoming.openPanels.filter(function(v) { return typeof v === 'string'; }) : clone(base.openPanels);
 
+    out.keepInput     = typeof incoming.keepInput === 'boolean' ? incoming.keepInput : base.keepInput;
+    out.wrapWidth     = (typeof incoming.wrapWidth === 'number' && incoming.wrapWidth >= 0)
+                        ? Math.floor(incoming.wrapWidth) : base.wrapWidth;
+    out.historyMax    = (typeof incoming.historyMax === 'number' && incoming.historyMax >= 0)
+                        ? Math.floor(incoming.historyMax) : base.historyMax;
+    out.consoleWidth  = (typeof incoming.consoleWidth === 'number' && incoming.consoleWidth >= 320)
+                        ? Math.min(1920, Math.floor(incoming.consoleWidth)) : base.consoleWidth;
+    out.panelOrder = (function () {
+      var valid = BUILTIN_PANELS.map(function (bp) { return bp.id; });
+      if (!Array.isArray(incoming.panelOrder)) return valid.slice();
+      var result = incoming.panelOrder.filter(function (id) { return valid.indexOf(id) >= 0; });
+      valid.forEach(function (id) { if (result.indexOf(id) < 0) result.push(id); });
+      return result;
+    })();
+    out.tsSelectable  = typeof incoming.tsSelectable  === 'boolean' ? incoming.tsSelectable  : base.tsSelectable;
+    out.logTimestamps = typeof incoming.logTimestamps === 'boolean' ? incoming.logTimestamps : base.logTimestamps;
+    var inPW = incoming.panelWidths || {};
+    out.panelWidths = {
+      left:  clampWidth(inPW.left,  base.panelWidths.left),
+      right: clampWidth(inPW.right, base.panelWidths.right),
+    };
+
     out.panelSides = {};
     var src = incoming.panelSides || {};
     BUILTIN_PANELS.forEach(function (bp) {
@@ -1123,7 +1399,7 @@
 
     out.macros = Array.isArray(incoming.macros)
       ? incoming.macros.map(function (m) {
-          return { enabled: m.enabled !== false, label: String(m.label || ''), command: String(m.command || ''), hotkey: normalizeHotkey(m.hotkey) };
+          return { enabled: m.enabled !== false, label: String(m.label || ''), command: String(m.command || '') };
         })
       : [];
 
@@ -1167,11 +1443,94 @@
 
   function isHexColor(v) { return typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v); }
   function oneOf(v, vals, d) { return vals.indexOf(v) >= 0 ? v : d; }
+  function clampWidth(v, def) { var n = parseInt(v, 10); return (!isNaN(n) && n >= 150 && n <= 600) ? n : (def || 230); }
   function clone(v)   { return JSON.parse(JSON.stringify(v)); }
   function nowTime()  { return new Date().toLocaleTimeString('en-US', { hour12: false }); }
   function uid()      { return Math.random().toString(36).slice(2, 10); }
+  function pad2(n)    { return n < 10 ? '0' + n : String(n); }
   function escHtml(s) {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  /* ── Timestamp selectability ──────────────────────────────────────────────── */
+  function applyTsSelectable() {
+    el.terminal.classList.toggle('ts-selectable', state.settings.tsSelectable !== false);
+  }
+
+  /* ── Log export ─────────────────────────────────────────────────────── */
+  function exportLog(includeTs) {
+    var stripAnsi = /\x1b\[[0-9;]*[mGKHF]/g;
+    var lines = state.scrollback.map(function (item) {
+      var text = String(item.line || '').replace(stripAnsi, '');
+      return (includeTs && item.time) ? '[' + item.time + '] ' + text : text;
+    });
+    var blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+    var url  = URL.createObjectURL(blob);
+    var a    = document.createElement('a');
+    var now  = new Date();
+    var stamp = now.getFullYear() + '-' + pad2(now.getMonth() + 1) + '-' + pad2(now.getDate()) +
+                '_' + pad2(now.getHours()) + pad2(now.getMinutes());
+    a.href = url; a.download = 'freign-log-' + stamp + '.txt';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  /* ── ANSI palette config UI ───────────────────────────────────────────── */
+  function renderAnsiPaletteCfg() {
+    if (!el.ansiPaletteCfg) return;
+    el.ansiPaletteCfg.innerHTML = '';
+    var grid = document.createElement('div');
+    grid.className = 'ansi-color-grid';
+    for (var i = 0; i < 16; i++) {
+      (function (idx) {
+        var row = document.createElement('div');
+        row.className = 'ansi-color-row';
+        var inp = document.createElement('input');
+        inp.type = 'color';
+        inp.value = state.settings.palette16[String(idx)] || DEFAULT_16[idx];
+        inp.title = ANSI_COLOR_NAMES[idx];
+        inp.addEventListener('input', function () {
+          state.settings.palette16[String(idx)] = inp.value;
+          rebuildPalette();
+          saveSettings();
+        });
+        var lbl = document.createElement('span');
+        lbl.textContent = ANSI_COLOR_NAMES[idx];
+        lbl.className = 'ansi-color-label';
+        var resetBtn = document.createElement('button');
+        resetBtn.type = 'button';
+        resetBtn.className = 'ansi-reset-btn';
+        resetBtn.textContent = '\u21ba';
+        resetBtn.title = 'Reset to default';
+        (function (i2, input) {
+          resetBtn.addEventListener('click', function () {
+            state.settings.palette16[String(i2)] = DEFAULT_16[i2];
+            input.value = DEFAULT_16[i2];
+            rebuildPalette();
+            saveSettings();
+          });
+        })(idx, inp);
+        row.appendChild(inp);
+        row.appendChild(lbl);
+        row.appendChild(resetBtn);
+        grid.appendChild(row);
+      })(i);
+    }
+    var resetAll = document.createElement('button');
+    resetAll.type = 'button';
+    resetAll.className = 'full-btn';
+    resetAll.style.marginTop = '8px';
+    resetAll.textContent = 'Reset All to Defaults';
+    resetAll.addEventListener('click', function () {
+      for (var j = 0; j < 16; j++) {
+        state.settings.palette16[String(j)] = DEFAULT_16[j];
+      }
+      rebuildPalette();
+      saveSettings();
+      renderAnsiPaletteCfg();
+    });
+    el.ansiPaletteCfg.appendChild(grid);
+    el.ansiPaletteCfg.appendChild(resetAll);
   }
 
 })();

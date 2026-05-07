@@ -8,10 +8,29 @@
 html, body {
   height: 100%;
   overflow: hidden;
-  font-family: var(--terminal-font, 'JetBrains Mono', 'Fira Code', 'Consolas', monospace);
+  font-family: 'Azeret Mono', monospace;
   font-size: 13px;
   background: var(--bg);
   color: var(--text);
+}
+
+/* Terminal and panel content use the user-chosen font (Config › Font) */
+#terminal,
+.panel-body {
+  font-family: var(--terminal-font, 'JetBrains Mono', 'Fira Code', 'Consolas', monospace);
+}
+
+/* ── Shellbar font correction ────────────────────────────────────────────────
+   play2 sets html { font-size: 13px } while the rest of the site uses the
+   browser default 16px. site-shell.css hardcodes nav text at 14px, which
+   ends up larger than the 13px base and looks oversized vs every other page.
+   Pin shellbar text to 13px so it matches the play2 chrome. */
+.fr-nav-item,
+.fr-theme-addr,
+.fr-theme-sep,
+.fr-theme-label,
+#site-theme-select {
+  font-size: 13px;
 }
 
 .sr-only {
@@ -24,54 +43,121 @@ html, body {
 
 /* ═══════════════════════════════════════════════════════════════
    WORKSPACE GRID
-   [left-rail] [center] [right-rail]
+   [left-rail] [center] [right-panels-rail] [right-settings-rail]
    ═══════════════════════════════════════════════════════════════ */
 
 #workspace {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr auto auto;
   grid-template-rows: 1fr;
   height: calc(100vh - var(--shellbar-h, 42px));
   overflow: hidden;
 }
 
-/* ─── Rounded layout ──────────────────────────────────────────
-   Adds gaps, rounded corners, floating-card feel.
+/* ─── Rounded / floating layout ──────────────────────────────
+   Console stays at a fixed configurable width (--console-width).
+   Panel rails sit flush against the console and expand OUTWARD —
+   left panel grows left, right panel grows right — into the free
+   space on each side. Settings rail is fixed at the viewport edge.
    ──────────────────────────────────────────────────────────── */
-#workspace[data-layout="rounded"] {
-  gap: 8px;
-  padding: 8px;
-  background: color-mix(in srgb, var(--bg) 80%, black);
-  align-items: stretch;
+
+/* Darken the page so the cards float against it */
+body:has(#workspace[data-layout="rounded"]) {
+  background: color-mix(in srgb, var(--bg) 45%, black);
 }
 
+#workspace[data-layout="rounded"] {
+  /* 1fr spacer | console (auto = var(--console-width)) | 1fr spacer */
+  /* Settings rail is position:fixed so not in flow */
+  grid-template-columns: 1fr auto 1fr;
+  gap: 10px;
+  padding: 10px;
+  padding-right: 64px; /* reserve room for fixed settings rail */
+  align-items: stretch;
+  background: transparent;
+}
+
+/* Explicit grid placement */
+#workspace[data-layout="rounded"] #left-rail         { grid-column: 1; justify-self: end; }
+#workspace[data-layout="rounded"] #center            { grid-column: 2; width: var(--console-width, 720px); }
+#workspace[data-layout="rounded"] #right-panels-rail { grid-column: 3; justify-self: start; }
+
+/* Cards */
 #workspace[data-layout="rounded"] #left-rail {
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
+  border: 1px solid var(--panel-border);
+  box-shadow: 0 4px 24px color-mix(in srgb, black 40%, transparent);
 }
 
 #workspace[data-layout="rounded"] #center {
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
   border: 1px solid var(--panel-border);
+  box-shadow: 0 4px 24px color-mix(in srgb, black 40%, transparent);
 }
 
-#workspace[data-layout="rounded"] #right-rail {
-  border-radius: 10px;
-  overflow: hidden;
+#workspace[data-layout="rounded"] #right-panels-rail {
+  border-radius: 12px;
+  overflow: visible;
+  border: 1px solid var(--panel-border);
+  box-shadow: 0 4px 24px color-mix(in srgb, black 40%, transparent);
 }
 
-#workspace[data-layout="rounded"] #topbar {
-  border-radius: 10px 10px 0 0;
+/* Flatten inner sub-borders so they don't fight the card edge */
+#workspace[data-layout="rounded"] #left-rail         { border-right: none; }
+#workspace[data-layout="rounded"] #left-nav          { border-right-color: color-mix(in srgb, var(--panel-border) 40%, transparent); }
+#workspace[data-layout="rounded"] #right-panels-rail { border-left: none; }
+
+/* Flip rail internals so panels expand AWAY from the console:
+   Left rail:  [resize][panels][nav] — nav is rightmost (flush to console), panel expands left
+   Right rail: [nav][panels][resize] — nav is leftmost (flush to console), panel expands right */
+#workspace[data-layout="rounded"] #left-rail         { flex-direction: row-reverse; }
+#workspace[data-layout="rounded"] #right-panels-rail { flex-direction: row-reverse; }
+
+/* With the reversed flex, the inner divider on left-nav is now on its left side */
+#workspace[data-layout="rounded"] #left-nav {
+  border-right: none;
+  border-left: 1px solid color-mix(in srgb, var(--panel-border) 40%, transparent);
 }
 
-#workspace[data-layout="rounded"] #cmd-form {
-  border-radius: 0 0 10px 10px;
+/* Settings rail + drawer: fixed to viewport right */
+body:has(#workspace[data-layout="rounded"]) #right-settings-rail {
+  position: fixed;
+  right: 0;
+  top: var(--shellbar-h, 42px);
+  height: calc(100vh - var(--shellbar-h, 42px));
+  z-index: 50;
 }
 
-#workspace[data-layout="rounded"] #vitals-strip {
-  border-radius: 0;
+body:has(#workspace[data-layout="rounded"]) #settings-drawer {
+  position: fixed;
+  right: 54px;
+  top: var(--shellbar-h, 42px);
+  height: calc(100vh - var(--shellbar-h, 42px));
+  z-index: 49;
 }
+
+/* In rounded mode the rail is row-reversed, so the divider belongs on the left of #right-panels
+   (between nav and panels), not the right (which would face the resize handle). */
+#workspace[data-layout="rounded"] #right-panels {
+  border-right: none;
+  border-left: 1px solid transparent;
+  transition: width 220ms ease, border-left-color 220ms;
+}
+#workspace[data-layout="rounded"] #right-panels:has(.panel.active),
+#workspace[data-layout="rounded"] #right-panels.has-active {
+  border-left-color: color-mix(in srgb, var(--panel-border) 50%, transparent);
+}
+/* Suppress the nav's own left border in rounded mode — it sits at the card edge */
+#workspace[data-layout="rounded"] #right-panels-nav,
+#workspace[data-layout="rounded"] #right-panels:has(.panel.active) ~ #right-panels-nav,
+#workspace[data-layout="rounded"] #right-panels.has-active ~ #right-panels-nav {
+  border-left: none;
+}
+
+#workspace[data-layout="rounded"] #topbar   { border-radius: 12px 12px 0 0; }
+#workspace[data-layout="rounded"] #cmd-form { border-radius: 0 0 12px 12px; }
 
 /* ═══════════════════════════════════════════════════════════════
    LEFT RAIL
@@ -158,6 +244,31 @@ html, body {
 
 #left-panels:has(.panel.active) { width: 230px; }
 #left-panels.has-active         { width: 230px; }
+
+/* ─── Drag-to-resize handles ───────────────────────────────── */
+.resize-handle {
+  width: 5px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  position: relative;
+  z-index: 5;
+  background: transparent;
+  display: none; /* JS shows it when a panel is open */
+}
+
+.resize-handle::after {
+  content: '';
+  position: absolute;
+  inset: 20% 1px;
+  background: color-mix(in srgb, var(--panel-border) 50%, transparent);
+  border-radius: 2px;
+  transition: background 120ms;
+}
+
+.resize-handle:hover::after,
+.resize-handle.dragging::after {
+  background: var(--accent);
+}
 
 /* ─── Shared panel container (both rails) ──────────────────── */
 
@@ -376,13 +487,12 @@ html, body {
 }
 
 .line {
-  white-space: pre-wrap;
-  word-break: break-word;
+  /* white-space / word-break live on .game-text so wrap-width excludes the .ts span */
+  display: block;
 }
 
 #terminal.nowrap .line {
-  white-space: pre;
-  word-break: normal;
+  overflow-x: auto;
 }
 
 .line.highlight {
@@ -398,6 +508,27 @@ html, body {
   font-size: 10.5px;
   opacity: 0.55;
   user-select: none;
+  display: inline-block;
+  vertical-align: top;
+  flex-shrink: 0;
+}
+
+/* Config: timestamps selectable — overrides the default user-select: none */
+#terminal.ts-selectable .ts { user-select: text; }
+
+/* Game output wrapper — receives the wrap-width CSS variable */
+.game-text {
+  display: inline-block;
+  vertical-align: top;
+  max-width: var(--terminal-wrap-width, none);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+#terminal.nowrap .game-text {
+  white-space: pre;
+  word-break: normal;
 }
 
 /* ── Macro bar ─────────────────────────────────────────────── */
@@ -516,8 +647,19 @@ html, body {
   transition: border-color 150ms, background 150ms;
 }
 
-#cmd-input:focus {
+#cmd-form:focus-within {
+  border-top-color: var(--accent);
+  box-shadow: 0 0 22px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+#cmd-form:focus-within #cmd-prompt,
+#cmd-form:focus-within #cmd-input,
+#cmd-form:focus-within #btn-repeat,
+#cmd-form:focus-within #cmd-send {
   border-color: var(--accent);
+}
+
+#cmd-form:focus-within #cmd-input {
   background: color-mix(in srgb, var(--input-bg) 88%, var(--accent));
 }
 
@@ -562,37 +704,74 @@ html, body {
 #cmd-send:hover { filter: brightness(1.12); }
 
 /* ═══════════════════════════════════════════════════════════════
-   RIGHT RAIL — PANELS + SETTINGS
+   RIGHT PANEL RAIL  [resize-handle | right-panels | right-panels-nav]
    ═══════════════════════════════════════════════════════════════ */
 
-#right-rail {
+#right-panels-rail {
   display: flex;
-  flex-direction: row;          /* right-panels | right-nav | (absolute) settings-drawer */
+  flex-direction: row;
   min-height: 0;
   position: relative;
   border-left: 1px solid var(--panel-border);
   background: var(--panel);
 }
 
-/* ── Right panel area (mirrors left-panels) ────────────────── */
+/* ── Right panel area ──────────────────────────────────────── */
 
 #right-panels {
   display: flex;
   flex-direction: column;
   width: 0;
   overflow: hidden;
-  transition: width 220ms ease;
-  border-right: 1px solid color-mix(in srgb, var(--panel-border) 50%, transparent);
+  transition: width 220ms ease, border-right-color 220ms;
+  border-right: 1px solid transparent;
 }
 
-#right-panels:has(.panel.active) { width: 230px; }
-#right-panels.has-active         { width: 230px; }
+#right-panels:has(.panel.active) { width: 230px; border-right-color: color-mix(in srgb, var(--panel-border) 50%, transparent); }
+#right-panels.has-active         { width: 230px; border-right-color: color-mix(in srgb, var(--panel-border) 50%, transparent); }
 
 #right-gmcp-panels {
   display: contents;
 }
 
-/* ── Right icon nav ────────────────────────────────────────── */
+/* ── Right panel nav (mirrors left-nav) ────────────────────── */
+
+#right-panels-nav {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 54px;
+  padding: 6px 0;
+  gap: 2px;
+  border-left: 1px solid transparent;
+  transition: border-left-color 220ms;
+  flex-shrink: 0;
+}
+
+/* Show divider only when a panel is actually open */
+#right-panels:has(.panel.active) ~ #right-panels-nav,
+#right-panels.has-active ~ #right-panels-nav {
+  border-left-color: color-mix(in srgb, var(--panel-border) 50%, transparent);
+}
+
+#right-panel-btns {
+  display: contents;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RIGHT SETTINGS RAIL  [right-nav + (absolute) settings-drawer]
+   ═══════════════════════════════════════════════════════════════ */
+
+#right-settings-rail {
+  display: flex;
+  flex-direction: row;
+  min-height: 0;
+  position: relative;
+  border-left: 1px solid var(--panel-border);
+  background: var(--panel);
+}
+
+/* ── Settings icon nav ─────────────────────────────────────── */
 
 #right-nav {
   display: flex;
@@ -603,20 +782,6 @@ html, body {
   gap: 2px;
   flex-shrink: 0;
 }
-
-#right-panel-btns {
-  display: contents;
-}
-
-/* Separator between panel buttons and settings buttons */
-#rnav-sep {
-  width: 32px;
-  height: 1px;
-  background: color-mix(in srgb, var(--panel-border) 50%, transparent);
-  margin: 4px 0;
-}
-
-#rnav-sep[hidden] { display: none; }
 
 .rnav-btn {
   display: flex;
@@ -659,6 +824,48 @@ html, body {
   font-size: 8px;
   line-height: 1;
 }
+
+/* Push the Save Log button to the bottom of the rail */
+#btn-save-log { margin-top: auto; }
+
+/* ── Log save popup ────────────────────────────────────────── */
+
+#log-save-popup {
+  position: absolute;
+  bottom: 50px;
+  right: 54px;
+  width: 220px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  box-shadow: -4px -4px 20px color-mix(in srgb, var(--bg) 60%, transparent);
+  padding: 12px 14px 14px;
+  z-index: 20;
+  animation: slideIn 150ms ease;
+}
+
+.log-popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text);
+}
+
+.log-popup-header button {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+  line-height: 1;
+}
+
+.log-popup-header button:hover { color: var(--text); }
 
 /* ── Settings drawer ───────────────────────────────────────── */
 
@@ -894,6 +1101,26 @@ html, body {
   background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
 
+.danger-btn {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, #e06c75 40%, var(--panel-border));
+  border-radius: 4px;
+  color: color-mix(in srgb, #e06c75 70%, var(--muted));
+  cursor: pointer;
+  width: 100%;
+  transition: color 120ms, border-color 120ms, background 120ms;
+}
+
+.danger-btn:hover {
+  color: #e06c75;
+  border-color: #e06c75;
+  background: color-mix(in srgb, #e06c75 8%, transparent);
+}
+
 /* ── Builtin panel side config ─────────────────────────────── */
 
 #builtin-panel-cfg {
@@ -930,6 +1157,84 @@ html, body {
 }
 
 .panel-side-row select:focus { border-color: var(--accent); }
+
+/* ── Panel / GMCP reorder buttons ─────────────────────────────────── */
+
+.order-btns {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+
+.order-btn {
+  font: inherit;
+  font-size: 9px;
+  line-height: 1;
+  padding: 1px 4px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 2px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.order-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 15%, var(--input-bg));
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.order-btn:disabled { opacity: 0.3; cursor: default; }
+
+/* ── ANSI color palette config ───────────────────────────────────── */
+
+.ansi-color-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ansi-color-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ansi-color-row input[type="color"] {
+  width: 28px;
+  height: 20px;
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+  padding: 1px;
+  cursor: pointer;
+  background: none;
+  flex-shrink: 0;
+}
+
+.ansi-color-label {
+  font-size: 10.5px;
+  color: var(--muted);
+  flex: 1;
+}
+
+.ansi-reset-btn {
+  font: inherit;
+  font-size: 11px;
+  padding: 1px 5px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+  color: var(--muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ansi-reset-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
 
 /* ── Item cards (alias / trigger / macro / gmcp-panel) ─────── */
 

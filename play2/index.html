@@ -87,6 +87,7 @@
         <div id="left-gmcp-panels"></div>
 
       </div><!-- /left-panels -->
+      <div class="resize-handle" id="resize-left" aria-hidden="true"></div>
     </div><!-- /left-rail -->
 
     <!-- CENTER TERMINAL -->
@@ -100,8 +101,6 @@
         </div>
         <div id="topbar-right">
           <span id="conn-status" class="offline" aria-live="polite">&#9679; Offline</span>
-          <button id="btn-public"     type="button" class="hdr-btn">Public</button>
-          <button id="btn-test"       type="button" class="hdr-btn">Test</button>
           <button id="btn-disconnect" type="button" class="hdr-btn danger">Disconnect</button>
         </div>
       </header>
@@ -142,21 +141,31 @@
 
     </div><!-- /center -->
 
-    <!-- RIGHT RAIL -->
-    <div id="right-rail">
+    <!-- RIGHT PANEL RAIL (mirrors left-rail: panel nav + panels, no settings) -->
+    <div id="right-panels-rail">
 
-      <!-- Collapsible right-side panel area (panels whose side = right) -->
+      <!-- Drag handle: left edge of rail — drag left to widen panels -->
+      <div class="resize-handle" id="resize-right" aria-hidden="true"></div>
+
+      <!-- Collapsible right-side panel area -->
       <div id="right-panels">
         <!-- Right-side custom GMCP panels injected by JS -->
         <div id="right-gmcp-panels"></div>
       </div>
 
-      <!-- Icon strip: panel toggles (top) + settings drawers (bottom) -->
-      <nav id="right-nav" aria-label="Panels and Settings">
-        <!-- Nav buttons for right-side panels injected by JS -->
+      <!-- Panel icon strip: right-side panels only (mirrors left-nav) -->
+      <nav id="right-panels-nav" aria-label="Right panel tabs">
+        <!-- Panel toggle buttons injected by JS -->
         <div id="right-panel-btns"></div>
-        <!-- Separator: only shown when right-panel-btns has children -->
-        <div id="rnav-sep" aria-hidden="true" hidden></div>
+      </nav>
+
+    </div><!-- /right-panels-rail -->
+
+    <!-- RIGHT SETTINGS RAIL -->
+    <div id="right-settings-rail">
+
+      <!-- Settings icon strip -->
+      <nav id="right-nav" aria-label="Settings">
         <button class="rnav-btn" data-drawer="connect"  type="button" title="Connection">
           <span class="rnav-icon" aria-hidden="true">&#9889;</span>
           <span class="rnav-label">Connect</span>
@@ -177,9 +186,18 @@
           <span class="rnav-icon" aria-hidden="true">&#8984;</span>
           <span class="rnav-label">Macros</span>
         </button>
-        <button class="rnav-btn" data-drawer="colors"   type="button" title="ANSI Colors">
-          <span class="rnav-icon" aria-hidden="true">&#9672;</span>
+        <button class="rnav-btn" data-drawer="colors"  type="button" title="ANSI Colors">
+          <span class="rnav-icon" aria-hidden="true">&#9671;</span>
           <span class="rnav-label">Colors</span>
+        </button>
+        <button class="rnav-btn" data-drawer="panels"  type="button" title="Panels">
+          <span class="rnav-icon" aria-hidden="true">&#9638;</span>
+          <span class="rnav-label">Panels</span>
+        </button>
+        <!-- Save Log: bottom-aligned, not a drawer -->
+        <button class="rnav-btn" id="btn-save-log" type="button" title="Save Session Log">
+          <span class="rnav-icon" aria-hidden="true">&#8595;</span>
+          <span class="rnav-label">Log</span>
         </button>
       </nav>
 
@@ -241,6 +259,10 @@
                   <option value="rounded">Rounded</option>
                 </select>
               </div>
+              <div class="field-row">
+                <label for="cfg-console-width">Console Width <span class="hint-text">(px)</span></label>
+                <input id="cfg-console-width" type="number" min="320" max="1920" step="10" style="width:80px" />
+              </div>
             </div>
 
             <div class="dpane-section">
@@ -250,33 +272,67 @@
                 <input id="cfg-timestamps" type="checkbox" />
               </div>
               <div class="field-row">
+                <label for="cfg-ts-selectable">Timestamps selectable</label>
+                <input id="cfg-ts-selectable" type="checkbox" />
+              </div>
+              <div class="field-row">
                 <label for="cfg-wrap">Line Wrap</label>
                 <input id="cfg-wrap" type="checkbox" />
+              </div>
+              <div class="field-row">
+                <label for="cfg-wrap-width">Wrap Width <span class="hint-text">(0=off)</span></label>
+                <input id="cfg-wrap-width" type="number" min="0" max="999" step="1" style="width:70px" />
+              </div>
+            </div>
+
+            <div class="dpane-section">
+              <div class="dpane-label">Console</div>
+              <div class="field-row">
+                <label for="cfg-history-max">History <span class="hint-text">(0=no limit)</span></label>
+                <input id="cfg-history-max" type="number" min="0" step="100" style="width:80px" />
+              </div>
+              <div class="field-row">
+                <button id="cfg-clear-history" type="button" class="danger-btn">Clear history</button>
               </div>
             </div>
 
             <div class="dpane-section">
               <div class="dpane-label">Input</div>
               <div class="field-row">
+                <label for="cfg-keep-input">Keep input after send</label>
+                <input id="cfg-keep-input" type="checkbox" />
+              </div>
+              <div class="field-row">
                 <label for="cfg-stack-sep">Stack Separator</label>
                 <input id="cfg-stack-sep" type="text" maxlength="4" placeholder=";" />
               </div>
             </div>
 
+          </div><!-- /dpane-config -->
+
+          <!-- ANSI COLORS -->
+          <div class="drawer-pane" id="dpane-colors">
             <div class="dpane-section">
-              <div class="dpane-label">Panel Sides</div>
-              <p class="hint-text">Assign each built-in panel to the left or right side. Changes take effect immediately.</p>
+              <div class="dpane-label">ANSI Colors</div>
+              <p class="hint-text">Customize the 16 terminal colors. Changes apply immediately to all output.</p>
+              <div id="ansi-palette-cfg"></div>
+            </div>
+          </div>
+
+          <!-- PANELS -->
+          <div class="drawer-pane" id="dpane-panels">
+            <div class="dpane-section">
+              <div class="dpane-label">Built-in Panels</div>
+              <p class="hint-text">Reorder with &#8593;&#8595;, assign each panel to the left or right rail.</p>
               <div id="builtin-panel-cfg"></div>
             </div>
-
             <div class="dpane-section">
               <div class="dpane-label">Custom GMCP Panels</div>
               <p class="hint-text">Add panels for specific GMCP packages. Choose which side each panel appears on.</p>
               <div id="gmcp-panel-list" class="item-list"></div>
               <button id="add-gmcp-panel" type="button" class="add-btn">+ Add Panel</button>
             </div>
-
-          </div><!-- /dpane-config -->
+          </div>
 
           <!-- ALIASES -->
           <div class="drawer-pane" id="dpane-aliases">
@@ -302,25 +358,29 @@
           <div class="drawer-pane" id="dpane-macros">
             <div class="dpane-section">
               <div class="dpane-label">Macros</div>
-              <p class="hint-text">Macros appear as quick-access buttons above the input bar. Assign a hotkey (e.g. Alt+1, F5) to trigger anywhere.</p>
+              <p class="hint-text">Macros appear as quick-access buttons above the input bar.</p>
               <div id="macro-list" class="item-list"></div>
               <button id="add-macro" type="button" class="add-btn">+ Add Macro</button>
-            </div>
-          </div>
-
-          <!-- ANSI COLORS -->
-          <div class="drawer-pane" id="dpane-colors">
-            <div class="dpane-section">
-              <div class="dpane-label">ANSI Color Palette (0&#x2013;15)</div>
-              <p class="hint-text">Customize the 16 base ANSI colors used to render game text.</p>
-              <div id="ansi-color-grid" class="color-grid"></div>
             </div>
           </div>
 
         </div><!-- /drawer-body -->
       </div><!-- /settings-drawer -->
 
-    </div><!-- /right-rail -->
+      <!-- Log save popup -->
+      <div id="log-save-popup" hidden>
+        <div class="log-popup-header">
+          <span>Save Session Log</span>
+          <button id="log-popup-close" type="button" title="Close">&#x2715;</button>
+        </div>
+        <div class="field-row">
+          <label for="log-popup-timestamps">Include timestamps</label>
+          <input id="log-popup-timestamps" type="checkbox" />
+        </div>
+        <button id="log-popup-save" type="button" class="full-btn" style="margin-top:10px">Save .txt</button>
+      </div>
+
+    </div><!-- /right-settings-rail -->
 
   </div><!-- /workspace -->
 

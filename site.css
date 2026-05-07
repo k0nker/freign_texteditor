@@ -60,7 +60,7 @@ html, body {
     radial-gradient(900px 540px at 95% 10%, color-mix(in srgb, var(--panel-border) 20%, transparent), transparent 62%),
     var(--bg);
   color: var(--text);
-  font-family: Consolas, "JetBrains Mono", Menlo, "Courier New", monospace;
+  font-family: 'Azeret Mono', Consolas, "JetBrains Mono", Menlo, "Courier New", monospace;
 }
 
 body {
