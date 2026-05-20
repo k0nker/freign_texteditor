@@ -22,6 +22,7 @@
     var areaIndex = {};   // shortName -> {x, y, z, minX, maxX, minY, maxY, minZ, maxZ}
     var sourceData = null;
     var trueMappingEnabled = false;
+    var activeGridId = 'global';
 
     var SPACING = 14;     // world units per grid cell (matches world.json scale)
 
@@ -44,6 +45,7 @@
     // Mouse
     var drag = { active: false, btn: -1, lx: 0, ly: 0 };
     var keysDown = Object.create(null);
+    var flightAccel = 1.0;   // hold-to-accelerate multiplier
     var animFrame = 0;
     var initialized = false;
     var hoveredVnum = null;
@@ -251,12 +253,22 @@
             var areaPZ = wa.wy * SPACING;
             for (var j = 0; j < ad.rooms.length; j++) {
                 var rj = ad.rooms[j];
+                // gx/gy/gz = mapcheck world-absolute coords (only on rooms
+                // reached by BFS from the focal room). x/y/z = area-local.
+                var hasCoords = (rj.gx != null);
                 byVnum[rj.v] = {
                     vnum: rj.v,
-                    x0: areaPX + rj.x * SPACING,
-                    z0: areaPZ + rj.y * SPACING,
-                    y: (rj.z || 0) * SPACING,
+                    // World-absolute position from mapcheck BFS.
+                    // gy is North=+Y in SpatialBfsRunner; map uses North=-Z, so negate.
+                    x0: (rj.gx || 0) * SPACING,
+                    z0: -(rj.gy || 0) * SPACING,
+                    // Area-grid fallback for disconnected rooms: keeps them
+                    // spread out rather than piling at origin.
+                    fallX: areaPX + rj.x * SPACING,
+                    fallZ: areaPZ + rj.y * SPACING,
+                    y: (rj.gz || rj.z || 0) * SPACING,
                     exits: rj.ex || [],
+                    hasCoords: hasCoords,
                 };
                 areaShortByVnum[rj.v] = wa.n;
             }
@@ -273,9 +285,14 @@
             queue.push(seedVnum);
         }
 
-        var anchor = findAsiynAnchor(data);
-        if (anchor && byVnum[anchor]) {
-            enqueueSeed(anchor, byVnum[anchor].x0, byVnum[anchor].z0);
+        // Phase 1: honour explicit xyz from world.json — place these rooms
+        // directly and mark them visited so BFS cannot override them.
+        for (var pv in byVnum) {
+            var pr = byVnum[pv];
+            if (pr.hasCoords) {
+                pos[pr.vnum]     = { x: pr.x0, z: pr.z0 };
+                visited[pr.vnum] = true;
+            }
         }
 
         function runBfs() {
@@ -294,16 +311,27 @@
             }
         }
 
-        // Asiyn component first, then branch out through disconnected components.
-        runBfs();
-
+        // Phase 2: disconnected rooms (no mapcheck xyz).
+        // Try to place each one next to an already-positioned exit neighbor.
+        // If truly isolated, seed at the area-grid position so disconnected
+        // areas spread out in a row rather than piling up at origin.
         for (var v in byVnum) {
             var seed = +v;
             if (visited[seed]) continue;
             var seedRoom = byVnum[seed];
 
-            // Place new disconnected islands near their original location.
-            enqueueSeed(seed, seedRoom.x0, seedRoom.z0);
+            var seeded = false;
+            for (var ei = 0; ei < seedRoom.exits.length; ei++) {
+                var ex = seedRoom.exits[ei];
+                if (!pos[ex.v]) continue;
+                var d = directionDelta(ex.d);
+                enqueueSeed(seed, pos[ex.v].x - d.dx, pos[ex.v].z - d.dz);
+                seeded = true;
+                break;
+            }
+            if (!seeded) {
+                enqueueSeed(seed, seedRoom.fallX, seedRoom.fallZ);
+            }
             runBfs();
         }
 
@@ -338,6 +366,7 @@
 
             for (var j = 0; j < ad.rooms.length; j++) {
                 var rj = ad.rooms[j];
+                if ((rj.g || 'global') !== activeGridId) continue;
                 var tx = areaPX + rj.x * SPACING;
                 var tz = areaPZ + rj.y * SPACING;
                 if (trueMap && trueMap.pos[rj.v]) {
@@ -544,6 +573,20 @@
         }
 
         // -- Draw edges --
+        // Compute adaptive depth fog range from the rooms that are actually visible.
+        var depthValues = [];
+        for (var fv in projected) depthValues.push(projected[fv].depth);
+        depthValues.sort(function (a, b) { return a - b; });
+        var fogNear = depthValues[Math.floor(depthValues.length * 0.03)] || 1;
+        var fogFar  = depthValues[Math.floor(depthValues.length * 0.88)] || fogNear * 8;
+        var fogRange = Math.max(1, fogFar - fogNear);
+        function depthAlpha(depth, bright, dim) {
+            var t = Math.max(0, Math.min(1, (depth - fogNear) / fogRange));
+            // ease-in so the near zone stays fully bright longer
+            t = t * t;
+            return bright - t * (bright - dim);
+        }
+
         // Group edges by color for fewer strokeStyle changes
         var edgesByColor = {};
         var pathEdges = [];
@@ -562,13 +605,18 @@
                 continue;
             }
 
-            var col = sectorStyle(0).link;
+            // Sector-color the edge by source room; fall back to link color
+            var srcRoom = roomIndex[e.av];
+            var edgeBase = srcRoom ? SECTOR_COLOR[srcRoom.sector] || SECTOR_COLOR[0] : sectorStyle(0).link;
+            var edgeDepth = (pA.depth + pB.depth) * 0.5;
+            var edgeAlpha = depthAlpha(edgeDepth, 0.52, 0.06);
+            var col = hexToRgba(edgeBase, edgeAlpha);
             if (!edgesByColor[col]) edgesByColor[col] = [];
             edgesByColor[col].push(pA.x, pA.y, pB.x, pB.y);
         }
         for (var col in edgesByColor) {
             var arr = edgesByColor[col];
-            ctx.strokeStyle = hexToRgba(col, 0.58);
+            ctx.strokeStyle = col;
             ctx.lineWidth = 0.9;
             ctx.beginPath();
             for (var k = 0; k < arr.length; k += 4) {
@@ -595,40 +643,45 @@
         }
         visRooms.sort(function (a, b) { return b.p.depth - a.p.depth; });
 
-        // Square half-size: closer = bigger, capped
+        // Square half-size: closer = bigger, capped. Depth fog fades distant rooms.
         for (var i = 0; i < visRooms.length; i++) {
             var item = visRooms[i];
             var p = item.p, r = item.r;
             if (p.x < -20 || p.x > W+20 || p.y < -20 || p.y > H+20) continue;
 
-            var sz = Math.max(1, Math.min(6, 2200 / p.depth));
+            var sz = Math.max(2, Math.min(12, 4000 / p.depth));
+            var roomAlpha = depthAlpha(p.depth, 1.0, 0.12);
             var roomStyle = sectorStyle(r.sector);
             var isOrigin = r.vnum === selectedOrigin;
             var isDest = r.vnum === selectedDest;
             var isPath = !!selectedPathSet[r.vnum];
             var isHover = r.vnum === hoveredVnum;
+            ctx.globalAlpha = roomAlpha;
             ctx.fillStyle = roomStyle.fill;
             ctx.fillRect(p.x - sz, p.y - sz, sz*2, sz*2);
             if (isOrigin) {
                 ctx.strokeStyle = 'rgba(232,212,120,0.98)';
-                ctx.lineWidth = 2.0;
+                ctx.lineWidth = sz > 4 ? 2.0 : 1.5;
             } else if (isDest) {
                 ctx.strokeStyle = 'rgba(140,195,255,0.98)';
-                ctx.lineWidth = 2.0;
+                ctx.lineWidth = sz > 4 ? 2.0 : 1.5;
             } else if (isPath) {
                 ctx.strokeStyle = 'rgba(205,175,95,0.96)';
-                ctx.lineWidth = 1.6;
+                ctx.lineWidth = sz > 3 ? 1.6 : 1.0;
             } else if (isHover) {
                 ctx.strokeStyle = 'rgba(230,240,255,0.95)';
-                ctx.lineWidth = 1.5;
+                ctx.lineWidth = sz > 3 ? 1.5 : 1.0;
             } else {
-                ctx.strokeStyle = hexToRgba(roomStyle.border, 0.92);
-                ctx.lineWidth = 1.0;
+                ctx.strokeStyle = hexToRgba(roomStyle.border, 0.88);
+                ctx.lineWidth = sz > 4 ? 1.0 : 0.6;
             }
             ctx.strokeRect(p.x - sz, p.y - sz, sz*2, sz*2);
             // Bright highlight on the top-left corner for a 3D feel
-            ctx.fillStyle = 'rgba(255,255,255,0.28)';
-            ctx.fillRect(p.x - sz, p.y - sz, sz, sz);
+            if (sz >= 3) {
+                ctx.fillStyle = 'rgba(255,255,255,0.22)';
+                ctx.fillRect(p.x - sz, p.y - sz, sz, sz);
+            }
+            ctx.globalAlpha = 1.0;
         }
 
         // -- Draw floating area labels --
@@ -711,18 +764,20 @@
     function pickRoomAt(sx, sy) {
         computeBasis(canvas.width, canvas.height);
         var bestVnum = null;
-        var bestD2 = Infinity;
+        var bestDepth = Infinity;
         for (var v in roomIndex) {
             var r = roomIndex[v];
             var p = proj(r.x, r.y, r.z);
             if (!p) continue;
-            var size = Math.max(4, Math.min(16, 2200 / p.depth + 4));
+            // Use same size formula as draw so hitbox matches the visible square.
+            var sz = Math.max(2, Math.min(12, 4000 / p.depth));
             var dx = p.x - sx;
             var dy = p.y - sy;
-            if (Math.abs(dx) > size || Math.abs(dy) > size) continue;
-            var d2 = dx * dx + dy * dy;
-            if (d2 < bestD2) {
-                bestD2 = d2;
+            if (Math.abs(dx) > sz || Math.abs(dy) > sz) continue;
+            // Among rooms whose hitbox contains the cursor, pick the closest
+            // (smallest depth = drawn on top = what the user sees on top).
+            if (p.depth < bestDepth) {
+                bestDepth = p.depth;
                 bestVnum = +v;
             }
         }
@@ -779,13 +834,13 @@
 
         if (drag.btn === 2) {
             // Look around from the current camera position.
-            cam.az += dx * 0.006;
-            cam.el -= dy * 0.006;
+            cam.az += dx * 0.003;
+            cam.el -= dy * 0.003;
             cam.el  = Math.max(-Math.PI/2 + 0.05, Math.min(Math.PI/2 - 0.05, cam.el));
         } else {
             // Pan from the current viewpoint using the camera's right/up vectors.
             computeBasis(canvas.width, canvas.height);
-            var speed = SPACING * 1.5;
+            var speed = SPACING * 0.55;
             cam.x -= dx * rgtX * speed;
             cam.y -= dx * rgtY * speed;
             cam.z -= dx * rgtZ * speed;
@@ -854,7 +909,16 @@
         }
         computeBasis(canvas.width, canvas.height);
         var moved = false;
-        var speed = SPACING * 2.25;
+        // Base speed scales with FOV so movement feels consistent at any zoom.
+        // Hold-to-accelerate: ramps from 1× up to 12× over ~2 s, resets on release.
+        var anyMove = keysDown.w || keysDown.s || keysDown.a || keysDown.d ||
+                      keysDown.space || keysDown.shift;
+        if (anyMove) {
+            flightAccel = Math.min(flightAccel + 0.04, 12.0);
+        } else {
+            flightAccel = 1.0;
+        }
+        var speed = SPACING * 0.85 * flightAccel;
 
         if (keysDown.w) {
             cam.x += fwdX * speed;
@@ -975,6 +1039,12 @@
                     selectedPathSet[pathVnums[i]] = true;
                 }
             }
+            render();
+        },
+        setGridId: function (gridId) {
+            activeGridId = gridId || 'global';
+            if (!sourceData || !canvas) return;
+            build(sourceData);
             render();
         },
         render: render,
