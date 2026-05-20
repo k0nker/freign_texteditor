@@ -297,6 +297,10 @@
     var areaMap    = {};   // short_name -> area object
     var worldAreas = [];   // ordered list of area placement records
 
+    // Grid filtering
+    var activeGridId = 'global';
+    var activeRealm  = null;   // null = static file, 'public' or 'test' = fetched realm
+
     // Layer mode
     var layerMode    = 'collapsed';  // 'collapsed' | 'expanded'
     var currentLayer = 0;
@@ -330,32 +334,40 @@
     });
 
     // ---- Data loading ----
-    var _worldData = null;
-    var canvas3d   = document.getElementById('map-canvas-3d');
-    var view3dBtn  = document.getElementById('view-3d-btn');
-    var trueMapBtn = document.getElementById('true-map-btn');
-    var mode3d     = false;
+    var _worldData    = null;
+    var canvas3d      = document.getElementById('map-canvas-3d');
+    var gridSelect    = document.getElementById('grid-select');
+    var publicMapBtn  = document.getElementById('use-public-map-btn');
+    var testMapBtn    = document.getElementById('use-test-map-btn');
+    var toggle2d      = document.getElementById('toggle-2d');
+    var toggle3d      = document.getElementById('toggle-3d');
+    var modeOpts2d    = document.getElementById('mode-options-2d');
+    var modeOpts3d    = document.getElementById('mode-options-3d');
+    var layerModeChk  = document.getElementById('layer-mode-chk');
+    var trueMapChk    = document.getElementById('true-map-chk');
+    var mode3d        = false;
     var trueMapping3d = false;
-
-    function updateTrueMapButton() {
-        if (!trueMapBtn) return;
-        trueMapBtn.textContent = 'True Mapping: ' + (trueMapping3d ? 'On' : 'Off');
-        trueMapBtn.classList.toggle('active', !!trueMapping3d);
-    }
 
     function apply3DTrueMappingMode() {
         if (!window.Map3D || typeof Map3D.setTrueMapping !== 'function') return;
         Map3D.setTrueMapping(trueMapping3d);
     }
 
+    function setViewMode(is3d) {
+        mode3d = is3d;
+        if (toggle2d) toggle2d.classList.toggle('active', !is3d);
+        if (toggle3d) toggle3d.classList.toggle('active',  is3d);
+        if (modeOpts2d) modeOpts2d.style.display = is3d ? 'none' : '';
+        if (modeOpts3d) modeOpts3d.style.display = is3d ? ''     : 'none';
+    }
+
     function enter3D() {
-        mode3d = true;
-        canvas.style.display    = 'none';
-        canvas3d.style.display  = 'block';
+        canvas.style.display   = 'none';
+        canvas3d.style.display = 'block';
         var wrap = canvas.parentElement;
         canvas3d.width  = wrap.clientWidth;
         canvas3d.height = wrap.clientHeight;
-        if (view3dBtn) { view3dBtn.textContent = '2D Map'; view3dBtn.classList.add('active'); }
+        setViewMode(true);
         if (_worldData) {
             Map3D.init(canvas3d, _worldData);
             apply3DTrueMappingMode();
@@ -364,23 +376,17 @@
     }
 
     function exit3D() {
-        mode3d = false;
         canvas3d.style.display = 'none';
         canvas.style.display   = 'block';
-        if (view3dBtn) { view3dBtn.textContent = '3D View'; view3dBtn.classList.remove('active'); }
+        setViewMode(false);
     }
 
-    if (view3dBtn) {
-        view3dBtn.addEventListener('click', function () {
-            if (mode3d) { exit3D(); } else { enter3D(); }
-        });
-    }
+    if (toggle2d) toggle2d.addEventListener('click', function () { if (mode3d)  exit3D(); });
+    if (toggle3d) toggle3d.addEventListener('click', function () { if (!mode3d) enter3D(); });
 
-    updateTrueMapButton();
-    if (trueMapBtn) {
-        trueMapBtn.addEventListener('click', function () {
-            trueMapping3d = !trueMapping3d;
-            updateTrueMapButton();
+    if (trueMapChk) {
+        trueMapChk.addEventListener('change', function () {
+            trueMapping3d = trueMapChk.checked;
             if (mode3d) apply3DTrueMappingMode();
         });
     }
@@ -391,24 +397,144 @@
         Map3D.resize(wrap.clientWidth, wrap.clientHeight);
     });
 
-    // ---- Data loading ----
-    fetch('data/world.json')
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-            _worldData = data;
-            buildGraph(data);
-            loading.style.display = 'none';
+    // ---- Grid dropdown helpers ----
+    var renderLoopStarted = false;
+
+    function populateGridSelect(data) {
+        if (!gridSelect) return;
+        var grids = {};
+        for (var i = 0; i < data.world.length; i++) {
+            var ad = data.areas[data.world[i].n];
+            if (!ad) continue;
+            for (var j = 0; j < ad.rooms.length; j++) {
+                var g = ad.rooms[j].g || 'global';
+                grids[g] = true;
+            }
+        }
+        var sorted = Object.keys(grids).sort();
+        gridSelect.innerHTML = '';
+        for (var k = 0; k < sorted.length; k++) {
+            var opt = document.createElement('option');
+            opt.value = sorted[k];
+            opt.textContent = sorted[k];
+            gridSelect.appendChild(opt);
+        }
+        // Restore selection or default to 'global'
+        if (grids[activeGridId]) {
+            gridSelect.value = activeGridId;
+        } else if (grids['global']) {
+            activeGridId = 'global';
+            gridSelect.value = 'global';
+        } else if (sorted.length > 0) {
+            activeGridId = sorted[0];
+            gridSelect.value = sorted[0];
+        }
+    }
+
+    function updateRealmButtons() {
+        // Realm buttons show no persistent active highlight.
+    }
+
+    function initMapData(data, realm) {
+        _worldData  = data;
+        activeRealm = realm;
+        populateGridSelect(data);
+        updateRealmButtons();
+        // Reset graph state
+        rooms     = {};
+        adjacency = {};
+        areaMap   = {};
+        buildGraph(data);
+        loading.style.display = 'none';
+        buildLegend();
+        resizeCanvas();
+        centerView();
+        if (!mode3d) {
+            if (!renderLoopStarted) {
+                renderLoopStarted = true;
+                requestAnimationFrame(renderLoop);
+            }
+        } else {
+            Map3D.init(canvas3d, _worldData);
+            apply3DTrueMappingMode();
+            sync3DSelectionState();
+        }
+    }
+
+    function fetchAndInitRealm(realm) {
+        var url = '/api/world/' + realm;
+        loading.style.display = 'flex';
+        loading.textContent = 'Fetching ' + realm + ' map...';
+        fetch(url)
+            .then(function (r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            })
+            .then(function (data) {
+                try {
+                    localStorage.setItem('freign.map.worldData', JSON.stringify(data));
+                    localStorage.setItem('freign.map.worldRealm', realm);
+                } catch (e) { /* quota exceeded — ignore */ }
+                initMapData(data, realm);
+            })
+            .catch(function (e) {
+                loading.style.display = 'none';
+                alert('Could not fetch ' + realm + ' map: ' + e.message);
+            });
+    }
+
+    if (publicMapBtn) {
+        publicMapBtn.addEventListener('click', function () { fetchAndInitRealm('public'); });
+    }
+    if (testMapBtn) {
+        testMapBtn.addEventListener('click', function () { fetchAndInitRealm('test'); });
+    }
+
+    if (gridSelect) {
+        gridSelect.addEventListener('change', function () {
+            activeGridId = this.value;
+            rooms     = {};
+            adjacency = {};
+            areaMap   = {};
+            buildGraph(_worldData);
             buildLegend();
-            resizeCanvas();
             centerView();
-            requestAnimationFrame(renderLoop);
-        })
-        .catch(function (e) {
-            loading.textContent = 'Error loading data/world.json: ' + e.message;
+            if (mode3d && window.Map3D && typeof Map3D.setGridId === 'function') {
+                Map3D.setGridId(activeGridId);
+            }
         });
+    }
+
+    // ---- Initial data load ----
+    (function loadInitialData() {
+        var cachedJson = null;
+        var cachedRealm = null;
+        try {
+            cachedJson  = localStorage.getItem('freign.map.worldData');
+            cachedRealm = localStorage.getItem('freign.map.worldRealm');
+        } catch (e) { /* private browsing — ignore */ }
+
+        if (cachedJson) {
+            try {
+                var data = JSON.parse(cachedJson);
+                initMapData(data, cachedRealm);
+                return;
+            } catch (e) {
+                // Corrupt cache — fall through to static file
+                try { localStorage.removeItem('freign.map.worldData'); } catch (e2) {}
+            }
+        }
+
+        fetch('data/world.json')
+            .then(function (r) { return r.json(); })
+            .then(function (data) { initMapData(data, null); })
+            .catch(function (e) {
+                loading.textContent = 'Error loading map data: ' + e.message;
+            });
+    }());
 
     function buildGraph(data) {
-        worldAreas = data.world;
+        worldAreas     = data.world;
         globalMinLayer = 0;
         globalMaxLayer = 0;
 
@@ -441,6 +567,7 @@
 
             for (var j = 0; j < ad.rooms.length; j++) {
                 var rj = ad.rooms[j];
+                if ((rj.g || 'global') !== activeGridId) continue;
                 var wx = areaPX + rj.x * SPACING + SPACING / 2;
                 var wy = areaPY + rj.y * SPACING + SPACING / 2;
                 var rz = rj.z || 0;
@@ -1012,6 +1139,7 @@
             secD.innerHTML = '<div class="sb-label">Destination</div><div class="sb-hint" id="hint-dest">Click a second room</div>';
         }
 
+        var copyBtn = document.getElementById('copy-path-btn');
         if (pathVnums.length > 1) {
             secP.style.display = '';
             pLen.textContent = pathDirs.length;
@@ -1026,13 +1154,16 @@
                         '</li>';
             }
             steps.innerHTML = html;
+            if (copyBtn) copyBtn.style.display = '';
         } else if (selOrigin && selDest) {
             secP.style.display = '';
             pLen.textContent = '0';
             steps.innerHTML = '<li><span class="step-room" style="color:#a05050">No path found</span></li>';
+            if (copyBtn) copyBtn.style.display = 'none';
         } else {
             secP.style.display = 'none';
             steps.innerHTML = '';
+            if (copyBtn) copyBtn.style.display = 'none';
         }
 
         sync3DSelectionState();
@@ -1050,76 +1181,149 @@
         jumpToRoom(+card.dataset.vnum);
     });
 
-    // ---- Search ----
-    var searchInput = document.getElementById('search-input');
-    var searchBtn   = document.getElementById('search-btn');
+    // ---- Search / Autocomplete ----
+    var searchInput    = document.getElementById('search-input');
+    var searchDropdown = document.getElementById('search-dropdown');
+    var dropActiveIdx  = -1;
 
-    function doSearch() {
-        var q = searchInput.value.trim().toLowerCase();
-        if (!q) return;
+    function buildSearchResults(q) {
+        if (!q) return [];
+        var ql = q.toLowerCase();
+        var results = [];
 
-        var secSR    = document.getElementById('section-search-results');
-        var listEl   = document.getElementById('search-results-list');
-        var results  = [];
+        // Exact vnum lookup first
+        if (/^\d+$/.test(ql) && rooms[+ql]) {
+            results.push({ type: 'room', vnum: +ql });
+        }
 
-        // Match area names first
+        // Area names
         for (var an in areaMap) {
-            if (areaMap[an].name.toLowerCase().indexOf(q) >= 0 || an.indexOf(q) >= 0) {
+            if (areaMap[an].name.toLowerCase().indexOf(ql) >= 0 || an.indexOf(ql) >= 0) {
                 results.push({ type: 'area', obj: areaMap[an] });
-                if (results.length >= 5) break;
+                if (results.length >= 6) break;
             }
         }
 
-        // Then room names
-        if (results.length < 10) {
+        // Room names
+        if (results.length < 12) {
             for (var v in rooms) {
                 var r = rooms[v];
-                if (r.name && r.name.toLowerCase().indexOf(q) >= 0) {
+                if (r.name && r.name.toLowerCase().indexOf(ql) >= 0) {
                     results.push({ type: 'room', vnum: r.vnum });
-                    if (results.length >= 15) break;
+                    if (results.length >= 12) break;
                 }
             }
         }
 
-        // Vnum lookup
-        if (/^\d+$/.test(q) && rooms[+q]) {
-            results.unshift({ type: 'room', vnum: +q });
-        }
-
-        if (results.length === 0) {
-            listEl.innerHTML = '<div class="sb-hint">No results</div>';
-        } else {
-            var html = '';
-            for (var i = 0; i < results.length; i++) {
-                var res = results[i];
-                if (res.type === 'area') {
-                    html += '<div class="sb-room" data-area="' + esc(res.obj.shortName) + '">' +
-                            '<div class="sb-room-name">' + esc(res.obj.name) + '</div>' +
-                            '<div class="sb-room-meta">Area &nbsp;·&nbsp; ' + res.obj.rooms.length + ' rooms</div>' +
-                            '</div>';
-                } else {
-                    var rr = rooms[res.vnum];
-                    html += '<div class="sb-room" data-vnum="' + res.vnum + '">' +
-                            '<div class="sb-room-name">' + esc(rr.name) + '</div>' +
-                            '<div class="sb-room-meta">vnum ' + res.vnum + ' &nbsp;·&nbsp; ' + esc((areaMap[rr.area] || {}).name || rr.area) + '</div>' +
-                            '</div>';
-                }
-            }
-            listEl.innerHTML = html;
-        }
-
-        secSR.style.display = '';
+        return results;
     }
 
-    searchBtn.addEventListener('click', doSearch);
-    searchInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') doSearch(); });
+    function renderDropdown(results) {
+        if (!searchDropdown) return;
+        dropActiveIdx = -1;
+        if (!results || results.length === 0) {
+            searchDropdown.style.display = 'none';
+            searchDropdown.innerHTML = '';
+            return;
+        }
+        var html = '';
+        for (var i = 0; i < results.length; i++) {
+            var res = results[i];
+            if (res.type === 'area') {
+                html += '<div class="drop-item" data-area="' + esc(res.obj.shortName) + '">' +
+                        '<div class="drop-item-name">' + esc(res.obj.name) + '</div>' +
+                        '<div class="drop-item-meta">Area &nbsp;&middot;&nbsp; ' + res.obj.rooms.length + ' rooms</div>' +
+                        '</div>';
+            } else {
+                var rr = rooms[res.vnum];
+                html += '<div class="drop-item" data-vnum="' + res.vnum + '">' +
+                        '<div class="drop-item-name">' + esc(rr ? rr.name : '?') + '</div>' +
+                        '<div class="drop-item-meta">vnum ' + res.vnum + ' &nbsp;&middot;&nbsp; ' + esc(rr ? ((areaMap[rr.area] || {}).name || rr.area) : '') + '</div>' +
+                        '</div>';
+            }
+        }
+        searchDropdown.innerHTML = html;
+        searchDropdown.style.display = 'block';
+    }
 
-    document.getElementById('search-results-list').addEventListener('click', function (e) {
-        var card = e.target.closest('[data-vnum]');
-        if (card) { jumpToRoom(+card.dataset.vnum); return; }
-        var acard = e.target.closest('[data-area]');
-        if (acard) { jumpToArea(acard.dataset.area); }
-    });
+    function closeDropdown() {
+        if (searchDropdown) searchDropdown.style.display = 'none';
+        dropActiveIdx = -1;
+    }
+
+    function activateDropItem(idx) {
+        var items = searchDropdown ? searchDropdown.querySelectorAll('.drop-item') : [];
+        for (var i = 0; i < items.length; i++) items[i].classList.remove('drop-active');
+        if (idx >= 0 && idx < items.length) {
+            items[idx].classList.add('drop-active');
+            items[idx].scrollIntoView({ block: 'nearest' });
+        }
+        dropActiveIdx = idx;
+    }
+
+    function pickDropItem() {
+        var items = searchDropdown ? searchDropdown.querySelectorAll('.drop-item') : [];
+        var item = items[dropActiveIdx >= 0 ? dropActiveIdx : 0];
+        if (!item) return;
+        searchInput.value = '';
+        closeDropdown();
+        if (item.dataset.vnum) jumpToRoom(+item.dataset.vnum);
+        else if (item.dataset.area) jumpToArea(item.dataset.area);
+    }
+
+    if (searchInput) {
+        searchInput.addEventListener('input', function () {
+            renderDropdown(buildSearchResults(searchInput.value.trim()));
+        });
+        searchInput.addEventListener('keydown', function (e) {
+            var items = searchDropdown ? searchDropdown.querySelectorAll('.drop-item') : [];
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                activateDropItem(Math.min(dropActiveIdx + 1, items.length - 1));
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                activateDropItem(Math.max(dropActiveIdx - 1, 0));
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                pickDropItem();
+            } else if (e.key === 'Escape') {
+                closeDropdown();
+            }
+        });
+        searchInput.addEventListener('blur', function () {
+            setTimeout(closeDropdown, 150);
+        });
+    }
+
+    if (searchDropdown) {
+        searchDropdown.addEventListener('mousedown', function (e) {
+            var item = e.target.closest('.drop-item');
+            if (!item) return;
+            e.preventDefault();
+            searchInput.value = '';
+            closeDropdown();
+            if (item.dataset.vnum) jumpToRoom(+item.dataset.vnum);
+            else if (item.dataset.area) jumpToArea(item.dataset.area);
+        });
+    }
+
+    // ---- Copy stacked command ----
+    var copyPathBtn = document.getElementById('copy-path-btn');
+    if (copyPathBtn) {
+        copyPathBtn.addEventListener('click', function () {
+            var DIR_CMD = ['n', 'e', 's', 'w', 'u', 'd'];
+            var cmd = pathDirs.map(function (d) {
+                return (d >= 0 && d < DIR_CMD.length) ? DIR_CMD[d] : '?';
+            }).join(';');
+            if (!cmd) return;
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(cmd).then(function () {
+                    copyPathBtn.textContent = 'Copied!';
+                    setTimeout(function () { copyPathBtn.textContent = 'Copy stacked command'; }, 1500);
+                });
+            }
+        });
+    }
 
     // ---- Camera centering ----
     function jumpToRoom(vnum) {
@@ -1268,16 +1472,13 @@
         }
     }
 
-    var layerModeBtn = document.getElementById('layer-mode-btn');
-    if (layerModeBtn) {
-        layerModeBtn.addEventListener('click', function () {
-            if (layerMode === 'collapsed') {
+    if (layerModeChk) {
+        layerModeChk.addEventListener('change', function () {
+            if (layerModeChk.checked) {
                 layerMode = 'expanded';
                 currentLayer = 0;
-                layerModeBtn.textContent = 'Layers: Expanded';
             } else {
                 layerMode = 'collapsed';
-                layerModeBtn.textContent = 'Layers: Collapsed';
             }
             updateLayerNav();
         });

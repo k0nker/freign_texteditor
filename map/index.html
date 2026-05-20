@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FREIGN World Map</title>
-<link rel="stylesheet" href="../site-shell.css?v=2" />
+<link rel="stylesheet" href="../site-shell.css?v=3" />
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -86,40 +86,126 @@
     margin-bottom: 8px;
   }
 
-  #sidebar-controls {
+  /* ---- 2D/3D view toggle pill ---- */
+  #view-toggle-wrap {
     display: flex;
-    flex-direction: column;
-    gap: 8px;
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    border-radius: 4px;
+    padding: 2px;
+    gap: 2px;
     margin-bottom: 10px;
   }
+  .view-tab {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    font: inherit;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 5px 0;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .view-tab.active {
+    background: var(--step-bg);
+    color: var(--title);
+  }
+  .view-tab:hover:not(.active) {
+    background: color-mix(in srgb, var(--step-bg) 50%, transparent);
+    color: var(--text);
+  }
 
-  .sidebar-control-row {
+  /* ---- Mode-specific option panels ---- */
+  #mode-options-2d,
+  #mode-options-3d {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    margin-bottom: 8px;
+  }
+  #mode-options-3d { display: none; }
+
+  /* ---- Slide toggles ---- */
+  .slide-toggle {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    cursor: pointer;
+    user-select: none;
+    padding: 1px 0;
+  }
+  .slide-toggle input[type="checkbox"] { display: none; }
+  .slider {
+    width: 32px;
+    height: 17px;
+    background: var(--input-border);
+    border-radius: 9px;
+    position: relative;
+    flex-shrink: 0;
+    transition: background 0.2s;
+  }
+  .slider::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: transform 0.2s, background 0.2s;
+  }
+  .slide-toggle input:checked ~ .slider {
+    background: color-mix(in srgb, var(--accent, #7f6aa7) 68%, transparent);
+  }
+  .slide-toggle input:checked ~ .slider::after {
+    transform: translateX(15px);
+    background: var(--title, #d7cee8);
+  }
+  .toggle-label {
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    transition: color 0.15s;
+  }
+  .slide-toggle input:checked ~ .toggle-label { color: var(--text); }
+
+  /* ---- Common options (always visible) ---- */
+  #common-options {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    margin-bottom: 10px;
+  }
+  .opt-row {
     display: flex;
     align-items: center;
     gap: 8px;
   }
-
-  .sidebar-control-label {
-    width: 52px;
+  .opt-label {
+    width: 42px;
     flex-shrink: 0;
     font-size: 10px;
     letter-spacing: 0.1em;
     text-transform: uppercase;
     color: var(--muted);
   }
-
-  .sidebar-control-row button,
-  .sidebar-control-row select {
-    min-width: 0;
-  }
-
-  #search-wrap {
+  .realm-row {
     display: flex;
-    gap: 6px;
+    gap: 5px;
+    flex: 1;
   }
 
+  /* ---- Autocomplete search ---- */
+  #search-wrap {
+    position: relative;
+  }
   #search-input {
-    flex: 1;
+    width: 100%;
     background: var(--input-bg);
     border: 1px solid var(--input-border);
     color: var(--text);
@@ -130,18 +216,30 @@
     border-radius: 2px;
   }
   #search-input:focus { border-color: var(--title); }
-
-  #search-btn {
-    background: var(--step-bg);
+  #search-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--sidebar-bg);
     border: 1px solid var(--input-border);
-    color: var(--accent-ink, var(--text));
-    padding: 5px 10px;
-    cursor: pointer;
-    font: inherit;
-    font-size: 12px;
-    border-radius: 2px;
+    border-top: none;
+    border-radius: 0 0 3px 3px;
+    z-index: 20;
+    max-height: 220px;
+    overflow-y: auto;
   }
-  #search-btn:hover { filter: brightness(1.08); }
+  .drop-item {
+    padding: 5px 8px;
+    cursor: pointer;
+    border-bottom: 1px solid color-mix(in srgb, var(--sidebar-border) 40%, transparent);
+    font-size: 12px;
+  }
+  .drop-item:last-child { border-bottom: none; }
+  .drop-item:hover, .drop-item.drop-active { background: var(--step-bg); }
+  .drop-item-name { color: var(--text); }
+  .drop-item-meta { font-size: 10px; color: var(--muted); margin-top: 1px; }
 
   #theme-wrap {
     display: flex;
@@ -263,50 +361,51 @@
     line-height: 1.6;
   }
 
-  /* ---- Layer controls ---- */
-  #layer-mode-btn {
-    background: var(--step-bg);
-    border: 1px solid var(--input-border);
-    color: var(--muted);
-    font: inherit;
-    font-size: 10px;
-    letter-spacing: 0.08em;
-    padding: 4px 10px;
-    border-radius: 3px;
-    cursor: pointer;
-    flex: 1;
-  }
-  #layer-mode-btn:hover { filter: brightness(1.12); color: var(--text); }
-
-  #view-3d-btn {
-    background: var(--step-bg);
-    border: 1px solid var(--input-border);
-    color: var(--muted);
-    font: inherit;
-    font-size: 10px;
-    letter-spacing: 0.08em;
-    padding: 4px 10px;
-    border-radius: 3px;
-    cursor: pointer;
-    flex: 1;
-  }
-  #view-3d-btn:hover  { filter: brightness(1.12); color: var(--text); }
-  #view-3d-btn.active { background: color-mix(in srgb, #3a6fa0 80%, transparent); color: #e8f0ff; border-color: #5090c0; }
-
-  #true-map-btn {
-    background: var(--step-bg);
-    border: 1px solid var(--input-border);
-    color: var(--muted);
-    font: inherit;
-    font-size: 10px;
-    letter-spacing: 0.08em;
-    padding: 4px 10px;
-    border-radius: 3px;
-    cursor: pointer;
+  /* ---- Copy path button ---- */
+  #copy-path-btn {
+    margin-top: 6px;
     width: 100%;
+    background: var(--step-bg);
+    border: 1px solid var(--input-border);
+    color: var(--muted);
+    font: inherit;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    padding: 5px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    text-align: center;
   }
-  #true-map-btn:hover { filter: brightness(1.12); color: var(--text); }
-  #true-map-btn.active { background: color-mix(in srgb, #6c8f54 70%, transparent); color: #ebf9de; border-color: #7da760; }
+  #copy-path-btn:hover { filter: brightness(1.12); color: var(--text); }
+  #copy-path-btn:active { filter: brightness(0.9); }
+
+  #grid-select {
+    flex: 1;
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    color: var(--text);
+    font: inherit;
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 3px;
+    outline: none;
+    cursor: pointer;
+  }
+  #grid-select:focus { border-color: var(--title); }
+
+  .realm-btn {
+    background: var(--step-bg);
+    border: 1px solid var(--input-border);
+    color: var(--muted);
+    font: inherit;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    padding: 4px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    flex: 1;
+  }
+  .realm-btn:hover { filter: brightness(1.1); color: var(--text); }
 
   #layer-nav {
     display: none;
@@ -424,28 +523,53 @@
 <div id="sidebar">
   <div id="sidebar-header">
     <h1>FREIGN World Map</h1>
-    <div id="sidebar-controls">
-      <div class="sidebar-control-row">
-        <div class="sidebar-control-label">View</div>
-        <button id="layer-mode-btn">Layers: Collapsed</button>
-        <button id="view-3d-btn">3D View</button>
-      </div>
-      <div class="sidebar-control-row">
-        <div class="sidebar-control-label">Floor</div>
-        <div id="layer-nav">
-          <button id="layer-up">↑</button>
-          <span id="layer-label">Floor 0</span>
-          <button id="layer-down">↓</button>
-        </div>
-      </div>
-      <div class="sidebar-control-row">
-        <div class="sidebar-control-label">3D</div>
-        <button id="true-map-btn">True Mapping: Off</button>
+
+    <!-- 2D / 3D pill toggle -->
+    <div id="view-toggle-wrap">
+      <button id="toggle-2d" class="view-tab active">2D</button>
+      <button id="toggle-3d" class="view-tab">3D</button>
+    </div>
+
+    <!-- 2D-specific options -->
+    <div id="mode-options-2d">
+      <label class="slide-toggle">
+        <input type="checkbox" id="layer-mode-chk">
+        <span class="slider"></span>
+        <span class="toggle-label">Expand Layers</span>
+      </label>
+      <div id="layer-nav">
+        <button id="layer-up">↑</button>
+        <span id="layer-label">Floor 0</span>
+        <button id="layer-down">↓</button>
       </div>
     </div>
-    <div id="search-wrap">
-      <input id="search-input" type="text" placeholder="Jump to area or room…" autocomplete="off">
-      <button id="search-btn">Go</button>
+
+    <!-- 3D-specific options -->
+    <div id="mode-options-3d">
+      <label class="slide-toggle">
+        <input type="checkbox" id="true-map-chk">
+        <span class="slider"></span>
+        <span class="toggle-label">True Mapping</span>
+      </label>
+    </div>
+
+    <!-- Always-visible options -->
+    <div id="common-options">
+      <div class="opt-row">
+        <span class="opt-label">Grid</span>
+        <select id="grid-select"><option value="global">global</option></select>
+      </div>
+      <div class="opt-row">
+        <span class="opt-label">Realm</span>
+        <div class="realm-row">
+          <button id="use-public-map-btn" class="realm-btn">Public Map</button>
+          <button id="use-test-map-btn"   class="realm-btn">Test Map</button>
+        </div>
+      </div>
+      <div id="search-wrap">
+        <input id="search-input" type="text" placeholder="Jump to area or room…" autocomplete="off" spellcheck="false">
+        <div id="search-dropdown"></div>
+      </div>
     </div>
   </div>
 
@@ -463,11 +587,7 @@
     <div class="sb-section" id="section-path" style="display:none">
       <div class="sb-label">Path (<span id="path-length">0</span> steps)</div>
       <ul id="path-steps"></ul>
-    </div>
-
-    <div class="sb-section" id="section-search-results" style="display:none">
-      <div class="sb-label">Search results</div>
-      <div id="search-results-list"></div>
+      <button id="copy-path-btn" style="display:none">Copy stacked command</button>
     </div>
   </div>
 </div>
