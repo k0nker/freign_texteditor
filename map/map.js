@@ -357,8 +357,8 @@
         mode3d = is3d;
         if (toggle2d) toggle2d.classList.toggle('active', !is3d);
         if (toggle3d) toggle3d.classList.toggle('active',  is3d);
-        if (modeOpts2d) modeOpts2d.style.display = is3d ? 'none' : '';
-        if (modeOpts3d) modeOpts3d.style.display = is3d ? ''     : 'none';
+        if (modeOpts2d) modeOpts2d.style.display = is3d ? 'none' : 'flex';
+        if (modeOpts3d) modeOpts3d.style.display = is3d ? 'flex'  : 'none';
     }
 
     function enter3D() {
@@ -585,6 +585,8 @@
                     gridZ:  rz,
                     worldX: wx,
                     worldY: wy,
+                    packedX: wx,
+                    packedY: wy,
                     exits:  rj.ex || [],
                 };
                 rooms[rj.v] = room;
@@ -592,6 +594,69 @@
                 areaObj.roomKeySet[rj.x + ',' + rj.y] = true;
 
                 adjacency[rj.v] = rj.ex || [];
+            }
+        }
+        computeBfsPositions();
+    }
+
+    // ---- BFS layout (expanded 2D mode) ----
+    // Positions rooms relative to each other using horizontal exit directions.
+    // Disconnected rooms fall back to their packed (area-grid) positions.
+    function computeBfsPositions() {
+        var BFS_DELTA = [
+            { dx: 0,        dy: -SPACING }, // N (0)
+            { dx:  SPACING, dy: 0        }, // E (1)
+            { dx: 0,        dy:  SPACING }, // S (2)
+            { dx: -SPACING, dy: 0        }, // W (3)
+        ];
+        var pos     = Object.create(null);
+        var visited = Object.create(null);
+        var queue   = [];
+
+        function seedRoom(vnum, x, y) {
+            if (!rooms[vnum] || visited[vnum]) return;
+            pos[vnum]     = { x: x, y: y };
+            visited[vnum] = true;
+            queue.push(vnum);
+        }
+
+        function runBfs() {
+            while (queue.length) {
+                var v = queue.shift();
+                var r = rooms[v];
+                var p = pos[v];
+                for (var i = 0; i < r.exits.length; i++) {
+                    var ex = r.exits[i];
+                    if (ex.d >= 4 || !rooms[ex.v] || visited[ex.v]) continue;
+                    var d = BFS_DELTA[ex.d];
+                    seedRoom(ex.v, p.x + d.dx, p.y + d.dy);
+                }
+            }
+        }
+
+        for (var vnum in rooms) {
+            var r = rooms[vnum];
+            if (visited[vnum]) continue;
+            // Try to attach to an already-positioned horizontal neighbor
+            var seeded = false;
+            for (var i = 0; i < r.exits.length; i++) {
+                var ex = r.exits[i];
+                if (ex.d >= 4 || !pos[ex.v]) continue;
+                var d = BFS_DELTA[ex.d];
+                seedRoom(+vnum, pos[ex.v].x - d.dx, pos[ex.v].y - d.dy);
+                seeded = true;
+                break;
+            }
+            if (!seeded) {
+                seedRoom(+vnum, r.packedX, r.packedY);
+            }
+            runBfs();
+        }
+
+        for (var v in pos) {
+            if (rooms[v]) {
+                rooms[v].bfsX = pos[v].x;
+                rooms[v].bfsY = pos[v].y;
             }
         }
     }
@@ -697,14 +762,18 @@
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
         // ---- Gather visible areas ----
+        // In expanded mode rooms are BFS-positioned; area bounds don't match,
+        // so skip backplates and area labels (culled per-room instead).
         var visibleAreas = [];
-        for (var an in areaMap) {
-            var a = areaMap[an];
-            if (a.px + a.w + margin < tl.x) continue;
-            if (a.py + a.h + margin < tl.y) continue;
-            if (a.px - margin > br.x) continue;
-            if (a.py - margin > br.y) continue;
-            visibleAreas.push(a);
+        if (layerMode !== 'expanded') {
+            for (var an in areaMap) {
+                var a = areaMap[an];
+                if (a.px + a.w + margin < tl.x) continue;
+                if (a.py + a.h + margin < tl.y) continue;
+                if (a.px - margin > br.x) continue;
+                if (a.py - margin > br.y) continue;
+                visibleAreas.push(a);
+            }
         }
 
         paintBackdropLayers(visibleAreas, s);
@@ -1477,9 +1546,18 @@
             if (layerModeChk.checked) {
                 layerMode = 'expanded';
                 currentLayer = 0;
+                for (var v in rooms) {
+                    rooms[v].worldX = rooms[v].bfsX;
+                    rooms[v].worldY = rooms[v].bfsY;
+                }
             } else {
                 layerMode = 'collapsed';
+                for (var v in rooms) {
+                    rooms[v].worldX = rooms[v].packedX;
+                    rooms[v].worldY = rooms[v].packedY;
+                }
             }
+            centerView();
             updateLayerNav();
         });
     }
