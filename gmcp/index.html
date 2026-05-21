@@ -694,9 +694,32 @@
             <span class="mudlet-card-uses">uses Map.Render — enable with: gmcpmap</span>
           </div>
           <pre><span class="lua-cmt">-- Script: GMCP Minimap
--- Trigger type: GMCP · package: Map · event: Render</span>
+-- Trigger type: GMCP · package: Map · event: Render
+--
+-- Mudlet's decho/cecho/echo don't interpret ANSI escape sequences.
+-- This converter translates the SGR codes Freign sends (ESC[0&lt;attrs&gt;m)
+-- into Mudlet's decho &lt;r,g,b&gt; format so colors render correctly.</span>
 
 <span class="lua-kw">local</span> mapConsole
+
+<span class="lua-kw">local function</span> <span class="lua-fn">ansiToDecho</span>(s)
+  <span class="lua-kw">return</span> (s:<span class="lua-fn">gsub</span>(<span class="lua-str">"\27%[0(.-)m"</span>, <span class="lua-kw">function</span>(attrs)
+    <span class="lua-kw">if</span> attrs == <span class="lua-str">";0"</span> <span class="lua-kw">or</span> attrs == <span class="lua-str">""</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> <span class="lua-str">"&lt;r&gt;"</span> <span class="lua-kw">end</span>
+    <span class="lua-kw">local</span> bold = attrs:<span class="lua-fn">find</span>(<span class="lua-str">";1;"</span>, <span class="lua-num">1</span>, <span class="lua-kw">true</span>) ~= <span class="lua-kw">nil</span>
+    <span class="lua-kw">local</span> base = <span class="lua-fn">tonumber</span>(attrs:<span class="lua-fn">match</span>(<span class="lua-str">";(%d+)$"</span>))
+    <span class="lua-kw">if not</span> base <span class="lua-kw">then</span> <span class="lua-kw">return</span> <span class="lua-str">"&lt;r&gt;"</span> <span class="lua-kw">end</span>
+    <span class="lua-kw">if</span>     base == <span class="lua-num">30</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> bold <span class="lua-kw">and</span> <span class="lua-str">"&lt;128,128,128&gt;"</span> <span class="lua-kw">or</span> <span class="lua-str">"&lt;30,30,30&gt;"</span>
+    <span class="lua-kw">elseif</span> base == <span class="lua-num">31</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> bold <span class="lua-kw">and</span> <span class="lua-str">"&lt;255,0,0&gt;"</span>     <span class="lua-kw">or</span> <span class="lua-str">"&lt;128,0,0&gt;"</span>
+    <span class="lua-kw">elseif</span> base == <span class="lua-num">32</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> bold <span class="lua-kw">and</span> <span class="lua-str">"&lt;0,255,0&gt;"</span>     <span class="lua-kw">or</span> <span class="lua-str">"&lt;0,128,0&gt;"</span>
+    <span class="lua-kw">elseif</span> base == <span class="lua-num">33</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> bold <span class="lua-kw">and</span> <span class="lua-str">"&lt;255,255,0&gt;"</span>   <span class="lua-kw">or</span> <span class="lua-str">"&lt;128,128,0&gt;"</span>
+    <span class="lua-kw">elseif</span> base == <span class="lua-num">34</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> bold <span class="lua-kw">and</span> <span class="lua-str">"&lt;0,0,255&gt;"</span>     <span class="lua-kw">or</span> <span class="lua-str">"&lt;0,0,128&gt;"</span>
+    <span class="lua-kw">elseif</span> base == <span class="lua-num">35</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> bold <span class="lua-kw">and</span> <span class="lua-str">"&lt;255,0,255&gt;"</span>   <span class="lua-kw">or</span> <span class="lua-str">"&lt;128,0,128&gt;"</span>
+    <span class="lua-kw">elseif</span> base == <span class="lua-num">36</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> bold <span class="lua-kw">and</span> <span class="lua-str">"&lt;0,255,255&gt;"</span>   <span class="lua-kw">or</span> <span class="lua-str">"&lt;0,128,128&gt;"</span>
+    <span class="lua-kw">elseif</span> base == <span class="lua-num">37</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> bold <span class="lua-kw">and</span> <span class="lua-str">"&lt;255,255,255&gt;"</span> <span class="lua-kw">or</span> <span class="lua-str">"&lt;192,192,192&gt;"</span>
+    <span class="lua-kw">else</span>                    <span class="lua-kw">return</span> <span class="lua-str">"&lt;r&gt;"</span>
+    <span class="lua-kw">end</span>
+  <span class="lua-kw">end</span>))
+<span class="lua-kw">end</span>
 
 <span class="lua-kw">function</span> <span class="lua-fn">gmcp_map_init</span>()
   mapConsole = <span class="lua-fn">createMiniConsole</span>(<span class="lua-str">"mapConsole"</span>, <span class="lua-num">10</span>, <span class="lua-num">50</span>, <span class="lua-num">180</span>, <span class="lua-num">130</span>)
@@ -705,9 +728,9 @@
 <span class="lua-kw">end</span>
 
 <span class="lua-kw">function</span> <span class="lua-fn">gmcp_map_render</span>()
-  <span class="lua-kw">local</span> ansi = gmcp.Map.Render.ansi
+  <span class="lua-kw">local</span> raw = gmcp.Map.Render.ansi
   <span class="lua-fn">clearWindow</span>(<span class="lua-str">"mapConsole"</span>)
-  <span class="lua-fn">cecho</span>(<span class="lua-str">"mapConsole"</span>, ansi)
+  <span class="lua-fn">decho</span>(<span class="lua-str">"mapConsole"</span>, <span class="lua-fn">ansiToDecho</span>(raw))
 <span class="lua-kw">end</span>
 
 <span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"sysConnectionEvent"</span>, <span class="lua-str">"gmcp_map_init"</span>)
