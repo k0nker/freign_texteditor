@@ -145,12 +145,12 @@
           <tr>
             <td class="packet-name">Room.Chars</td>
             <td>every look</td>
-            <td><code>chars[]</code> — <code>name</code></td>
+            <td><code>chars[]</code> — <code>name</code>, <code>position</code></td>
           </tr>
           <tr>
             <td class="packet-name">Room.Mobs</td>
             <td>every look</td>
-            <td><code>mobs[]</code> — <code>name</code></td>
+            <td><code>mobs[]</code> — <code>name</code>, <code>position</code></td>
           </tr>
           <tr>
             <td class="packet-name">Room.Items</td>
@@ -474,11 +474,11 @@
                 <code>name</code> is <code>null</code> in darkness.
               </p>
               <pre><span class="kw">{</span> <span class="str">"chars"</span>: <span class="kw">[</span>
-  <span class="kw">{</span> <span class="str">"name"</span>: <span class="str">"Varek"</span> <span class="kw">}</span>
+  <span class="kw">{</span> <span class="str">"name"</span>: <span class="str">"Varek"</span>, <span class="str">"position"</span>: <span class="str">"standing"</span> <span class="kw">}</span>
 <span class="kw">]</span> <span class="kw">}</span>
 
 <span class="kw">{</span> <span class="str">"mobs"</span>: <span class="kw">[</span>
-  <span class="kw">{</span> <span class="str">"name"</span>: <span class="str">"a city guard"</span> <span class="kw">}</span>
+  <span class="kw">{</span> <span class="str">"name"</span>: <span class="str">"a city guard"</span>, <span class="str">"position"</span>: <span class="str">"standing"</span> <span class="kw">}</span>
 <span class="kw">]</span> <span class="kw">}</span>
 
 <span class="kw">{</span> <span class="str">"items"</span>: <span class="kw">[</span>
@@ -837,7 +837,7 @@
   <span class="lua-kw">if</span> rc <span class="lua-kw">and</span> rc.chars <span class="lua-kw">and</span> <span class="lua-fn">#rc.chars</span> &gt; <span class="lua-num">0</span> <span class="lua-kw">then</span>
     <span class="lua-fn">cecho</span>(<span class="lua-str">"roomConsole"</span>, <span class="lua-str">"&lt;cyan&gt;Players:\n"</span>)
     <span class="lua-kw">for</span> _, ch <span class="lua-kw">in</span> <span class="lua-fn">ipairs</span>(rc.chars) <span class="lua-kw">do</span>
-      <span class="lua-fn">cecho</span>(<span class="lua-str">"roomConsole"</span>, <span class="lua-str">"  &lt;white&gt;"</span> .. ch.name .. <span class="lua-str">"\n"</span>)
+      <span class="lua-fn">cecho</span>(<span class="lua-str">"roomConsole"</span>, <span class="lua-str">"  &lt;white&gt;"</span> .. ch.name .. <span class="lua-str">" &lt;grey&gt;"</span> .. (ch.position <span class="lua-kw">or</span> <span class="lua-str">""</span>) .. <span class="lua-str">"\n"</span>)
     <span class="lua-kw">end</span>
   <span class="lua-kw">end</span>
 
@@ -845,7 +845,7 @@
   <span class="lua-kw">if</span> rm <span class="lua-kw">and</span> rm.mobs <span class="lua-kw">and</span> <span class="lua-fn">#rm.mobs</span> &gt; <span class="lua-num">0</span> <span class="lua-kw">then</span>
     <span class="lua-fn">cecho</span>(<span class="lua-str">"roomConsole"</span>, <span class="lua-str">"&lt;orange&gt;Mobs:\n"</span>)
     <span class="lua-kw">for</span> _, mo <span class="lua-kw">in</span> <span class="lua-fn">ipairs</span>(rm.mobs) <span class="lua-kw">do</span>
-      <span class="lua-fn">cecho</span>(<span class="lua-str">"roomConsole"</span>, <span class="lua-str">"  &lt;white&gt;"</span> .. mo.name .. <span class="lua-str">"\n"</span>)
+      <span class="lua-fn">cecho</span>(<span class="lua-str">"roomConsole"</span>, <span class="lua-str">"  &lt;white&gt;"</span> .. mo.name .. <span class="lua-str">" &lt;grey&gt;"</span> .. (mo.position <span class="lua-kw">or</span> <span class="lua-str">""</span>) .. <span class="lua-str">"\n"</span>)
     <span class="lua-kw">end</span>
   <span class="lua-kw">end</span>
 
