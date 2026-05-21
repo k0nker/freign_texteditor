@@ -1,0 +1,886 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GMCP Reference — Forgotten Reign</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@400;700&display=swap" />
+  <link rel="stylesheet" href="/site.css?v=7" />
+  <link rel="stylesheet" href="/site-shell.css?v=3" />
+  <style>
+    .gmcp-intro { padding: 18px 0 8px; }
+    .gmcp-intro p { max-width: 80ch; line-height: 1.65; color: var(--text); margin: 0 0 10px; }
+    .gmcp-intro code, code { font: inherit; background: color-mix(in srgb, var(--input-bg) 90%, var(--accent)); padding: 1px 5px; border-radius: 3px; color: var(--title); }
+
+    .cmd-row { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0 0; }
+    .cmd-pill { background: color-mix(in srgb, var(--input-bg) 72%, var(--accent)); border: 1px solid var(--input-border); border-radius: 6px; padding: 6px 12px; font-size: 12px; }
+    .cmd-pill .cmd-name { color: var(--accent); font-weight: 700; margin-right: 6px; }
+    .cmd-pill .cmd-desc { color: var(--muted); }
+
+    /* Packet table */
+    .packet-section { padding: 18px 0; border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 65%, transparent); }
+    .packet-section h2 { margin: 0 0 12px; font-size: 14px; letter-spacing: 0.1em; text-transform: lowercase; color: var(--title); }
+    .packet-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .packet-table th { text-align: left; color: var(--muted); font-weight: 400; letter-spacing: 0.08em; text-transform: uppercase; font-size: 10px; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--panel-border); }
+    .packet-table td { padding: 8px 10px 8px 0; vertical-align: top; border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 40%, transparent); line-height: 1.5; }
+    .packet-table tr:last-child td { border-bottom: none; }
+    .packet-name { color: var(--accent); font-weight: 700; white-space: nowrap; }
+    .packet-when { color: var(--muted); font-size: 11px; }
+
+    /* JSON examples */
+    .packet-cards { display: flex; flex-direction: column; gap: 18px; padding: 8px 0 0; }
+    .packet-card { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px; overflow: hidden; }
+    .packet-card-header { padding: 8px 14px; background: color-mix(in srgb, var(--panel-border) 30%, var(--panel)); display: flex; align-items: baseline; gap: 12px; }
+    .packet-card-name { color: var(--accent); font-weight: 700; font-size: 13px; }
+    .packet-card-desc { color: var(--muted); font-size: 11px; }
+    .packet-card-body { padding: 12px 14px; display: grid; gap: 12px; }
+    @media (min-width: 800px) { .packet-card-body { grid-template-columns: 1fr 1fr; } }
+    .packet-card-body label { display: block; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+    pre { margin: 0; overflow-x: auto; font: inherit; font-size: 11px; color: var(--text); background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 5px; padding: 8px 10px; line-height: 1.5; }
+    .kw { color: var(--title); }
+    .str { color: #a8d5a2; }
+    .num { color: #d0a8d5; }
+    .bool { color: #d5c5a8; }
+
+    /* Mudlet section */
+    .mudlet-section { padding: 18px 0; border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 65%, transparent); }
+    .mudlet-section h2 { margin: 0 0 4px; font-size: 14px; letter-spacing: 0.1em; text-transform: lowercase; color: var(--title); }
+    .mudlet-section .section-lead { color: var(--muted); font-size: 12px; margin: 0 0 14px; }
+    .mudlet-cards { display: flex; flex-direction: column; gap: 14px; }
+    .mudlet-card { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px; overflow: hidden; }
+    .mudlet-card-header { padding: 8px 14px; background: color-mix(in srgb, var(--panel-border) 30%, var(--panel)); display: flex; align-items: baseline; gap: 10px; }
+    .mudlet-card-title { color: var(--title); font-weight: 700; font-size: 12px; }
+    .mudlet-card-uses { color: var(--muted); font-size: 10px; letter-spacing: 0.06em; }
+    .mudlet-card pre { border-radius: 0; border: none; border-top: 1px solid var(--panel-border); background: var(--input-bg); font-size: 11px; }
+    .lua-kw { color: #7ec8e3; }
+    .lua-str { color: #a8d5a2; }
+    .lua-cmt { color: var(--muted); }
+    .lua-fn { color: #e8c97a; }
+    .lua-num { color: #d0a8d5; }
+  </style>
+</head>
+<body data-theme="amethyst">
+  <div id="fr-shellbar-mount" data-active-nav="db"></div>
+
+  <main class="page-shell">
+
+    <!-- Hero -->
+    <div class="hero gmcp-intro">
+      <p class="eyebrow">protocol reference</p>
+      <h1 class="brand" style="font-size:clamp(28px,5vw,44px);margin:0 0 8px">GMCP</h1>
+      <p>
+        <strong>Generic MUD Communication Protocol</strong> (GMCP) lets your client receive structured JSON data
+        from Forgotten Reign alongside the normal game text. Use it to build live stat bars,
+        minimaps, inventory panels, and more — without screen-scraping.
+      </p>
+      <p>
+        All packets are sent as standard Telnet GMCP sub-negotiations (<code>IAC SB 0xC9 … IAC SE</code>).
+        Every payload includes a <code>timestamp</code> field (UTC epoch seconds) automatically injected by the server.
+      </p>
+
+      <div class="cmd-row">
+        <div class="cmd-pill"><span class="cmd-name">gmcp</span><span class="cmd-desc">toggle GMCP on / off</span></div>
+        <div class="cmd-pill"><span class="cmd-name">gmcpmap</span><span class="cmd-desc">toggle Map.Render packets (ANSI minimap)</span></div>
+        <div class="cmd-pill"><span class="cmd-name">gmcpoff</span><span class="cmd-desc">disable all GMCP and clear client state</span></div>
+      </div>
+    </div>
+
+    <!-- Packet table -->
+    <div class="packet-section">
+      <h2>packet reference</h2>
+      <table class="packet-table">
+        <thead>
+          <tr>
+            <th>packet</th>
+            <th>fires when</th>
+            <th>key fields</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="packet-name">Char.Vitals</td>
+            <td>every prompt tick; regen tick; delta-cached</td>
+            <td><code>hp</code> <code>maxhp</code> <code>mana</code> <code>maxmana</code> <code>move</code> <code>maxmove</code> <code>hunger</code> <code>thirst</code></td>
+          </tr>
+          <tr>
+            <td class="packet-name">Char.Affects</td>
+            <td>every prompt tick; hash-delta cached</td>
+            <td><code>affects[]</code> — <code>name</code>, <code>type</code>, <code>duration</code>, <code>mods[{stat,amount}]</code></td>
+          </tr>
+          <tr>
+            <td class="packet-name">Char.Combat</td>
+            <td>every prompt tick; empty <code>targets[]</code> on combat end</td>
+            <td><code>targets[]</code> — <code>name</code>, <code>targeting</code>, <code>hp_pct</code>, <code>condition</code> (primary target first)</td>
+          </tr>
+          <tr>
+            <td class="packet-name">Char.Worth</td>
+            <td>prompt tick; gold gain/loss; level-up</td>
+            <td><code>gold</code>, <code>bank_gold</code>, <code>cabal_points</code></td>
+          </tr>
+          <tr>
+            <td class="packet-name">Char.Status</td>
+            <td>login</td>
+            <td><code>name</code>, <code>race</code>, <code>charclass</code>, <code>level</code>, <code>cabal</code>, <code>rank</code>, <code>align</code>, <code>position</code></td>
+          </tr>
+          <tr>
+            <td class="packet-name">Char.Stats</td>
+            <td>login</td>
+            <td><code>str</code>, <code>int</code>, <code>wis</code>, <code>dex</code>, <code>con</code>, <code>str_add</code></td>
+          </tr>
+          <tr>
+            <td class="packet-name">Char.Inventory</td>
+            <td>doInventory, doWear, doRemove, login</td>
+            <td><code>items[]</code> — <code>name</code>, <code>type</code> (carried but not worn)</td>
+          </tr>
+          <tr>
+            <td class="packet-name">Char.Equipment</td>
+            <td>doEquipment, doWear, doRemove, login</td>
+            <td><code>slots[]</code> — <code>slot</code>, <code>name</code></td>
+          </tr>
+          <tr>
+            <td class="packet-name">Room.Info</td>
+            <td>every look</td>
+            <td><code>id</code>, <code>name</code>, <code>terrain</code>, <code>area</code>, <code>exits[{dir,id}]</code>, <code>can_see</code></td>
+          </tr>
+          <tr>
+            <td class="packet-name">Room.Chars</td>
+            <td>every look</td>
+            <td><code>chars[]</code> — <code>name</code>, <code>position</code>, <code>is_npc</code></td>
+          </tr>
+          <tr>
+            <td class="packet-name">Room.Mobs</td>
+            <td>every look</td>
+            <td><code>mobs[]</code> — <code>name</code>, <code>position</code></td>
+          </tr>
+          <tr>
+            <td class="packet-name">Room.Items</td>
+            <td>every look</td>
+            <td><code>items[]</code> — <code>name</code>, <code>type</code></td>
+          </tr>
+          <tr>
+            <td class="packet-name">Comm.Channel</td>
+            <td>channel message sent / received</td>
+            <td><code>channel</code>, <code>speaker</code>, <code>direction</code>, <code>text</code></td>
+          </tr>
+          <tr>
+            <td class="packet-name">Group.Info</td>
+            <td>prompt tick (hash delta); group changes; login</td>
+            <td><code>leader</code> (name); <code>members[]</code> — <code>name</code>, <code>level</code>, <code>race</code>, <code>class</code>, <code>room_id</code>, <code>hp_pct</code>, <code>mana_pct</code>, <code>mv_pct</code>, <code>is_npc</code></td>
+          </tr>
+          <tr>
+            <td class="packet-name">World.Time</td>
+            <td>hourly tick (delta); login</td>
+            <td><code>hour</code>, <code>day</code>, <code>month</code>, <code>year</code>, <code>time_of_day</code></td>
+          </tr>
+          <tr>
+            <td class="packet-name">World.Weather</td>
+            <td>weather changes; login</td>
+            <td><code>sky</code>, <code>sunlight</code></td>
+          </tr>
+          <tr>
+            <td class="packet-name">World.Moons</td>
+            <td>moon phase changes; login</td>
+            <td><code>moons[]</code> — <code>name</code>, <code>phase</code>, <code>is_visible</code></td>
+          </tr>
+          <tr>
+            <td class="packet-name">Map.Render</td>
+            <td>every look — requires <code>gmcpmap</code> toggle</td>
+            <td><code>ansi</code> (pre-rendered ANSI color string, 9×9 grid)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- JSON payload examples -->
+    <div class="packet-section">
+      <h2>example payloads</h2>
+      <div class="packet-cards">
+
+        <div class="packet-card">
+          <div class="packet-card-header">
+            <span class="packet-card-name">Char.Vitals</span>
+            <span class="packet-card-desc">fires every prompt tick; delta-cached</span>
+          </div>
+          <div class="packet-card-body">
+            <div>
+              <label>payload</label>
+              <pre><span class="kw">{</span>
+  <span class="str">"hp"</span>:        <span class="num">420</span>,
+  <span class="str">"maxhp"</span>:     <span class="num">500</span>,
+  <span class="str">"mana"</span>:      <span class="num">310</span>,
+  <span class="str">"maxmana"</span>:   <span class="num">400</span>,
+  <span class="str">"move"</span>:      <span class="num">200</span>,
+  <span class="str">"maxmove"</span>:   <span class="num">220</span>,
+  <span class="str">"hunger"</span>:    <span class="num">48</span>,
+  <span class="str">"thirst"</span>:    <span class="num">48</span>,
+  <span class="str">"timestamp"</span>: <span class="num">1717000000</span>
+<span class="kw">}</span></pre>
+            </div>
+            <div>
+              <label>notes</label>
+              <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:0">
+                Sent only when values change from the last cached snapshot.
+                <code>hunger</code> / <code>thirst</code> range 0–48; 48 = full.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="packet-card">
+          <div class="packet-card-header">
+            <span class="packet-card-name">Char.Affects</span>
+            <span class="packet-card-desc">active spell and skill effects</span>
+          </div>
+          <div class="packet-card-body">
+            <div>
+              <label>payload</label>
+              <pre><span class="kw">{</span>
+  <span class="str">"affects"</span>: <span class="kw">[</span>
+    <span class="kw">{</span>
+      <span class="str">"name"</span>:     <span class="str">"armor"</span>,
+      <span class="str">"type"</span>:     <span class="str">"spell"</span>,
+      <span class="str">"duration"</span>: <span class="num">24</span>,
+      <span class="str">"mods"</span>: <span class="kw">[</span>
+        <span class="kw">{</span> <span class="str">"stat"</span>: <span class="str">"ac"</span>, <span class="str">"amount"</span>: <span class="num">-20</span> <span class="kw">}</span>
+      <span class="kw">]</span>
+    <span class="kw">}</span>
+  <span class="kw">]</span>,
+  <span class="str">"timestamp"</span>: <span class="num">1717000000</span>
+<span class="kw">}</span></pre>
+            </div>
+            <div>
+              <label>notes</label>
+              <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:0">
+                Hash-delta cached — only resent when the set changes.
+                <code>duration</code> is in game hours.
+                <code>mods[]</code> may be empty for informational effects.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="packet-card">
+          <div class="packet-card-header">
+            <span class="packet-card-name">Char.Combat</span>
+            <span class="packet-card-desc">all in-room enemies; primary target first; empty targets[] on teardown</span>
+          </div>
+          <div class="packet-card-body">
+            <div>
+              <label>in combat</label>
+              <pre><span class="kw">{</span>
+  <span class="str">"targets"</span>: <span class="kw">[</span>
+    <span class="kw">{</span>
+      <span class="str">"name"</span>:      <span class="str">"a cave troll"</span>,
+      <span class="str">"targeting"</span>: <span class="str">"you"</span>,
+      <span class="str">"hp_pct"</span>:    <span class="num">84</span>,
+      <span class="str">"condition"</span>: <span class="str">"a few scratches"</span>
+    <span class="kw">}</span>,
+    <span class="kw">{</span>
+      <span class="str">"name"</span>:      <span class="str">"a cave troll guard"</span>,
+      <span class="str">"targeting"</span>: <span class="str">"Varek"</span>,
+      <span class="str">"hp_pct"</span>:    <span class="num">22</span>,
+      <span class="str">"condition"</span>: <span class="str">"pretty hurt"</span>
+    <span class="kw">}</span>
+  <span class="kw">]</span>,
+  <span class="str">"timestamp"</span>: <span class="num">1717000000</span>
+<span class="kw">}</span></pre>
+            </div>
+            <div>
+              <label>combat ended</label>
+              <pre><span class="kw">{</span>
+  <span class="str">"targets"</span>: <span class="kw">[]</span>,
+  <span class="str">"timestamp"</span>: <span class="num">1717000000</span>
+<span class="kw">}</span></pre>
+              <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:6px 0 0">
+                The first entry is always the character's primary target (<code>getFighting()</code>).
+                Remaining entries are others in the room whose fight pointer targets you.
+                All names are pers-resolved — hidden/invis/disguised characters never leak their real identity.
+                <br><br>
+                <code>targeting</code> is the visible name of who that enemy is currently swinging at,
+                or an empty string if they are not fighting anyone.
+                <br><br>
+                <code>condition</code> values (descending HP%): <code>excellent</code>, <code>a few scratches</code>,
+                <code>small wounds</code>, <code>quite a few wounds</code>, <code>big nasty wounds</code>,
+                <code>pretty hurt</code>, <code>awful</code>, <code>bleeding to death</code>.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="packet-card">
+          <div class="packet-card-header">
+            <span class="packet-card-name">Char.Status</span>
+            <span class="packet-card-desc">character identity — sent at login</span>
+          </div>
+          <div class="packet-card-body">
+            <div>
+              <label>payload</label>
+              <pre><span class="kw">{</span>
+  <span class="str">"name"</span>:      <span class="str">"Aelindra"</span>,
+  <span class="str">"race"</span>:      <span class="str">"elf"</span>,
+  <span class="str">"charclass"</span>: <span class="str">"mage"</span>,
+  <span class="str">"level"</span>:     <span class="num">37</span>,
+  <span class="str">"cabal"</span>:     <span class="str">"Tribunal"</span>,
+  <span class="str">"rank"</span>:      <span class="str">"Adjudicator"</span>,
+  <span class="str">"align"</span>:     <span class="str">"neutral"</span>,
+  <span class="str">"position"</span>:  <span class="str">"standing"</span>,
+  <span class="str">"timestamp"</span>: <span class="num">1717000000</span>
+<span class="kw">}</span></pre>
+            </div>
+            <div>
+              <label>notes</label>
+              <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:0">
+                Sent once at login. Use to populate character identity panels and
+                persist to session storage for reference throughout the session.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="packet-card">
+          <div class="packet-card-header">
+            <span class="packet-card-name">Char.Inventory / Char.Equipment</span>
+            <span class="packet-card-desc">carried items and worn gear</span>
+          </div>
+          <div class="packet-card-body">
+            <div>
+              <label>Char.Inventory</label>
+              <pre><span class="kw">{</span>
+  <span class="str">"items"</span>: <span class="kw">[</span>
+    <span class="kw">{</span> <span class="str">"name"</span>: <span class="str">"a leather sack"</span>, <span class="str">"type"</span>: <span class="str">"CONTAINER"</span> <span class="kw">}</span>,
+    <span class="kw">{</span> <span class="str">"name"</span>: <span class="str">"a healing potion"</span>, <span class="str">"type"</span>: <span class="str">"POTION"</span>    <span class="kw">}</span>
+  <span class="kw">]</span>,
+  <span class="str">"timestamp"</span>: <span class="num">1717000000</span>
+<span class="kw">}</span></pre>
+            </div>
+            <div>
+              <label>Char.Equipment</label>
+              <pre><span class="kw">{</span>
+  <span class="str">"slots"</span>: <span class="kw">[</span>
+    <span class="kw">{</span> <span class="str">"slot"</span>: <span class="str">"head"</span>,   <span class="str">"name"</span>: <span class="str">"iron helm"</span>       <span class="kw">}</span>,
+    <span class="kw">{</span> <span class="str">"slot"</span>: <span class="str">"body"</span>,   <span class="str">"name"</span>: <span class="str">"plate cuirass"</span>   <span class="kw">}</span>,
+    <span class="kw">{</span> <span class="str">"slot"</span>: <span class="str">"wield"</span>,  <span class="str">"name"</span>: <span class="str">"a runed longsword"</span><span class="kw">}</span>
+  <span class="kw">]</span>,
+  <span class="str">"timestamp"</span>: <span class="num">1717000000</span>
+<span class="kw">}</span></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="packet-card">
+          <div class="packet-card-header">
+            <span class="packet-card-name">Room.Info</span>
+            <span class="packet-card-desc">current room metadata — fires every look</span>
+          </div>
+          <div class="packet-card-body">
+            <div>
+              <label>payload</label>
+              <pre><span class="kw">{</span>
+  <span class="str">"id"</span>:      <span class="num">3001</span>,
+  <span class="str">"name"</span>:    <span class="str">"The Crossroads"</span>,
+  <span class="str">"terrain"</span>: <span class="str">"city"</span>,
+  <span class="str">"area"</span>:    <span class="str">"Midgaard"</span>,
+  <span class="str">"can_see"</span>: <span class="bool">true</span>,
+  <span class="str">"exits"</span>: <span class="kw">[</span>
+    <span class="kw">{</span> <span class="str">"dir"</span>: <span class="str">"north"</span>, <span class="str">"id"</span>: <span class="num">3002</span> <span class="kw">}</span>,
+    <span class="kw">{</span> <span class="str">"dir"</span>: <span class="str">"east"</span>,  <span class="str">"id"</span>: <span class="num">3010</span> <span class="kw">}</span>
+  <span class="kw">]</span>,
+  <span class="str">"timestamp"</span>: <span class="num">1717000000</span>
+<span class="kw">}</span></pre>
+            </div>
+            <div>
+              <label>also fired alongside</label>
+              <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:0 0 8px">
+                <code>Room.Chars</code>, <code>Room.Mobs</code>, and <code>Room.Items</code>
+                are always sent together with <code>Room.Info</code> on the same look tick.
+              </p>
+              <pre><span class="kw">{</span> <span class="str">"chars"</span>: <span class="kw">[</span>
+  <span class="kw">{</span> <span class="str">"name"</span>: <span class="str">"Varek"</span>, <span class="str">"position"</span>: <span class="str">"standing"</span>, <span class="str">"is_npc"</span>: <span class="bool">false</span> <span class="kw">}</span>
+<span class="kw">]</span> <span class="kw">}</span>
+
+<span class="kw">{</span> <span class="str">"mobs"</span>: <span class="kw">[</span>
+  <span class="kw">{</span> <span class="str">"name"</span>: <span class="str">"a city guard"</span>, <span class="str">"position"</span>: <span class="str">"standing"</span> <span class="kw">}</span>
+<span class="kw">]</span> <span class="kw">}</span>
+
+<span class="kw">{</span> <span class="str">"items"</span>: <span class="kw">[</span>
+  <span class="kw">{</span> <span class="str">"name"</span>: <span class="str">"a silver coin"</span>, <span class="str">"type"</span>: <span class="str">"MONEY"</span> <span class="kw">}</span>
+<span class="kw">]</span> <span class="kw">}</span></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="packet-card">
+          <div class="packet-card-header">
+            <span class="packet-card-name">Group.Info</span>
+            <span class="packet-card-desc">group member vitals — prompt tick, delta-cached</span>
+          </div>
+          <div class="packet-card-body">
+            <div>
+              <label>payload</label>
+              <pre><span class="kw">{</span>
+  <span class="str">"leader"</span>:  <span class="str">"Aelindra"</span>,
+  <span class="str">"members"</span>: <span class="kw">[</span>
+    <span class="kw">{</span>
+      <span class="str">"name"</span>:     <span class="str">"Aelindra"</span>,
+      <span class="str">"level"</span>:    <span class="num">42</span>,
+      <span class="str">"race"</span>:     <span class="str">"elf"</span>,
+      <span class="str">"class"</span>:    <span class="str">"ranger"</span>,
+      <span class="str">"room_id"</span>:  <span class="str">"a3f8c2"</span>,
+      <span class="str">"hp_pct"</span>:   <span class="num">84</span>,
+      <span class="str">"mana_pct"</span>: <span class="num">77</span>,
+      <span class="str">"mv_pct"</span>:   <span class="num">91</span>,
+      <span class="str">"is_npc"</span>:   <span class="bool">false</span>
+    <span class="kw">}</span>,
+    <span class="kw">{</span>
+      <span class="str">"name"</span>:     <span class="str">"Varek"</span>,
+      <span class="str">"level"</span>:    <span class="num">38</span>,
+      <span class="str">"race"</span>:     <span class="str">"dwarf"</span>,
+      <span class="str">"class"</span>:    <span class="str">"warrior"</span>,
+      <span class="str">"room_id"</span>:  <span class="str">"b91d4e"</span>,
+      <span class="str">"hp_pct"</span>:   <span class="num">45</span>,
+      <span class="str">"mana_pct"</span>: <span class="num">50</span>,
+      <span class="str">"mv_pct"</span>:   <span class="num">58</span>,
+      <span class="str">"is_npc"</span>:   <span class="bool">false</span>
+    <span class="kw">}</span>
+  <span class="kw">]</span>,
+  <span class="str">"timestamp"</span>: <span class="num">1717000000</span>
+<span class="kw">}</span></pre>
+            </div>
+            <div>
+              <label>notes</label>
+              <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:0">
+                <code>leader</code> is the group leader's name at the top level for easy access.
+                Hash delta — only resent when any member's values change.
+                Includes the player themselves. Empty <code>members[]</code> means not in a group.
+                <code>room_id</code> matches the <code>id</code> field from <code>Room.Info</code> — use it to
+                know whether members share your current room.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="packet-card">
+          <div class="packet-card-header">
+            <span class="packet-card-name">World.Time / World.Weather / World.Moons</span>
+            <span class="packet-card-desc">server time, sky conditions, moon phases</span>
+          </div>
+          <div class="packet-card-body">
+            <div>
+              <label>World.Time</label>
+              <pre><span class="kw">{</span>
+  <span class="str">"hour"</span>:        <span class="num">14</span>,
+  <span class="str">"day"</span>:         <span class="num">7</span>,
+  <span class="str">"month"</span>:       <span class="num">3</span>,
+  <span class="str">"year"</span>:        <span class="num">502</span>,
+  <span class="str">"time_of_day"</span>: <span class="str">"afternoon"</span>,
+  <span class="str">"timestamp"</span>:   <span class="num">1717000000</span>
+<span class="kw">}</span></pre>
+            </div>
+            <div>
+              <label>World.Weather + World.Moons</label>
+              <pre><span class="kw">{</span> <span class="str">"sky"</span>: <span class="str">"cloudless"</span>, <span class="str">"sunlight"</span>: <span class="str">"light"</span> <span class="kw">}</span>
+
+<span class="kw">{</span>
+  <span class="str">"moons"</span>: <span class="kw">[</span>
+    <span class="kw">{</span> <span class="str">"name"</span>: <span class="str">"Selune"</span>, <span class="str">"phase"</span>: <span class="str">"full"</span>,     <span class="str">"is_visible"</span>: <span class="bool">true</span>  <span class="kw">}</span>,
+    <span class="kw">{</span> <span class="str">"name"</span>: <span class="str">"Shar"</span>,   <span class="str">"phase"</span>: <span class="str">"crescent"</span>, <span class="str">"is_visible"</span>: <span class="bool">false</span> <span class="kw">}</span>
+  <span class="kw">]</span>
+<span class="kw">}</span></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="packet-card">
+          <div class="packet-card-header">
+            <span class="packet-card-name">Map.Render</span>
+            <span class="packet-card-desc">pre-rendered ANSI minimap — requires gmcpmap toggle</span>
+          </div>
+          <div class="packet-card-body">
+            <div>
+              <label>payload</label>
+              <pre><span class="kw">{</span>
+  <span class="str">"ansi"</span>: <span class="str">"\u001b[32m#\u001b[0m …"</span>,
+  <span class="str">"timestamp"</span>: <span class="num">1717000000</span>
+<span class="kw">}</span></pre>
+            </div>
+            <div>
+              <label>notes</label>
+              <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:0">
+                The <code>ansi</code> string is a 9×9 character grid with embedded
+                ANSI color escape sequences. Render it directly into a fixed-size
+                label in Mudlet using <code>ansi2deco()</code> or a <code>miniConsole</code>
+                that understands VT100 color codes.
+                Enable with: <code>gmcpmap</code>
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="packet-card">
+          <div class="packet-card-header">
+            <span class="packet-card-name">Comm.Channel</span>
+            <span class="packet-card-desc">channel messages in both directions</span>
+          </div>
+          <div class="packet-card-body">
+            <div>
+              <label>payload</label>
+              <pre><span class="kw">{</span>
+  <span class="str">"channel"</span>:   <span class="str">"gossip"</span>,
+  <span class="str">"speaker"</span>:   <span class="str">"Varek"</span>,
+  <span class="str">"direction"</span>: <span class="str">"in"</span>,
+  <span class="str">"text"</span>:      <span class="str">"anyone want to group?"</span>,
+  <span class="str">"timestamp"</span>: <span class="num">1717000000</span>
+<span class="kw">}</span></pre>
+            </div>
+            <div>
+              <label>notes</label>
+              <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:0">
+                <code>direction</code>: <code>"in"</code> = received, <code>"out"</code> = sent by you.
+                <code>channel</code> values include <code>gossip</code>, <code>shout</code>,
+                <code>tell</code>, <code>clan</code>, <code>cabal</code>, <code>auction</code>, etc.
+              </p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Mudlet panel examples -->
+    <div class="mudlet-section">
+      <h2>mudlet panel examples</h2>
+      <p class="section-lead">
+        Paste each snippet into a new Mudlet Script or GMCP trigger. All examples assume Mudlet 4.x+.
+      </p>
+      <div class="mudlet-cards">
+
+        <!-- Vitals bar -->
+        <div class="mudlet-card">
+          <div class="mudlet-card-header">
+            <span class="mudlet-card-title">Vitals Bar</span>
+            <span class="mudlet-card-uses">uses Char.Vitals</span>
+          </div>
+          <pre><span class="lua-cmt">-- Script: GMCP Vitals Bar
+-- Trigger type: GMCP · package: Char · event: Vitals</span>
+
+<span class="lua-kw">function</span> <span class="lua-fn">gmcp_vitals</span>()
+  <span class="lua-kw">local</span> v = gmcp.Char.Vitals
+
+  <span class="lua-cmt">-- HP gauge</span>
+  <span class="lua-fn">setGauge</span>(<span class="lua-str">"hpGauge"</span>, v.hp, v.maxhp)
+  <span class="lua-fn">setGaugeText</span>(<span class="lua-str">"hpGauge"</span>, v.hp .. <span class="lua-str">"/"</span> .. v.maxhp)
+
+  <span class="lua-cmt">-- Mana gauge</span>
+  <span class="lua-fn">setGauge</span>(<span class="lua-str">"manaGauge"</span>, v.mana, v.maxmana)
+  <span class="lua-fn">setGaugeText</span>(<span class="lua-str">"manaGauge"</span>, v.mana .. <span class="lua-str">"/"</span> .. v.maxmana)
+
+  <span class="lua-cmt">-- Move gauge</span>
+  <span class="lua-fn">setGauge</span>(<span class="lua-str">"moveGauge"</span>, v.move, v.maxmove)
+  <span class="lua-fn">setGaugeText</span>(<span class="lua-str">"moveGauge"</span>, v.move .. <span class="lua-str">"/"</span> .. v.maxmove)
+<span class="lua-kw">end</span>
+
+<span class="lua-cmt">-- Wire GMCP event to function</span>
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Char.Vitals"</span>, <span class="lua-str">"gmcp_vitals"</span>)
+
+<span class="lua-cmt">-- Create gauges (run once in profile login script)
+-- createGauge("hpGauge",   300, 20, 10, 760, nil, 0.75, 0.25, 0.25)
+-- createGauge("manaGauge", 300, 20, 10, 784, nil, 0.25, 0.45, 0.85)
+-- createGauge("moveGauge", 300, 20, 10, 808, nil, 0.25, 0.70, 0.35)</span></pre>
+        </div>
+
+        <!-- Minimap -->
+        <div class="mudlet-card">
+          <div class="mudlet-card-header">
+            <span class="mudlet-card-title">ANSI Minimap Panel</span>
+            <span class="mudlet-card-uses">uses Map.Render — enable with: gmcpmap</span>
+          </div>
+          <pre><span class="lua-cmt">-- Script: GMCP Minimap
+-- Trigger type: GMCP · package: Map · event: Render</span>
+
+<span class="lua-kw">local</span> mapConsole
+
+<span class="lua-kw">function</span> <span class="lua-fn">gmcp_map_init</span>()
+  mapConsole = <span class="lua-fn">createMiniConsole</span>(<span class="lua-str">"mapConsole"</span>, <span class="lua-num">10</span>, <span class="lua-num">50</span>, <span class="lua-num">180</span>, <span class="lua-num">130</span>)
+  <span class="lua-fn">setMiniConsoleFontSize</span>(<span class="lua-str">"mapConsole"</span>, <span class="lua-num">9</span>)
+  <span class="lua-fn">setBackgroundColor</span>(<span class="lua-str">"mapConsole"</span>, <span class="lua-num">18</span>, <span class="lua-num">18</span>, <span class="lua-num">18</span>, <span class="lua-num">220</span>)
+<span class="lua-kw">end</span>
+
+<span class="lua-kw">function</span> <span class="lua-fn">gmcp_map_render</span>()
+  <span class="lua-kw">local</span> ansi = gmcp.Map.Render.ansi
+  <span class="lua-fn">clearWindow</span>(<span class="lua-str">"mapConsole"</span>)
+  <span class="lua-fn">cecho</span>(<span class="lua-str">"mapConsole"</span>, ansi)
+<span class="lua-kw">end</span>
+
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"sysConnectionEvent"</span>, <span class="lua-str">"gmcp_map_init"</span>)
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Map.Render"</span>,     <span class="lua-str">"gmcp_map_render"</span>)</pre>
+        </div>
+
+        <!-- Group window -->
+        <div class="mudlet-card">
+          <div class="mudlet-card-header">
+            <span class="mudlet-card-title">Group Window</span>
+            <span class="mudlet-card-uses">uses Group.Info</span>
+          </div>
+          <pre><span class="lua-cmt">-- Script: GMCP Group Window</span>
+
+<span class="lua-kw">function</span> <span class="lua-fn">gmcp_group</span>()
+  <span class="lua-kw">local</span> info = gmcp.Group.Info
+  <span class="lua-kw">local</span> g    = info.members
+  <span class="lua-fn">clearWindow</span>(<span class="lua-str">"groupConsole"</span>)
+  <span class="lua-kw">if</span> <span class="lua-fn">#g</span> == <span class="lua-num">0</span> <span class="lua-kw">then</span>
+    <span class="lua-fn">cecho</span>(<span class="lua-str">"groupConsole"</span>, <span class="lua-str">"&lt;grey&gt;  not in a group\n"</span>)
+    <span class="lua-kw">return</span>
+  <span class="lua-kw">end</span>
+
+  <span class="lua-kw">for</span> _, m <span class="lua-kw">in</span> <span class="lua-fn">ipairs</span>(g) <span class="lua-kw">do</span>
+    <span class="lua-kw">local</span> tag = m.name == info.leader <span class="lua-kw">and</span> <span class="lua-str">"&lt;gold&gt;*"</span> <span class="lua-kw">or</span> <span class="lua-str">"&lt;white&gt; "</span>
+    <span class="lua-kw">local</span> col = m.hp_pct &gt; <span class="lua-num">60</span> <span class="lua-kw">and</span> <span class="lua-str">"&lt;green&gt;"</span> <span class="lua-kw">or</span> m.hp_pct &gt; <span class="lua-num">30</span> <span class="lua-kw">and</span> <span class="lua-str">"&lt;yellow&gt;"</span> <span class="lua-kw">or</span> <span class="lua-str">"&lt;red&gt;"</span>
+    <span class="lua-fn">cecho</span>(<span class="lua-str">"groupConsole"</span>,
+      tag .. <span class="lua-str">" "</span> .. m.name .. <span class="lua-str">" ["</span> .. m.race .. <span class="lua-str">" "</span> .. m.class .. <span class="lua-str">" "</span> .. m.level .. <span class="lua-str">"] "</span> ..
+      col  .. m.hp_pct .. <span class="lua-str">"%hp  "</span> ..
+      <span class="lua-str">"&lt;blue&gt;"</span> .. m.mana_pct .. <span class="lua-str">"%mp  "</span> ..
+      <span class="lua-str">"&lt;cyan&gt;"</span> .. m.mv_pct .. <span class="lua-str">"%mv\n"</span>)
+  <span class="lua-kw">end</span>
+<span class="lua-kw">end</span>
+
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Group.Info"</span>, <span class="lua-str">"gmcp_group"</span>)</pre>
+        </div>
+
+        <!-- Affects window -->
+        <div class="mudlet-card">
+          <div class="mudlet-card-header">
+            <span class="mudlet-card-title">Active Affects Panel</span>
+            <span class="mudlet-card-uses">uses Char.Affects</span>
+          </div>
+          <pre><span class="lua-cmt">-- Script: GMCP Affects Panel</span>
+
+<span class="lua-kw">function</span> <span class="lua-fn">gmcp_affects</span>()
+  <span class="lua-kw">local</span> aff = gmcp.Char.Affects.affects
+  <span class="lua-fn">clearWindow</span>(<span class="lua-str">"affConsole"</span>)
+  <span class="lua-kw">if</span> <span class="lua-fn">#aff</span> == <span class="lua-num">0</span> <span class="lua-kw">then</span>
+    <span class="lua-fn">cecho</span>(<span class="lua-str">"affConsole"</span>, <span class="lua-str">"&lt;grey&gt;  no active effects\n"</span>)
+    <span class="lua-kw">return</span>
+  <span class="lua-kw">end</span>
+  <span class="lua-kw">for</span> _, a <span class="lua-kw">in</span> <span class="lua-fn">ipairs</span>(aff) <span class="lua-kw">do</span>
+    <span class="lua-fn">cecho</span>(<span class="lua-str">"affConsole"</span>,
+      <span class="lua-str">"&lt;cyan&gt;"</span> .. a.name ..
+      <span class="lua-str">"&lt;grey&gt; ["</span> .. a.duration .. <span class="lua-str">"h]\n"</span>)
+  <span class="lua-kw">end</span>
+<span class="lua-kw">end</span>
+
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Char.Affects"</span>, <span class="lua-str">"gmcp_affects"</span>)</pre>
+        </div>
+
+        <!-- Combat target -->
+        <div class="mudlet-card">
+          <div class="mudlet-card-header">
+            <span class="mudlet-card-title">Combat Target Bar</span>
+            <span class="mudlet-card-uses">uses Char.Combat</span>
+          </div>
+          <pre><span class="lua-cmt">-- Script: GMCP Combat Target Bar</span>
+
+<span class="lua-kw">local</span> condColor = {
+  [<span class="lua-str">"excellent"</span>]         = <span class="lua-str">"&lt;green&gt;"</span>,
+  [<span class="lua-str">"a few scratches"</span>]   = <span class="lua-str">"&lt;green&gt;"</span>,
+  [<span class="lua-str">"small wounds"</span>]      = <span class="lua-str">"&lt;yellow&gt;"</span>,
+  [<span class="lua-str">"quite a few wounds"</span>] = <span class="lua-str">"&lt;yellow&gt;"</span>,
+  [<span class="lua-str">"big nasty wounds"</span>]  = <span class="lua-str">"&lt;orange&gt;"</span>,
+  [<span class="lua-str">"pretty hurt"</span>]       = <span class="lua-str">"&lt;orange&gt;"</span>,
+  [<span class="lua-str">"awful"</span>]             = <span class="lua-str">"&lt;red&gt;"</span>,
+  [<span class="lua-str">"bleeding to death"</span>] = <span class="lua-str">"&lt;red&gt;"</span>,
+}
+
+<span class="lua-kw">function</span> <span class="lua-fn">gmcp_combat</span>()
+  <span class="lua-kw">local</span> targets = gmcp.Char.Combat.targets
+  <span class="lua-fn">clearWindow</span>(<span class="lua-str">"combatConsole"</span>)
+  <span class="lua-kw">if</span> <span class="lua-kw">not</span> targets <span class="lua-kw">or</span> <span class="lua-fn">#targets</span> == <span class="lua-num">0</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> <span class="lua-kw">end</span>
+  <span class="lua-kw">for</span> i, t <span class="lua-kw">in</span> <span class="lua-fn">ipairs</span>(targets) <span class="lua-kw">do</span>
+    <span class="lua-kw">local</span> col  = condColor[t.condition] <span class="lua-kw">or</span> <span class="lua-str">"&lt;white&gt;"</span>
+    <span class="lua-kw">local</span> pfx  = i == <span class="lua-num">1</span> <span class="lua-kw">and</span> <span class="lua-str">"&lt;white&gt;** "</span> <span class="lua-kw">or</span> <span class="lua-str">"&lt;grey&gt;   "</span>
+    <span class="lua-kw">local</span> tgt  = t.targeting ~= <span class="lua-str">""</span> <span class="lua-kw">and</span> <span class="lua-str">" -&gt; "</span> .. t.targeting <span class="lua-kw">or</span> <span class="lua-str">""</span>
+    <span class="lua-fn">cecho</span>(<span class="lua-str">"combatConsole"</span>,
+      pfx .. <span class="lua-str">"&lt;orange&gt;"</span> .. t.name .. tgt ..
+      <span class="lua-str">"  "</span> .. col .. t.condition ..
+      <span class="lua-str">" ("</span> .. t.hp_pct .. <span class="lua-str">"%hp)\n"</span>)
+  <span class="lua-kw">end</span>
+<span class="lua-kw">end</span>
+
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Char.Combat"</span>, <span class="lua-str">"gmcp_combat"</span>)</pre>
+        </div>
+
+        <!-- Room info panel -->
+        <div class="mudlet-card">
+          <div class="mudlet-card-header">
+            <span class="mudlet-card-title">Room Info Panel</span>
+            <span class="mudlet-card-uses">uses Room.Info + Room.Chars + Room.Mobs + Room.Items</span>
+          </div>
+          <pre><span class="lua-cmt">-- Script: GMCP Room Panel
+-- Wire all four Room.* events to gmcp_room()</span>
+
+<span class="lua-kw">local</span> roomData = {}
+
+<span class="lua-kw">function</span> <span class="lua-fn">gmcp_room_render</span>()
+  <span class="lua-fn">clearWindow</span>(<span class="lua-str">"roomConsole"</span>)
+
+  <span class="lua-kw">local</span> ri = gmcp.Room.Info
+  <span class="lua-kw">if</span> ri <span class="lua-kw">then</span>
+    <span class="lua-fn">cecho</span>(<span class="lua-str">"roomConsole"</span>, <span class="lua-str">"&lt;gold&gt;"</span> .. (ri.name <span class="lua-kw">or</span> <span class="lua-str">""</span>) .. <span class="lua-str">"\n"</span>)
+    <span class="lua-fn">cecho</span>(<span class="lua-str">"roomConsole"</span>, <span class="lua-str">"&lt;grey&gt;  area: "</span>    .. (ri.area    <span class="lua-kw">or</span> <span class="lua-str">"?"</span>) .. <span class="lua-str">"\n"</span>)
+    <span class="lua-fn">cecho</span>(<span class="lua-str">"roomConsole"</span>, <span class="lua-str">"&lt;grey&gt;  terrain: "</span> .. (ri.terrain <span class="lua-kw">or</span> <span class="lua-str">"?"</span>) .. <span class="lua-str">"\n"</span>)
+    <span class="lua-kw">if</span> ri.exits <span class="lua-kw">then</span>
+      <span class="lua-kw">local</span> dirs = {}
+      <span class="lua-kw">for</span> _, e <span class="lua-kw">in</span> <span class="lua-fn">ipairs</span>(ri.exits) <span class="lua-kw">do</span> dirs[<span class="lua-fn">#dirs</span>+<span class="lua-num">1</span>] = e.dir <span class="lua-kw">end</span>
+      <span class="lua-fn">cecho</span>(<span class="lua-str">"roomConsole"</span>, <span class="lua-str">"&lt;grey&gt;  exits: &lt;white&gt;"</span> .. <span class="lua-fn">table.concat</span>(dirs, <span class="lua-str">" "</span>) .. <span class="lua-str">"\n"</span>)
+    <span class="lua-kw">end</span>
+  <span class="lua-kw">end</span>
+
+  <span class="lua-kw">local</span> rc = gmcp.Room.Chars
+  <span class="lua-kw">if</span> rc <span class="lua-kw">and</span> rc.chars <span class="lua-kw">and</span> <span class="lua-fn">#rc.chars</span> &gt; <span class="lua-num">0</span> <span class="lua-kw">then</span>
+    <span class="lua-fn">cecho</span>(<span class="lua-str">"roomConsole"</span>, <span class="lua-str">"&lt;cyan&gt;Players:\n"</span>)
+    <span class="lua-kw">for</span> _, ch <span class="lua-kw">in</span> <span class="lua-fn">ipairs</span>(rc.chars) <span class="lua-kw">do</span>
+      <span class="lua-fn">cecho</span>(<span class="lua-str">"roomConsole"</span>, <span class="lua-str">"  &lt;white&gt;"</span> .. ch.name .. <span class="lua-str">" &lt;grey&gt;"</span> .. ch.position .. <span class="lua-str">"\n"</span>)
+    <span class="lua-kw">end</span>
+  <span class="lua-kw">end</span>
+
+  <span class="lua-kw">local</span> rm = gmcp.Room.Mobs
+  <span class="lua-kw">if</span> rm <span class="lua-kw">and</span> rm.mobs <span class="lua-kw">and</span> <span class="lua-fn">#rm.mobs</span> &gt; <span class="lua-num">0</span> <span class="lua-kw">then</span>
+    <span class="lua-fn">cecho</span>(<span class="lua-str">"roomConsole"</span>, <span class="lua-str">"&lt;orange&gt;Mobs:\n"</span>)
+    <span class="lua-kw">for</span> _, mo <span class="lua-kw">in</span> <span class="lua-fn">ipairs</span>(rm.mobs) <span class="lua-kw">do</span>
+      <span class="lua-fn">cecho</span>(<span class="lua-str">"roomConsole"</span>, <span class="lua-str">"  &lt;white&gt;"</span> .. mo.name .. <span class="lua-str">"\n"</span>)
+    <span class="lua-kw">end</span>
+  <span class="lua-kw">end</span>
+
+  <span class="lua-kw">local</span> rit = gmcp.Room.Items
+  <span class="lua-kw">if</span> rit <span class="lua-kw">and</span> rit.items <span class="lua-kw">and</span> <span class="lua-fn">#rit.items</span> &gt; <span class="lua-num">0</span> <span class="lua-kw">then</span>
+    <span class="lua-fn">cecho</span>(<span class="lua-str">"roomConsole"</span>, <span class="lua-str">"&lt;yellow&gt;Items:\n"</span>)
+    <span class="lua-kw">for</span> _, it <span class="lua-kw">in</span> <span class="lua-fn">ipairs</span>(rit.items) <span class="lua-kw">do</span>
+      <span class="lua-fn">cecho</span>(<span class="lua-str">"roomConsole"</span>, <span class="lua-str">"  &lt;white&gt;"</span> .. it.name .. <span class="lua-str">"\n"</span>)
+    <span class="lua-kw">end</span>
+  <span class="lua-kw">end</span>
+<span class="lua-kw">end</span>
+
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Room.Info"</span>,  <span class="lua-str">"gmcp_room_render"</span>)
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Room.Chars"</span>, <span class="lua-str">"gmcp_room_render"</span>)
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Room.Mobs"</span>,  <span class="lua-str">"gmcp_room_render"</span>)
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Room.Items"</span>, <span class="lua-str">"gmcp_room_render"</span>)</pre>
+        </div>
+
+        <!-- Inventory + Equipment -->
+        <div class="mudlet-card">
+          <div class="mudlet-card-header">
+            <span class="mudlet-card-title">Inventory &amp; Equipment Panels</span>
+            <span class="mudlet-card-uses">uses Char.Inventory + Char.Equipment</span>
+          </div>
+          <pre><span class="lua-cmt">-- Script: GMCP Inventory / Equipment</span>
+
+<span class="lua-kw">function</span> <span class="lua-fn">gmcp_inventory</span>()
+  <span class="lua-kw">local</span> inv = gmcp.Char.Inventory.items
+  <span class="lua-fn">clearWindow</span>(<span class="lua-str">"invConsole"</span>)
+  <span class="lua-fn">cecho</span>(<span class="lua-str">"invConsole"</span>, <span class="lua-str">"&lt;gold&gt;Carrying:\n"</span>)
+  <span class="lua-kw">if</span> <span class="lua-fn">#inv</span> == <span class="lua-num">0</span> <span class="lua-kw">then</span>
+    <span class="lua-fn">cecho</span>(<span class="lua-str">"invConsole"</span>, <span class="lua-str">"&lt;grey&gt;  nothing\n"</span>)
+  <span class="lua-kw">else</span>
+    <span class="lua-kw">for</span> _, it <span class="lua-kw">in</span> <span class="lua-fn">ipairs</span>(inv) <span class="lua-kw">do</span>
+      <span class="lua-fn">cecho</span>(<span class="lua-str">"invConsole"</span>, <span class="lua-str">"&lt;white&gt;  "</span> .. it.name .. <span class="lua-str">"\n"</span>)
+    <span class="lua-kw">end</span>
+  <span class="lua-kw">end</span>
+<span class="lua-kw">end</span>
+
+<span class="lua-kw">function</span> <span class="lua-fn">gmcp_equipment</span>()
+  <span class="lua-kw">local</span> eq = gmcp.Char.Equipment.slots
+  <span class="lua-fn">clearWindow</span>(<span class="lua-str">"eqConsole"</span>)
+  <span class="lua-fn">cecho</span>(<span class="lua-str">"eqConsole"</span>, <span class="lua-str">"&lt;gold&gt;Worn:\n"</span>)
+  <span class="lua-kw">for</span> _, s <span class="lua-kw">in</span> <span class="lua-fn">ipairs</span>(eq) <span class="lua-kw">do</span>
+    <span class="lua-fn">cecho</span>(<span class="lua-str">"eqConsole"</span>,
+      <span class="lua-str">"&lt;grey&gt;  ["</span> .. s.slot .. <span class="lua-str">"] &lt;white&gt;"</span> .. s.name .. <span class="lua-str">"\n"</span>)
+  <span class="lua-kw">end</span>
+<span class="lua-kw">end</span>
+
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Char.Inventory"</span>, <span class="lua-str">"gmcp_inventory"</span>)
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Char.Equipment"</span>, <span class="lua-str">"gmcp_equipment"</span>)</pre>
+        </div>
+
+        <!-- World clock / weather -->
+        <div class="mudlet-card">
+          <div class="mudlet-card-header">
+            <span class="mudlet-card-title">World Clock &amp; Weather Panel</span>
+            <span class="mudlet-card-uses">uses World.Time + World.Weather + World.Moons</span>
+          </div>
+          <pre><span class="lua-cmt">-- Script: GMCP World Panel</span>
+
+<span class="lua-kw">function</span> <span class="lua-fn">gmcp_world_render</span>()
+  <span class="lua-fn">clearWindow</span>(<span class="lua-str">"worldConsole"</span>)
+
+  <span class="lua-kw">local</span> t = gmcp.World.Time
+  <span class="lua-kw">if</span> t <span class="lua-kw">then</span>
+    <span class="lua-fn">cecho</span>(<span class="lua-str">"worldConsole"</span>,
+      <span class="lua-str">"&lt;gold&gt;"</span>  .. (t.time_of_day <span class="lua-kw">or</span> <span class="lua-str">""</span>) ..
+      <span class="lua-str">"&lt;grey&gt; h"</span> .. (t.hour <span class="lua-kw">or</span> <span class="lua-str">"?"</span>) ..
+      <span class="lua-str">" d"</span>      .. (t.day  <span class="lua-kw">or</span> <span class="lua-str">"?"</span>) .. <span class="lua-str">"\n"</span>)
+  <span class="lua-kw">end</span>
+
+  <span class="lua-kw">local</span> w = gmcp.World.Weather
+  <span class="lua-kw">if</span> w <span class="lua-kw">then</span>
+    <span class="lua-fn">cecho</span>(<span class="lua-str">"worldConsole"</span>,
+      <span class="lua-str">"&lt;cyan&gt;sky: &lt;white&gt;"</span> .. (w.sky <span class="lua-kw">or</span> <span class="lua-str">"?"</span>) .. <span class="lua-str">"\n"</span>)
+  <span class="lua-kw">end</span>
+
+  <span class="lua-kw">local</span> m = gmcp.World.Moons
+  <span class="lua-kw">if</span> m <span class="lua-kw">and</span> m.moons <span class="lua-kw">then</span>
+    <span class="lua-kw">for</span> _, moon <span class="lua-kw">in</span> <span class="lua-fn">ipairs</span>(m.moons) <span class="lua-kw">do</span>
+      <span class="lua-kw">if</span> moon.is_visible <span class="lua-kw">then</span>
+        <span class="lua-fn">cecho</span>(<span class="lua-str">"worldConsole"</span>,
+          <span class="lua-str">"&lt;purple&gt;"</span> .. moon.name .. <span class="lua-str">" &lt;grey&gt;"</span> .. moon.phase .. <span class="lua-str">"\n"</span>)
+      <span class="lua-kw">end</span>
+    <span class="lua-kw">end</span>
+  <span class="lua-kw">end</span>
+<span class="lua-kw">end</span>
+
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.World.Time"</span>,    <span class="lua-str">"gmcp_world_render"</span>)
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.World.Weather"</span>, <span class="lua-str">"gmcp_world_render"</span>)
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.World.Moons"</span>,   <span class="lua-str">"gmcp_world_render"</span>)</pre>
+        </div>
+
+        <!-- Channel feed -->
+        <div class="mudlet-card">
+          <div class="mudlet-card-header">
+            <span class="mudlet-card-title">Channel Feed Window</span>
+            <span class="mudlet-card-uses">uses Comm.Channel</span>
+          </div>
+          <pre><span class="lua-cmt">-- Script: GMCP Channel Feed
+-- Appends to a scrollback console instead of clearing each time</span>
+
+<span class="lua-kw">local</span> chanColor = {
+  gossip  = <span class="lua-str">"&lt;cyan&gt;"</span>,
+  shout   = <span class="lua-str">"&lt;red&gt;"</span>,
+  tell    = <span class="lua-str">"&lt;magenta&gt;"</span>,
+  clan    = <span class="lua-str">"&lt;green&gt;"</span>,
+  cabal   = <span class="lua-str">"&lt;gold&gt;"</span>,
+  auction = <span class="lua-str">"&lt;yellow&gt;"</span>,
+}
+
+<span class="lua-kw">function</span> <span class="lua-fn">gmcp_channel</span>()
+  <span class="lua-kw">local</span> c   = gmcp.Comm.Channel
+  <span class="lua-kw">local</span> col = chanColor[c.channel] <span class="lua-kw">or</span> <span class="lua-str">"&lt;white&gt;"</span>
+  <span class="lua-kw">local</span> dir = c.direction == <span class="lua-str">"out"</span> <span class="lua-kw">and</span> <span class="lua-str">"&lt;grey&gt;→ "</span> <span class="lua-kw">or</span> <span class="lua-str">""</span>
+  <span class="lua-fn">cecho</span>(<span class="lua-str">"chanConsole"</span>,
+    dir .. col .. <span class="lua-str">"["</span> .. c.channel .. <span class="lua-str">"] "</span> ..
+    <span class="lua-str">"&lt;white&gt;"</span> .. c.speaker .. <span class="lua-str">": "</span> ..
+    <span class="lua-str">"&lt;grey&gt;"</span>  .. c.text .. <span class="lua-str">"\n"</span>)
+<span class="lua-kw">end</span>
+
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Comm.Channel"</span>, <span class="lua-str">"gmcp_channel"</span>)</pre>
+        </div>
+
+      </div><!-- /mudlet-cards -->
+    </div><!-- /mudlet-section -->
+
+  </main>
+
+  <footer class="footer"><div class="footer-inner">Forgotten Reign • © 2026</div></footer>
+
+  <script src="/site-themes.js?v=1" defer></script>
+  <script src="/site-shell.js?v=3" defer></script>
+  <script src="/site.js?v=8" defer></script>
+</body>
+</html>
