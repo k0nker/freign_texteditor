@@ -651,79 +651,75 @@
       <p class="section-lead">
         Paste each snippet into a new Mudlet Script or GMCP trigger. All examples assume Mudlet 4.x+.
       </p>
-      <div class="mudlet-cards">
+              <div class="mudlet-cards">
 
-        <!-- Vitals bar -->
         <div class="mudlet-card">
           <div class="mudlet-card-header">
             <span class="mudlet-card-title">Vitals Bar</span>
             <span class="mudlet-card-uses">uses Char.Vitals</span>
           </div>
-          <pre><span class="lua-cmt">-- Script: GMCP Vitals Bar
--- Trigger type: GMCP · package: Char · event: Vitals</span>
+          <pre><span class="lua-cmt">-- Script: GMCP Vitals Bar</span>
+<span class="lua-cmt">-- Trigger type: GMCP · package: Char · event: Vitals</span>
+<span class="lua-cmt">--</span>
+<span class="lua-cmt">-- Run this script once; it self-registers for login init and live updates.</span>
+
+<span class="lua-kw">function</span> <span class="lua-fn">gmcp_vitals_init</span>()
+  <span class="lua-fn">createGauge</span>(<span class="lua-str">"hpGauge"</span>,   <span class="lua-num">300</span>, <span class="lua-num">18</span>, <span class="lua-num">10</span>, <span class="lua-num">760</span>, <span class="lua-kw">nil</span>, <span class="lua-num">0.75</span>, <span class="lua-num">0.25</span>, <span class="lua-num">0.25</span>)
+  <span class="lua-fn">createGauge</span>(<span class="lua-str">"manaGauge"</span>, <span class="lua-num">300</span>, <span class="lua-num">18</span>, <span class="lua-num">10</span>, <span class="lua-num">782</span>, <span class="lua-kw">nil</span>, <span class="lua-num">0.25</span>, <span class="lua-num">0.45</span>, <span class="lua-num">0.85</span>)
+  <span class="lua-fn">createGauge</span>(<span class="lua-str">"moveGauge"</span>, <span class="lua-num">300</span>, <span class="lua-num">18</span>, <span class="lua-num">10</span>, <span class="lua-num">804</span>, <span class="lua-kw">nil</span>, <span class="lua-num">0.25</span>, <span class="lua-num">0.70</span>, <span class="lua-num">0.35</span>)
+<span class="lua-kw">end</span>
 
 <span class="lua-kw">function</span> <span class="lua-fn">gmcp_vitals</span>()
   <span class="lua-kw">local</span> v = gmcp.Char.Vitals
-
-  <span class="lua-cmt">-- HP gauge</span>
-  <span class="lua-fn">setGauge</span>(<span class="lua-str">"hpGauge"</span>, v.hp, v.maxhp)
-  <span class="lua-fn">setGaugeText</span>(<span class="lua-str">"hpGauge"</span>, v.hp .. <span class="lua-str">"/"</span> .. v.maxhp)
-
-  <span class="lua-cmt">-- Mana gauge</span>
+  <span class="lua-fn">setGauge</span>(<span class="lua-str">"hpGauge"</span>,   v.hp,   v.maxhp)
+  <span class="lua-fn">setGaugeText</span>(<span class="lua-str">"hpGauge"</span>,   v.hp   .. <span class="lua-str">"/"</span> .. v.maxhp)
   <span class="lua-fn">setGauge</span>(<span class="lua-str">"manaGauge"</span>, v.mana, v.maxmana)
   <span class="lua-fn">setGaugeText</span>(<span class="lua-str">"manaGauge"</span>, v.mana .. <span class="lua-str">"/"</span> .. v.maxmana)
-
-  <span class="lua-cmt">-- Move gauge</span>
   <span class="lua-fn">setGauge</span>(<span class="lua-str">"moveGauge"</span>, v.move, v.maxmove)
   <span class="lua-fn">setGaugeText</span>(<span class="lua-str">"moveGauge"</span>, v.move .. <span class="lua-str">"/"</span> .. v.maxmove)
 <span class="lua-kw">end</span>
 
-<span class="lua-cmt">-- Wire GMCP event to function</span>
-<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Char.Vitals"</span>, <span class="lua-str">"gmcp_vitals"</span>)
-
-<span class="lua-cmt">-- Create gauges (run once in profile login script)
--- createGauge("hpGauge",   300, 20, 10, 760, nil, 0.75, 0.25, 0.25)
--- createGauge("manaGauge", 300, 20, 10, 784, nil, 0.25, 0.45, 0.85)
--- createGauge("moveGauge", 300, 20, 10, 808, nil, 0.25, 0.70, 0.35)</span></pre>
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"sysConnectionEvent"</span>, <span class="lua-str">"gmcp_vitals_init"</span>)
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Char.Vitals"</span>,   <span class="lua-str">"gmcp_vitals"</span>)</pre>
         </div>
 
-        <!-- Minimap -->
         <div class="mudlet-card">
           <div class="mudlet-card-header">
             <span class="mudlet-card-title">ANSI Minimap Panel</span>
             <span class="mudlet-card-uses">uses Map.Render — enable with: gmcpmap</span>
           </div>
-          <pre><span class="lua-cmt">-- Script: GMCP Minimap
--- Trigger type: GMCP · package: Map · event: Render
---
--- Mudlet's decho/cecho/echo don't interpret ANSI escape sequences.
--- This converter translates the SGR codes Freign sends (ESC[0&lt;attrs&gt;m)
--- into Mudlet's decho &lt;r,g,b&gt; format so colors render correctly.</span>
+          <pre><span class="lua-cmt">-- Script: GMCP Minimap</span>
+<span class="lua-cmt">-- Trigger type: GMCP · package: Map · event: Render</span>
+<span class="lua-cmt">--</span>
+<span class="lua-cmt">-- Mudlet's decho/cecho/echo don't interpret ANSI escape sequences.</span>
+<span class="lua-cmt">-- This converter translates the SGR codes Freign sends (ESC[0&lt;attrs&gt;m)</span>
+<span class="lua-cmt">-- into Mudlet's decho &lt;r,g,b&gt; format so colours render correctly.</span>
 
 <span class="lua-kw">local</span> mapConsole
 
-<span class="lua-kw">local function</span> <span class="lua-fn">ansiToDecho</span>(s)
+<span class="lua-kw">local</span> <span class="lua-kw">function</span> <span class="lua-fn">ansiToDecho</span>(s)
   <span class="lua-kw">return</span> (s:<span class="lua-fn">gsub</span>(<span class="lua-str">"\27%[0(.-)m"</span>, <span class="lua-kw">function</span>(attrs)
     <span class="lua-kw">if</span> attrs == <span class="lua-str">";0"</span> <span class="lua-kw">or</span> attrs == <span class="lua-str">""</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> <span class="lua-str">"&lt;r&gt;"</span> <span class="lua-kw">end</span>
     <span class="lua-kw">local</span> bold = attrs:<span class="lua-fn">find</span>(<span class="lua-str">";1;"</span>, <span class="lua-num">1</span>, <span class="lua-kw">true</span>) ~= <span class="lua-kw">nil</span>
+                 <span class="lua-kw">or</span> attrs:<span class="lua-fn">sub</span>(-<span class="lua-num">2</span>) == <span class="lua-str">";1"</span>
     <span class="lua-kw">local</span> base = <span class="lua-fn">tonumber</span>(attrs:<span class="lua-fn">match</span>(<span class="lua-str">";(%d+)$"</span>))
-    <span class="lua-kw">if not</span> base <span class="lua-kw">then</span> <span class="lua-kw">return</span> <span class="lua-str">"&lt;r&gt;"</span> <span class="lua-kw">end</span>
+    <span class="lua-kw">if</span> <span class="lua-kw">not</span> base <span class="lua-kw">or</span> base &lt; <span class="lua-num">30</span> <span class="lua-kw">or</span> base &gt; <span class="lua-num">37</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> <span class="lua-str">"&lt;r&gt;"</span> <span class="lua-kw">end</span>
     <span class="lua-kw">if</span>     base == <span class="lua-num">30</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> bold <span class="lua-kw">and</span> <span class="lua-str">"&lt;128,128,128&gt;"</span> <span class="lua-kw">or</span> <span class="lua-str">"&lt;30,30,30&gt;"</span>
-    <span class="lua-kw">elseif</span> base == <span class="lua-num">31</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> bold <span class="lua-kw">and</span> <span class="lua-str">"&lt;255,0,0&gt;"</span>     <span class="lua-kw">or</span> <span class="lua-str">"&lt;128,0,0&gt;"</span>
-    <span class="lua-kw">elseif</span> base == <span class="lua-num">32</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> bold <span class="lua-kw">and</span> <span class="lua-str">"&lt;0,255,0&gt;"</span>     <span class="lua-kw">or</span> <span class="lua-str">"&lt;0,128,0&gt;"</span>
-    <span class="lua-kw">elseif</span> base == <span class="lua-num">33</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> bold <span class="lua-kw">and</span> <span class="lua-str">"&lt;255,255,0&gt;"</span>   <span class="lua-kw">or</span> <span class="lua-str">"&lt;128,128,0&gt;"</span>
-    <span class="lua-kw">elseif</span> base == <span class="lua-num">34</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> bold <span class="lua-kw">and</span> <span class="lua-str">"&lt;0,0,255&gt;"</span>     <span class="lua-kw">or</span> <span class="lua-str">"&lt;0,0,128&gt;"</span>
-    <span class="lua-kw">elseif</span> base == <span class="lua-num">35</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> bold <span class="lua-kw">and</span> <span class="lua-str">"&lt;255,0,255&gt;"</span>   <span class="lua-kw">or</span> <span class="lua-str">"&lt;128,0,128&gt;"</span>
-    <span class="lua-kw">elseif</span> base == <span class="lua-num">36</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> bold <span class="lua-kw">and</span> <span class="lua-str">"&lt;0,255,255&gt;"</span>   <span class="lua-kw">or</span> <span class="lua-str">"&lt;0,128,128&gt;"</span>
-    <span class="lua-kw">elseif</span> base == <span class="lua-num">37</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> bold <span class="lua-kw">and</span> <span class="lua-str">"&lt;255,255,255&gt;"</span> <span class="lua-kw">or</span> <span class="lua-str">"&lt;192,192,192&gt;"</span>
-    <span class="lua-kw">else</span>                    <span class="lua-kw">return</span> <span class="lua-str">"&lt;r&gt;"</span>
+    <span class="lua-kw">elseif</span> base == <span class="lua-num">31</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> bold <span class="lua-kw">and</span> <span class="lua-str">"&lt;255,85,85&gt;"</span>   <span class="lua-kw">or</span> <span class="lua-str">"&lt;170,0,0&gt;"</span>
+    <span class="lua-kw">elseif</span> base == <span class="lua-num">32</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> bold <span class="lua-kw">and</span> <span class="lua-str">"&lt;85,255,85&gt;"</span>   <span class="lua-kw">or</span> <span class="lua-str">"&lt;0,170,0&gt;"</span>
+    <span class="lua-kw">elseif</span> base == <span class="lua-num">33</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> bold <span class="lua-kw">and</span> <span class="lua-str">"&lt;255,255,85&gt;"</span>  <span class="lua-kw">or</span> <span class="lua-str">"&lt;170,170,0&gt;"</span>
+    <span class="lua-kw">elseif</span> base == <span class="lua-num">34</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> bold <span class="lua-kw">and</span> <span class="lua-str">"&lt;85,85,255&gt;"</span>   <span class="lua-kw">or</span> <span class="lua-str">"&lt;0,0,170&gt;"</span>
+    <span class="lua-kw">elseif</span> base == <span class="lua-num">35</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> bold <span class="lua-kw">and</span> <span class="lua-str">"&lt;255,85,255&gt;"</span>  <span class="lua-kw">or</span> <span class="lua-str">"&lt;170,0,170&gt;"</span>
+    <span class="lua-kw">elseif</span> base == <span class="lua-num">36</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> bold <span class="lua-kw">and</span> <span class="lua-str">"&lt;85,255,255&gt;"</span>  <span class="lua-kw">or</span> <span class="lua-str">"&lt;0,170,170&gt;"</span>
+    <span class="lua-kw">elseif</span> base == <span class="lua-num">37</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> bold <span class="lua-kw">and</span> <span class="lua-str">"&lt;255,255,255&gt;"</span> <span class="lua-kw">or</span> <span class="lua-str">"&lt;170,170,170&gt;"</span>
     <span class="lua-kw">end</span>
   <span class="lua-kw">end</span>))
 <span class="lua-kw">end</span>
 
 <span class="lua-kw">function</span> <span class="lua-fn">gmcp_map_init</span>()
   mapConsole = <span class="lua-fn">createMiniConsole</span>(<span class="lua-str">"mapConsole"</span>, <span class="lua-num">10</span>, <span class="lua-num">50</span>, <span class="lua-num">180</span>, <span class="lua-num">130</span>)
-  <span class="lua-fn">setMiniConsoleFontSize</span>(<span class="lua-str">"mapConsole"</span>, <span class="lua-num">9</span>)
+  <span class="lua-fn">setFont</span>(<span class="lua-str">"mapConsole"</span>, <span class="lua-str">"Monospace"</span>)
+  <span class="lua-fn">setFontSize</span>(<span class="lua-str">"mapConsole"</span>, <span class="lua-num">9</span>)
   <span class="lua-fn">setBackgroundColor</span>(<span class="lua-str">"mapConsole"</span>, <span class="lua-num">18</span>, <span class="lua-num">18</span>, <span class="lua-num">18</span>, <span class="lua-num">220</span>)
 <span class="lua-kw">end</span>
 
@@ -734,10 +730,9 @@
 <span class="lua-kw">end</span>
 
 <span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"sysConnectionEvent"</span>, <span class="lua-str">"gmcp_map_init"</span>)
-<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Map.Render"</span>,     <span class="lua-str">"gmcp_map_render"</span>)</pre>
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Map.Render"</span>,    <span class="lua-str">"gmcp_map_render"</span>)</pre>
         </div>
 
-        <!-- Group window -->
         <div class="mudlet-card">
           <div class="mudlet-card-header">
             <span class="mudlet-card-title">Group Window</span>
@@ -745,30 +740,38 @@
           </div>
           <pre><span class="lua-cmt">-- Script: GMCP Group Window</span>
 
+<span class="lua-kw">function</span> <span class="lua-fn">gmcp_group_init</span>()
+  <span class="lua-fn">createMiniConsole</span>(<span class="lua-str">"groupConsole"</span>, <span class="lua-num">10</span>, <span class="lua-num">200</span>, <span class="lua-num">400</span>, <span class="lua-num">120</span>)
+  <span class="lua-fn">setFont</span>(<span class="lua-str">"groupConsole"</span>, <span class="lua-str">"Monospace"</span>)
+  <span class="lua-fn">setFontSize</span>(<span class="lua-str">"groupConsole"</span>, <span class="lua-num">10</span>)
+  <span class="lua-fn">setBackgroundColor</span>(<span class="lua-str">"groupConsole"</span>, <span class="lua-num">18</span>, <span class="lua-num">18</span>, <span class="lua-num">18</span>, <span class="lua-num">200</span>)
+<span class="lua-kw">end</span>
+
 <span class="lua-kw">function</span> <span class="lua-fn">gmcp_group</span>()
   <span class="lua-kw">local</span> info = gmcp.Group.Info
-  <span class="lua-kw">local</span> g    = info.members
+  <span class="lua-kw">local</span> g    = info <span class="lua-kw">and</span> info.members
   <span class="lua-fn">clearWindow</span>(<span class="lua-str">"groupConsole"</span>)
-  <span class="lua-kw">if</span> <span class="lua-fn">#g</span> == <span class="lua-num">0</span> <span class="lua-kw">then</span>
+  <span class="lua-kw">if</span> <span class="lua-kw">not</span> g <span class="lua-kw">or</span> <span class="lua-fn">#g</span> == <span class="lua-num">0</span> <span class="lua-kw">then</span>
     <span class="lua-fn">cecho</span>(<span class="lua-str">"groupConsole"</span>, <span class="lua-str">"&lt;grey&gt;  not in a group\n"</span>)
     <span class="lua-kw">return</span>
   <span class="lua-kw">end</span>
-
   <span class="lua-kw">for</span> _, m <span class="lua-kw">in</span> <span class="lua-fn">ipairs</span>(g) <span class="lua-kw">do</span>
     <span class="lua-kw">local</span> tag = m.name == info.leader <span class="lua-kw">and</span> <span class="lua-str">"&lt;gold&gt;*"</span> <span class="lua-kw">or</span> <span class="lua-str">"&lt;white&gt; "</span>
-    <span class="lua-kw">local</span> col = m.hp_pct &gt; <span class="lua-num">60</span> <span class="lua-kw">and</span> <span class="lua-str">"&lt;green&gt;"</span> <span class="lua-kw">or</span> m.hp_pct &gt; <span class="lua-num">30</span> <span class="lua-kw">and</span> <span class="lua-str">"&lt;yellow&gt;"</span> <span class="lua-kw">or</span> <span class="lua-str">"&lt;red&gt;"</span>
+    <span class="lua-kw">local</span> col = m.hp_pct &gt; <span class="lua-num">60</span> <span class="lua-kw">and</span> <span class="lua-str">"&lt;green&gt;"</span>
+                <span class="lua-kw">or</span> m.hp_pct &gt; <span class="lua-num">30</span> <span class="lua-kw">and</span> <span class="lua-str">"&lt;yellow&gt;"</span> <span class="lua-kw">or</span> <span class="lua-str">"&lt;red&gt;"</span>
     <span class="lua-fn">cecho</span>(<span class="lua-str">"groupConsole"</span>,
-      tag .. <span class="lua-str">" "</span> .. m.name .. <span class="lua-str">" ["</span> .. m.race .. <span class="lua-str">" "</span> .. m.class .. <span class="lua-str">" "</span> .. m.level .. <span class="lua-str">"] "</span> ..
+      tag .. <span class="lua-str">" "</span> .. m.name ..
+      <span class="lua-str">" ["</span> .. m.race .. <span class="lua-str">" "</span> .. m.class .. <span class="lua-str">" "</span> .. m.level .. <span class="lua-str">"] "</span> ..
       col  .. m.hp_pct .. <span class="lua-str">"%hp  "</span> ..
-      <span class="lua-str">"&lt;blue&gt;"</span> .. m.mana_pct .. <span class="lua-str">"%mp  "</span> ..
-      <span class="lua-str">"&lt;cyan&gt;"</span> .. m.mv_pct .. <span class="lua-str">"%mv\n"</span>)
+      <span class="lua-str">"&lt;blue&gt;"</span>  .. m.mana_pct .. <span class="lua-str">"%mp  "</span> ..
+      <span class="lua-str">"&lt;cyan&gt;"</span>  .. m.mv_pct   .. <span class="lua-str">"%mv\n"</span>)
   <span class="lua-kw">end</span>
 <span class="lua-kw">end</span>
 
-<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Group.Info"</span>, <span class="lua-str">"gmcp_group"</span>)</pre>
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"sysConnectionEvent"</span>, <span class="lua-str">"gmcp_group_init"</span>)
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Group.Info"</span>,    <span class="lua-str">"gmcp_group"</span>)</pre>
         </div>
 
-        <!-- Affects window -->
         <div class="mudlet-card">
           <div class="mudlet-card-header">
             <span class="mudlet-card-title">Active Affects Panel</span>
@@ -776,10 +779,17 @@
           </div>
           <pre><span class="lua-cmt">-- Script: GMCP Affects Panel</span>
 
+<span class="lua-kw">function</span> <span class="lua-fn">gmcp_affects_init</span>()
+  <span class="lua-fn">createMiniConsole</span>(<span class="lua-str">"affConsole"</span>, <span class="lua-num">10</span>, <span class="lua-num">330</span>, <span class="lua-num">280</span>, <span class="lua-num">160</span>)
+  <span class="lua-fn">setFont</span>(<span class="lua-str">"affConsole"</span>, <span class="lua-str">"Monospace"</span>)
+  <span class="lua-fn">setFontSize</span>(<span class="lua-str">"affConsole"</span>, <span class="lua-num">10</span>)
+  <span class="lua-fn">setBackgroundColor</span>(<span class="lua-str">"affConsole"</span>, <span class="lua-num">18</span>, <span class="lua-num">18</span>, <span class="lua-num">18</span>, <span class="lua-num">200</span>)
+<span class="lua-kw">end</span>
+
 <span class="lua-kw">function</span> <span class="lua-fn">gmcp_affects</span>()
-  <span class="lua-kw">local</span> aff = gmcp.Char.Affects.affects
+  <span class="lua-kw">local</span> aff = gmcp.Char.Affects <span class="lua-kw">and</span> gmcp.Char.Affects.affects
   <span class="lua-fn">clearWindow</span>(<span class="lua-str">"affConsole"</span>)
-  <span class="lua-kw">if</span> <span class="lua-fn">#aff</span> == <span class="lua-num">0</span> <span class="lua-kw">then</span>
+  <span class="lua-kw">if</span> <span class="lua-kw">not</span> aff <span class="lua-kw">or</span> <span class="lua-fn">#aff</span> == <span class="lua-num">0</span> <span class="lua-kw">then</span>
     <span class="lua-fn">cecho</span>(<span class="lua-str">"affConsole"</span>, <span class="lua-str">"&lt;grey&gt;  no active effects\n"</span>)
     <span class="lua-kw">return</span>
   <span class="lua-kw">end</span>
@@ -790,10 +800,10 @@
   <span class="lua-kw">end</span>
 <span class="lua-kw">end</span>
 
-<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Char.Affects"</span>, <span class="lua-str">"gmcp_affects"</span>)</pre>
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"sysConnectionEvent"</span>, <span class="lua-str">"gmcp_affects_init"</span>)
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Char.Affects"</span>,  <span class="lua-str">"gmcp_affects"</span>)</pre>
         </div>
 
-        <!-- Combat target -->
         <div class="mudlet-card">
           <div class="mudlet-card-header">
             <span class="mudlet-card-title">Combat Target Bar</span>
@@ -802,24 +812,31 @@
           <pre><span class="lua-cmt">-- Script: GMCP Combat Target Bar</span>
 
 <span class="lua-kw">local</span> condColor = {
-  [<span class="lua-str">"excellent"</span>]         = <span class="lua-str">"&lt;green&gt;"</span>,
-  [<span class="lua-str">"a few scratches"</span>]   = <span class="lua-str">"&lt;green&gt;"</span>,
-  [<span class="lua-str">"small wounds"</span>]      = <span class="lua-str">"&lt;yellow&gt;"</span>,
+  [<span class="lua-str">"excellent"</span>]          = <span class="lua-str">"&lt;green&gt;"</span>,
+  [<span class="lua-str">"a few scratches"</span>]    = <span class="lua-str">"&lt;green&gt;"</span>,
+  [<span class="lua-str">"small wounds"</span>]       = <span class="lua-str">"&lt;yellow&gt;"</span>,
   [<span class="lua-str">"quite a few wounds"</span>] = <span class="lua-str">"&lt;yellow&gt;"</span>,
-  [<span class="lua-str">"big nasty wounds"</span>]  = <span class="lua-str">"&lt;orange&gt;"</span>,
-  [<span class="lua-str">"pretty hurt"</span>]       = <span class="lua-str">"&lt;orange&gt;"</span>,
-  [<span class="lua-str">"awful"</span>]             = <span class="lua-str">"&lt;red&gt;"</span>,
-  [<span class="lua-str">"bleeding to death"</span>] = <span class="lua-str">"&lt;red&gt;"</span>,
+  [<span class="lua-str">"big nasty wounds"</span>]   = <span class="lua-str">"&lt;orange&gt;"</span>,
+  [<span class="lua-str">"pretty hurt"</span>]        = <span class="lua-str">"&lt;orange&gt;"</span>,
+  [<span class="lua-str">"awful"</span>]              = <span class="lua-str">"&lt;red&gt;"</span>,
+  [<span class="lua-str">"bleeding to death"</span>]  = <span class="lua-str">"&lt;red&gt;"</span>,
 }
 
+<span class="lua-kw">function</span> <span class="lua-fn">gmcp_combat_init</span>()
+  <span class="lua-fn">createMiniConsole</span>(<span class="lua-str">"combatConsole"</span>, <span class="lua-num">10</span>, <span class="lua-num">500</span>, <span class="lua-num">400</span>, <span class="lua-num">80</span>)
+  <span class="lua-fn">setFont</span>(<span class="lua-str">"combatConsole"</span>, <span class="lua-str">"Monospace"</span>)
+  <span class="lua-fn">setFontSize</span>(<span class="lua-str">"combatConsole"</span>, <span class="lua-num">10</span>)
+  <span class="lua-fn">setBackgroundColor</span>(<span class="lua-str">"combatConsole"</span>, <span class="lua-num">18</span>, <span class="lua-num">18</span>, <span class="lua-num">18</span>, <span class="lua-num">200</span>)
+<span class="lua-kw">end</span>
+
 <span class="lua-kw">function</span> <span class="lua-fn">gmcp_combat</span>()
-  <span class="lua-kw">local</span> targets = gmcp.Char.Combat.targets
+  <span class="lua-kw">local</span> targets = gmcp.Char.Combat <span class="lua-kw">and</span> gmcp.Char.Combat.targets
   <span class="lua-fn">clearWindow</span>(<span class="lua-str">"combatConsole"</span>)
   <span class="lua-kw">if</span> <span class="lua-kw">not</span> targets <span class="lua-kw">or</span> <span class="lua-fn">#targets</span> == <span class="lua-num">0</span> <span class="lua-kw">then</span> <span class="lua-kw">return</span> <span class="lua-kw">end</span>
   <span class="lua-kw">for</span> i, t <span class="lua-kw">in</span> <span class="lua-fn">ipairs</span>(targets) <span class="lua-kw">do</span>
-    <span class="lua-kw">local</span> col  = condColor[t.condition] <span class="lua-kw">or</span> <span class="lua-str">"&lt;white&gt;"</span>
-    <span class="lua-kw">local</span> pfx  = i == <span class="lua-num">1</span> <span class="lua-kw">and</span> <span class="lua-str">"&lt;white&gt;** "</span> <span class="lua-kw">or</span> <span class="lua-str">"&lt;grey&gt;   "</span>
-    <span class="lua-kw">local</span> tgt  = t.targeting ~= <span class="lua-str">""</span> <span class="lua-kw">and</span> <span class="lua-str">" -&gt; "</span> .. t.targeting <span class="lua-kw">or</span> <span class="lua-str">""</span>
+    <span class="lua-kw">local</span> col = condColor[t.condition] <span class="lua-kw">or</span> <span class="lua-str">"&lt;white&gt;"</span>
+    <span class="lua-kw">local</span> pfx = i == <span class="lua-num">1</span> <span class="lua-kw">and</span> <span class="lua-str">"&lt;white&gt;** "</span> <span class="lua-kw">or</span> <span class="lua-str">"&lt;grey&gt;   "</span>
+    <span class="lua-kw">local</span> tgt = t.targeting ~= <span class="lua-str">""</span> <span class="lua-kw">and</span> <span class="lua-str">" -&gt; "</span> .. t.targeting <span class="lua-kw">or</span> <span class="lua-str">""</span>
     <span class="lua-fn">cecho</span>(<span class="lua-str">"combatConsole"</span>,
       pfx .. <span class="lua-str">"&lt;orange&gt;"</span> .. t.name .. tgt ..
       <span class="lua-str">"  "</span> .. col .. t.condition ..
@@ -827,19 +844,24 @@
   <span class="lua-kw">end</span>
 <span class="lua-kw">end</span>
 
-<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Char.Combat"</span>, <span class="lua-str">"gmcp_combat"</span>)</pre>
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"sysConnectionEvent"</span>, <span class="lua-str">"gmcp_combat_init"</span>)
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Char.Combat"</span>,   <span class="lua-str">"gmcp_combat"</span>)</pre>
         </div>
 
-        <!-- Room info panel -->
         <div class="mudlet-card">
           <div class="mudlet-card-header">
             <span class="mudlet-card-title">Room Info Panel</span>
             <span class="mudlet-card-uses">uses Room.Info + Room.Chars + Room.Mobs + Room.Items</span>
           </div>
-          <pre><span class="lua-cmt">-- Script: GMCP Room Panel
--- Wire all four Room.* events to gmcp_room()</span>
+          <pre><span class="lua-cmt">-- Script: GMCP Room Panel</span>
+<span class="lua-cmt">-- Wire all four Room.* events to gmcp_room_render()</span>
 
-<span class="lua-kw">local</span> roomData = {}
+<span class="lua-kw">function</span> <span class="lua-fn">gmcp_room_init</span>()
+  <span class="lua-fn">createMiniConsole</span>(<span class="lua-str">"roomConsole"</span>, <span class="lua-num">10</span>, <span class="lua-num">590</span>, <span class="lua-num">400</span>, <span class="lua-num">160</span>)
+  <span class="lua-fn">setFont</span>(<span class="lua-str">"roomConsole"</span>, <span class="lua-str">"Monospace"</span>)
+  <span class="lua-fn">setFontSize</span>(<span class="lua-str">"roomConsole"</span>, <span class="lua-num">10</span>)
+  <span class="lua-fn">setBackgroundColor</span>(<span class="lua-str">"roomConsole"</span>, <span class="lua-num">18</span>, <span class="lua-num">18</span>, <span class="lua-num">18</span>, <span class="lua-num">200</span>)
+<span class="lua-kw">end</span>
 
 <span class="lua-kw">function</span> <span class="lua-fn">gmcp_room_render</span>()
   <span class="lua-fn">clearWindow</span>(<span class="lua-str">"roomConsole"</span>)
@@ -852,7 +874,7 @@
     <span class="lua-kw">if</span> ri.exits <span class="lua-kw">then</span>
       <span class="lua-kw">local</span> dirs = {}
       <span class="lua-kw">for</span> _, e <span class="lua-kw">in</span> <span class="lua-fn">ipairs</span>(ri.exits) <span class="lua-kw">do</span> dirs[<span class="lua-fn">#dirs</span>+<span class="lua-num">1</span>] = e.dir <span class="lua-kw">end</span>
-      <span class="lua-fn">cecho</span>(<span class="lua-str">"roomConsole"</span>, <span class="lua-str">"&lt;grey&gt;  exits: &lt;white&gt;"</span> .. <span class="lua-fn">table.concat</span>(dirs, <span class="lua-str">" "</span>) .. <span class="lua-str">"\n"</span>)
+      <span class="lua-fn">cecho</span>(<span class="lua-str">"roomConsole"</span>, <span class="lua-str">"&lt;grey&gt;  exits: &lt;white&gt;"</span> .. table.<span class="lua-fn">concat</span>(dirs, <span class="lua-str">" "</span>) .. <span class="lua-str">"\n"</span>)
     <span class="lua-kw">end</span>
   <span class="lua-kw">end</span>
 
@@ -881,13 +903,13 @@
   <span class="lua-kw">end</span>
 <span class="lua-kw">end</span>
 
-<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Room.Info"</span>,  <span class="lua-str">"gmcp_room_render"</span>)
-<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Room.Chars"</span>, <span class="lua-str">"gmcp_room_render"</span>)
-<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Room.Mobs"</span>,  <span class="lua-str">"gmcp_room_render"</span>)
-<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Room.Items"</span>, <span class="lua-str">"gmcp_room_render"</span>)</pre>
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"sysConnectionEvent"</span>, <span class="lua-str">"gmcp_room_init"</span>)
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Room.Info"</span>,     <span class="lua-str">"gmcp_room_render"</span>)
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Room.Chars"</span>,    <span class="lua-str">"gmcp_room_render"</span>)
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Room.Mobs"</span>,     <span class="lua-str">"gmcp_room_render"</span>)
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Room.Items"</span>,    <span class="lua-str">"gmcp_room_render"</span>)</pre>
         </div>
 
-        <!-- Inventory + Equipment -->
         <div class="mudlet-card">
           <div class="mudlet-card-header">
             <span class="mudlet-card-title">Inventory &amp; Equipment Panels</span>
@@ -895,11 +917,22 @@
           </div>
           <pre><span class="lua-cmt">-- Script: GMCP Inventory / Equipment</span>
 
+<span class="lua-kw">function</span> <span class="lua-fn">gmcp_inv_init</span>()
+  <span class="lua-fn">createMiniConsole</span>(<span class="lua-str">"invConsole"</span>, <span class="lua-num">420</span>, <span class="lua-num">200</span>, <span class="lua-num">280</span>, <span class="lua-num">200</span>)
+  <span class="lua-fn">setFont</span>(<span class="lua-str">"invConsole"</span>, <span class="lua-str">"Monospace"</span>)
+  <span class="lua-fn">setFontSize</span>(<span class="lua-str">"invConsole"</span>, <span class="lua-num">10</span>)
+  <span class="lua-fn">setBackgroundColor</span>(<span class="lua-str">"invConsole"</span>, <span class="lua-num">18</span>, <span class="lua-num">18</span>, <span class="lua-num">18</span>, <span class="lua-num">200</span>)
+  <span class="lua-fn">createMiniConsole</span>(<span class="lua-str">"eqConsole"</span>, <span class="lua-num">420</span>, <span class="lua-num">410</span>, <span class="lua-num">280</span>, <span class="lua-num">200</span>)
+  <span class="lua-fn">setFont</span>(<span class="lua-str">"eqConsole"</span>, <span class="lua-str">"Monospace"</span>)
+  <span class="lua-fn">setFontSize</span>(<span class="lua-str">"eqConsole"</span>, <span class="lua-num">10</span>)
+  <span class="lua-fn">setBackgroundColor</span>(<span class="lua-str">"eqConsole"</span>, <span class="lua-num">18</span>, <span class="lua-num">18</span>, <span class="lua-num">18</span>, <span class="lua-num">200</span>)
+<span class="lua-kw">end</span>
+
 <span class="lua-kw">function</span> <span class="lua-fn">gmcp_inventory</span>()
-  <span class="lua-kw">local</span> inv = gmcp.Char.Inventory.items
+  <span class="lua-kw">local</span> inv = gmcp.Char.Inventory <span class="lua-kw">and</span> gmcp.Char.Inventory.items
   <span class="lua-fn">clearWindow</span>(<span class="lua-str">"invConsole"</span>)
   <span class="lua-fn">cecho</span>(<span class="lua-str">"invConsole"</span>, <span class="lua-str">"&lt;gold&gt;Carrying:\n"</span>)
-  <span class="lua-kw">if</span> <span class="lua-fn">#inv</span> == <span class="lua-num">0</span> <span class="lua-kw">then</span>
+  <span class="lua-kw">if</span> <span class="lua-kw">not</span> inv <span class="lua-kw">or</span> <span class="lua-fn">#inv</span> == <span class="lua-num">0</span> <span class="lua-kw">then</span>
     <span class="lua-fn">cecho</span>(<span class="lua-str">"invConsole"</span>, <span class="lua-str">"&lt;grey&gt;  nothing\n"</span>)
   <span class="lua-kw">else</span>
     <span class="lua-kw">for</span> _, it <span class="lua-kw">in</span> <span class="lua-fn">ipairs</span>(inv) <span class="lua-kw">do</span>
@@ -909,20 +942,20 @@
 <span class="lua-kw">end</span>
 
 <span class="lua-kw">function</span> <span class="lua-fn">gmcp_equipment</span>()
-  <span class="lua-kw">local</span> eq = gmcp.Char.Equipment.slots
+  <span class="lua-kw">local</span> eq = gmcp.Char.Equipment <span class="lua-kw">and</span> gmcp.Char.Equipment.slots
   <span class="lua-fn">clearWindow</span>(<span class="lua-str">"eqConsole"</span>)
   <span class="lua-fn">cecho</span>(<span class="lua-str">"eqConsole"</span>, <span class="lua-str">"&lt;gold&gt;Worn:\n"</span>)
+  <span class="lua-kw">if</span> <span class="lua-kw">not</span> eq <span class="lua-kw">then</span> <span class="lua-kw">return</span> <span class="lua-kw">end</span>
   <span class="lua-kw">for</span> _, s <span class="lua-kw">in</span> <span class="lua-fn">ipairs</span>(eq) <span class="lua-kw">do</span>
-    <span class="lua-fn">cecho</span>(<span class="lua-str">"eqConsole"</span>,
-      <span class="lua-str">"&lt;grey&gt;  ["</span> .. s.slot .. <span class="lua-str">"] &lt;white&gt;"</span> .. s.name .. <span class="lua-str">"\n"</span>)
+    <span class="lua-fn">cecho</span>(<span class="lua-str">"eqConsole"</span>, <span class="lua-str">"&lt;grey&gt;  ["</span> .. s.slot .. <span class="lua-str">"] &lt;white&gt;"</span> .. s.name .. <span class="lua-str">"\n"</span>)
   <span class="lua-kw">end</span>
 <span class="lua-kw">end</span>
 
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"sysConnectionEvent"</span>,  <span class="lua-str">"gmcp_inv_init"</span>)
 <span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Char.Inventory"</span>, <span class="lua-str">"gmcp_inventory"</span>)
 <span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Char.Equipment"</span>, <span class="lua-str">"gmcp_equipment"</span>)</pre>
         </div>
 
-        <!-- World clock / weather -->
         <div class="mudlet-card">
           <div class="mudlet-card-header">
             <span class="mudlet-card-title">World Clock &amp; Weather Panel</span>
@@ -930,15 +963,22 @@
           </div>
           <pre><span class="lua-cmt">-- Script: GMCP World Panel</span>
 
+<span class="lua-kw">function</span> <span class="lua-fn">gmcp_world_init</span>()
+  <span class="lua-fn">createMiniConsole</span>(<span class="lua-str">"worldConsole"</span>, <span class="lua-num">710</span>, <span class="lua-num">760</span>, <span class="lua-num">260</span>, <span class="lua-num">60</span>)
+  <span class="lua-fn">setFont</span>(<span class="lua-str">"worldConsole"</span>, <span class="lua-str">"Monospace"</span>)
+  <span class="lua-fn">setFontSize</span>(<span class="lua-str">"worldConsole"</span>, <span class="lua-num">10</span>)
+  <span class="lua-fn">setBackgroundColor</span>(<span class="lua-str">"worldConsole"</span>, <span class="lua-num">18</span>, <span class="lua-num">18</span>, <span class="lua-num">18</span>, <span class="lua-num">200</span>)
+<span class="lua-kw">end</span>
+
 <span class="lua-kw">function</span> <span class="lua-fn">gmcp_world_render</span>()
   <span class="lua-fn">clearWindow</span>(<span class="lua-str">"worldConsole"</span>)
 
   <span class="lua-kw">local</span> t = gmcp.World.Time
   <span class="lua-kw">if</span> t <span class="lua-kw">then</span>
     <span class="lua-fn">cecho</span>(<span class="lua-str">"worldConsole"</span>,
-      <span class="lua-str">"&lt;gold&gt;"</span>  .. (t.sunlight_name <span class="lua-kw">or</span> <span class="lua-str">""</span>) ..
+      <span class="lua-str">"&lt;gold&gt;"</span>   .. (t.sunlight_name <span class="lua-kw">or</span> <span class="lua-str">""</span>) ..
       <span class="lua-str">"&lt;grey&gt; h"</span> .. (t.hour <span class="lua-kw">or</span> <span class="lua-str">"?"</span>) ..
-      <span class="lua-str">" d"</span>      .. (t.day  <span class="lua-kw">or</span> <span class="lua-str">"?"</span>) .. <span class="lua-str">"\n"</span>)
+      <span class="lua-str">" d"</span>       .. (t.day  <span class="lua-kw">or</span> <span class="lua-str">"?"</span>) .. <span class="lua-str">"\n"</span>)
   <span class="lua-kw">end</span>
 
   <span class="lua-kw">local</span> w = gmcp.World.Weather
@@ -959,19 +999,19 @@
   <span class="lua-kw">end</span>
 <span class="lua-kw">end</span>
 
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"sysConnectionEvent"</span>, <span class="lua-str">"gmcp_world_init"</span>)
 <span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.World.Time"</span>,    <span class="lua-str">"gmcp_world_render"</span>)
 <span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.World.Weather"</span>, <span class="lua-str">"gmcp_world_render"</span>)
 <span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.World.Moons"</span>,   <span class="lua-str">"gmcp_world_render"</span>)</pre>
         </div>
 
-        <!-- Channel feed -->
         <div class="mudlet-card">
           <div class="mudlet-card-header">
             <span class="mudlet-card-title">Channel Feed Window</span>
             <span class="mudlet-card-uses">uses Comm.Channel.Text</span>
           </div>
-          <pre><span class="lua-cmt">-- Script: GMCP Channel Feed
--- Appends to a scrollback console instead of clearing each time</span>
+          <pre><span class="lua-cmt">-- Script: GMCP Channel Feed</span>
+<span class="lua-cmt">-- Appends to a scrollback console instead of clearing each time</span>
 
 <span class="lua-kw">local</span> chanColor = {
   gossip  = <span class="lua-str">"&lt;cyan&gt;"</span>,
@@ -982,16 +1022,24 @@
   auction = <span class="lua-str">"&lt;yellow&gt;"</span>,
 }
 
+<span class="lua-kw">function</span> <span class="lua-fn">gmcp_chan_init</span>()
+  <span class="lua-fn">createMiniConsole</span>(<span class="lua-str">"chanConsole"</span>, <span class="lua-num">10</span>, <span class="lua-num">760</span>, <span class="lua-num">700</span>, <span class="lua-num">80</span>)
+  <span class="lua-fn">setFont</span>(<span class="lua-str">"chanConsole"</span>, <span class="lua-str">"Monospace"</span>)
+  <span class="lua-fn">setFontSize</span>(<span class="lua-str">"chanConsole"</span>, <span class="lua-num">10</span>)
+  <span class="lua-fn">setBackgroundColor</span>(<span class="lua-str">"chanConsole"</span>, <span class="lua-num">18</span>, <span class="lua-num">18</span>, <span class="lua-num">18</span>, <span class="lua-num">200</span>)
+<span class="lua-kw">end</span>
+
 <span class="lua-kw">function</span> <span class="lua-fn">gmcp_channel</span>()
   <span class="lua-kw">local</span> c   = gmcp.Comm.Channel.Text
   <span class="lua-kw">local</span> col = chanColor[c.channel] <span class="lua-kw">or</span> <span class="lua-str">"&lt;white&gt;"</span>
-  <span class="lua-kw">local</span> dir = c.direction == <span class="lua-str">"sent"</span> <span class="lua-kw">and</span> <span class="lua-str">"&lt;grey&gt;→ "</span> <span class="lua-kw">or</span> <span class="lua-str">""</span>
+  <span class="lua-kw">local</span> dir = c.direction == <span class="lua-str">"sent"</span> <span class="lua-kw">and</span> <span class="lua-str">"&lt;grey&gt;-&gt; "</span> <span class="lua-kw">or</span> <span class="lua-str">""</span>
   <span class="lua-fn">cecho</span>(<span class="lua-str">"chanConsole"</span>,
     dir .. col .. <span class="lua-str">"["</span> .. c.channel .. <span class="lua-str">"] "</span> ..
     <span class="lua-str">"&lt;white&gt;"</span> .. c.talker .. <span class="lua-str">": "</span> ..
-    <span class="lua-str">"&lt;grey&gt;"</span>  .. c.text .. <span class="lua-str">"\n"</span>)
+    <span class="lua-str">"&lt;grey&gt;"</span>  .. c.text   .. <span class="lua-str">"\n"</span>)
 <span class="lua-kw">end</span>
 
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"sysConnectionEvent"</span>,     <span class="lua-str">"gmcp_chan_init"</span>)
 <span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Comm.Channel.Text"</span>, <span class="lua-str">"gmcp_channel"</span>)</pre>
         </div>
 
