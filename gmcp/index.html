@@ -105,7 +105,7 @@
           <tr>
             <td class="packet-name">Char.Affects</td>
             <td>every prompt tick; hash-delta cached</td>
-            <td><code>affects[]</code> — <code>name</code>, <code>type</code>, <code>duration</code>, <code>mods[{stat,amount}]</code></td>
+            <td><code>affects[]</code> — <code>kind</code>, <code>name</code>, <code>duration</code>, <code>level</code>, <code>location</code>, <code>modifier</code></td>
           </tr>
           <tr>
             <td class="packet-name">Char.Combat</td>
@@ -120,12 +120,12 @@
           <tr>
             <td class="packet-name">Char.Status</td>
             <td>login</td>
-            <td><code>name</code>, <code>race</code>, <code>charclass</code>, <code>level</code>, <code>cabal</code>, <code>rank</code>, <code>align</code>, <code>position</code></td>
+            <td><code>name</code>, <code>race</code>, <code>class</code>, <code>level</code>, <code>xp</code>, <code>tnl</code>, <code>practice</code>, <code>trains</code>, <code>cabal</code></td>
           </tr>
           <tr>
             <td class="packet-name">Char.Stats</td>
             <td>login</td>
-            <td><code>str</code>, <code>int</code>, <code>wis</code>, <code>dex</code>, <code>con</code>, <code>str_add</code></td>
+            <td><code>str</code>, <code>int</code>, <code>wis</code>, <code>dex</code>, <code>con</code>, <code>hitroll</code>, <code>damroll</code>, <code>ac_pierce</code>, <code>ac_bash</code>, <code>ac_slash</code>, <code>ac_exotic</code>, <code>alignment</code>, <code>wimpy</code></td>
           </tr>
           <tr>
             <td class="packet-name">Char.Inventory</td>
@@ -140,27 +140,27 @@
           <tr>
             <td class="packet-name">Room.Info</td>
             <td>every look</td>
-            <td><code>id</code>, <code>name</code>, <code>terrain</code>, <code>area</code>, <code>exits[{dir,id}]</code>, <code>can_see</code></td>
+            <td><code>id</code>, <code>name</code>, <code>area</code>, <code>terrain</code>, <code>coord{x,y,z,gridId}</code>, <code>exits[{dir,to,door,closed,locked}]</code></td>
           </tr>
           <tr>
             <td class="packet-name">Room.Chars</td>
             <td>every look</td>
-            <td><code>chars[]</code> — <code>name</code>, <code>position</code>, <code>is_npc</code></td>
+            <td><code>chars[]</code> — <code>name</code></td>
           </tr>
           <tr>
             <td class="packet-name">Room.Mobs</td>
             <td>every look</td>
-            <td><code>mobs[]</code> — <code>name</code>, <code>position</code></td>
+            <td><code>mobs[]</code> — <code>name</code></td>
           </tr>
           <tr>
             <td class="packet-name">Room.Items</td>
             <td>every look</td>
-            <td><code>items[]</code> — <code>name</code>, <code>type</code></td>
+            <td><code>items[]</code> — <code>name</code></td>
           </tr>
           <tr>
-            <td class="packet-name">Comm.Channel</td>
+            <td class="packet-name">Comm.Channel.Text</td>
             <td>channel message sent / received</td>
-            <td><code>channel</code>, <code>speaker</code>, <code>direction</code>, <code>text</code></td>
+            <td><code>channel</code>, <code>talker</code>, <code>text</code>, <code>direction</code> (optional)</td>
           </tr>
           <tr>
             <td class="packet-name">Group.Info</td>
@@ -169,18 +169,18 @@
           </tr>
           <tr>
             <td class="packet-name">World.Time</td>
-            <td>hourly tick (delta); login</td>
-            <td><code>hour</code>, <code>day</code>, <code>month</code>, <code>year</code>, <code>time_of_day</code></td>
+            <td>hourly tick; broadcast to all</td>
+            <td><code>hour</code>, <code>day</code>, <code>month</code>, <code>year</code>, <code>sunlight</code>, <code>sunlight_name</code>, <code>server_time</code></td>
           </tr>
           <tr>
             <td class="packet-name">World.Weather</td>
-            <td>weather changes; login</td>
-            <td><code>sky</code>, <code>sunlight</code></td>
+            <td>weather changes; broadcast to all</td>
+            <td><code>sky</code>, <code>sky_name</code>, <code>sunlight</code>, <code>mmhg</code></td>
           </tr>
           <tr>
             <td class="packet-name">World.Moons</td>
-            <td>moon phase changes; login</td>
-            <td><code>moons[]</code> — <code>name</code>, <code>phase</code>, <code>is_visible</code></td>
+            <td>moon phase changes; broadcast to all</td>
+            <td><code>nesteri</code>, <code>avaerta</code>, <code>xequizox</code> — each <code>{phase, phase_name}</code></td>
           </tr>
           <tr>
             <td class="packet-name">Map.Render</td>
@@ -229,7 +229,7 @@
         <div class="packet-card">
           <div class="packet-card-header">
             <span class="packet-card-name">Char.Affects</span>
-            <span class="packet-card-desc">active spell and skill effects</span>
+            <span class="packet-card-desc">active spell and song effects — hash-delta cached</span>
           </div>
           <div class="packet-card-body">
             <div>
@@ -237,12 +237,20 @@
               <pre><span class="kw">{</span>
   <span class="str">"affects"</span>: <span class="kw">[</span>
     <span class="kw">{</span>
+      <span class="str">"kind"</span>:     <span class="str">"spell"</span>,
       <span class="str">"name"</span>:     <span class="str">"armor"</span>,
-      <span class="str">"type"</span>:     <span class="str">"spell"</span>,
       <span class="str">"duration"</span>: <span class="num">24</span>,
-      <span class="str">"mods"</span>: <span class="kw">[</span>
-        <span class="kw">{</span> <span class="str">"stat"</span>: <span class="str">"ac"</span>, <span class="str">"amount"</span>: <span class="num">-20</span> <span class="kw">}</span>
-      <span class="kw">]</span>
+      <span class="str">"level"</span>:    <span class="num">35</span>,
+      <span class="str">"location"</span>: <span class="str">"ac"</span>,
+      <span class="str">"modifier"</span>: <span class="num">-20</span>
+    <span class="kw">}</span>,
+    <span class="kw">{</span>
+      <span class="str">"kind"</span>:     <span class="str">"song"</span>,
+      <span class="str">"name"</span>:     <span class="str">"battle hymn"</span>,
+      <span class="str">"duration"</span>: <span class="num">6</span>,
+      <span class="str">"level"</span>:    <span class="num">42</span>,
+      <span class="str">"location"</span>: <span class="str">"damroll"</span>,
+      <span class="str">"modifier"</span>: <span class="num">5</span>
     <span class="kw">}</span>
   <span class="kw">]</span>,
   <span class="str">"timestamp"</span>: <span class="num">1717000000</span>
@@ -252,8 +260,10 @@
               <label>notes</label>
               <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:0">
                 Hash-delta cached — only resent when the set changes.
-                <code>duration</code> is in game hours.
-                <code>mods[]</code> may be empty for informational effects.
+                <code>kind</code> is <code>"spell"</code> or <code>"song"</code>.
+                <code>duration</code> is in game ticks.
+                <code>location</code> is the stat affected (e.g. <code>"ac"</code>, <code>"damroll"</code>, <code>"none"</code>).
+                <code>modifier</code> is the numeric delta applied to that location.
               </p>
             </div>
           </div>
@@ -310,28 +320,90 @@
         <div class="packet-card">
           <div class="packet-card-header">
             <span class="packet-card-name">Char.Status</span>
-            <span class="packet-card-desc">character identity — sent at login</span>
+            <span class="packet-card-desc">character identity and progression — sent at login</span>
           </div>
           <div class="packet-card-body">
             <div>
               <label>payload</label>
               <pre><span class="kw">{</span>
-  <span class="str">"name"</span>:      <span class="str">"Aelindra"</span>,
-  <span class="str">"race"</span>:      <span class="str">"elf"</span>,
-  <span class="str">"charclass"</span>: <span class="str">"mage"</span>,
-  <span class="str">"level"</span>:     <span class="num">37</span>,
-  <span class="str">"cabal"</span>:     <span class="str">"Tribunal"</span>,
-  <span class="str">"rank"</span>:      <span class="str">"Adjudicator"</span>,
-  <span class="str">"align"</span>:     <span class="str">"neutral"</span>,
-  <span class="str">"position"</span>:  <span class="str">"standing"</span>,
+  <span class="str">"name"</span>:     <span class="str">"Aelindra"</span>,
+  <span class="str">"race"</span>:     <span class="str">"elf"</span>,
+  <span class="str">"class"</span>:    <span class="str">"mage"</span>,
+  <span class="str">"level"</span>:    <span class="num">37</span>,
+  <span class="str">"xp"</span>:       <span class="num">182400</span>,
+  <span class="str">"tnl"</span>:      <span class="num">17600</span>,
+  <span class="str">"practice"</span>: <span class="num">5</span>,
+  <span class="str">"trains"</span>:   <span class="num">2</span>,
+  <span class="str">"cabal"</span>:    <span class="str">"Tribunal"</span>,
   <span class="str">"timestamp"</span>: <span class="num">1717000000</span>
 <span class="kw">}</span></pre>
             </div>
             <div>
               <label>notes</label>
               <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:0">
-                Sent once at login. Use to populate character identity panels and
-                persist to session storage for reference throughout the session.
+                Sent once at login. Use to populate character identity panels.
+                <code>tnl</code> = experience needed to next level.
+                <code>cabal</code> is <code>"none"</code> when not in a cabal.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="packet-card">
+          <div class="packet-card-header">
+            <span class="packet-card-name">Char.Stats</span>
+            <span class="packet-card-desc">attributes and combat stats — sent at login</span>
+          </div>
+          <div class="packet-card-body">
+            <div>
+              <label>payload</label>
+              <pre><span class="kw">{</span>
+  <span class="str">"str"</span>:       <span class="num">18</span>,
+  <span class="str">"int"</span>:       <span class="num">16</span>,
+  <span class="str">"wis"</span>:       <span class="num">14</span>,
+  <span class="str">"dex"</span>:       <span class="num">20</span>,
+  <span class="str">"con"</span>:       <span class="num">17</span>,
+  <span class="str">"hitroll"</span>:   <span class="num">22</span>,
+  <span class="str">"damroll"</span>:   <span class="num">18</span>,
+  <span class="str">"ac_pierce"</span>: <span class="num">-180</span>,
+  <span class="str">"ac_bash"</span>:   <span class="num">-175</span>,
+  <span class="str">"ac_slash"</span>:  <span class="num">-185</span>,
+  <span class="str">"ac_exotic"</span>: <span class="num">-160</span>,
+  <span class="str">"alignment"</span>: <span class="num">-250</span>,
+  <span class="str">"wimpy"</span>:     <span class="num">100</span>,
+  <span class="str">"timestamp"</span>: <span class="num">1717000000</span>
+<span class="kw">}</span></pre>
+            </div>
+            <div>
+              <label>notes</label>
+              <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:0">
+                Sent at login. AC values use the internal scale (negative = better).
+                <code>alignment</code> ranges from <code>-1000</code> (pure evil) to <code>1000</code> (pure good).
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="packet-card">
+          <div class="packet-card-header">
+            <span class="packet-card-name">Char.Worth</span>
+            <span class="packet-card-desc">gold and cabal currency — delta-cached</span>
+          </div>
+          <div class="packet-card-body">
+            <div>
+              <label>payload</label>
+              <pre><span class="kw">{</span>
+  <span class="str">"gold"</span>:         <span class="num">4200</span>,
+  <span class="str">"bank_gold"</span>:    <span class="num">150000</span>,
+  <span class="str">"cabal_points"</span>: <span class="num">87</span>,
+  <span class="str">"timestamp"</span>:    <span class="num">1717000000</span>
+<span class="kw">}</span></pre>
+            </div>
+            <div>
+              <label>notes</label>
+              <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:0">
+                Delta-cached — only sent when gold, bank gold, or cabal points change.
+                <code>cabal_points</code> is <code>0</code> if not in a cabal.
               </p>
             </div>
           </div>
@@ -376,14 +448,17 @@
             <div>
               <label>payload</label>
               <pre><span class="kw">{</span>
-  <span class="str">"id"</span>:      <span class="num">3001</span>,
+  <span class="str">"id"</span>:      <span class="str">"a3f8c2"</span>,
   <span class="str">"name"</span>:    <span class="str">"The Crossroads"</span>,
-  <span class="str">"terrain"</span>: <span class="str">"city"</span>,
   <span class="str">"area"</span>:    <span class="str">"Midgaard"</span>,
-  <span class="str">"can_see"</span>: <span class="bool">true</span>,
+  <span class="str">"terrain"</span>: <span class="str">"city"</span>,
+  <span class="str">"coord"</span>: <span class="kw">{</span>
+    <span class="str">"x"</span>: <span class="num">12</span>, <span class="str">"y"</span>: <span class="num">7</span>, <span class="str">"z"</span>: <span class="num">0</span>,
+    <span class="str">"gridId"</span>: <span class="str">"midgaard"</span>
+  <span class="kw">}</span>,
   <span class="str">"exits"</span>: <span class="kw">[</span>
-    <span class="kw">{</span> <span class="str">"dir"</span>: <span class="str">"north"</span>, <span class="str">"id"</span>: <span class="num">3002</span> <span class="kw">}</span>,
-    <span class="kw">{</span> <span class="str">"dir"</span>: <span class="str">"east"</span>,  <span class="str">"id"</span>: <span class="num">3010</span> <span class="kw">}</span>
+    <span class="kw">{</span> <span class="str">"dir"</span>: <span class="str">"north"</span>, <span class="str">"to"</span>: <span class="str">"b91d4e"</span>, <span class="str">"door"</span>: <span class="bool">false</span>, <span class="str">"closed"</span>: <span class="bool">false</span>, <span class="str">"locked"</span>: <span class="bool">false</span> <span class="kw">}</span>,
+    <span class="kw">{</span> <span class="str">"dir"</span>: <span class="str">"east"</span>,  <span class="str">"to"</span>: <span class="str">"c44a1f"</span>, <span class="str">"door"</span>: <span class="bool">true</span>,  <span class="str">"closed"</span>: <span class="bool">true</span>,  <span class="str">"locked"</span>: <span class="bool">false</span> <span class="kw">}</span>
   <span class="kw">]</span>,
   <span class="str">"timestamp"</span>: <span class="num">1717000000</span>
 <span class="kw">}</span></pre>
@@ -393,17 +468,21 @@
               <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:0 0 8px">
                 <code>Room.Chars</code>, <code>Room.Mobs</code>, and <code>Room.Items</code>
                 are always sent together with <code>Room.Info</code> on the same look tick.
+                <code>id</code> and exit <code>to</code> are opaque hashed strings that correlate
+                with <code>room_id</code> in <code>Group.Info</code>.
+                <code>coord</code> fields may be <code>null</code> if the room has no BFS-assigned coordinates.
+                <code>name</code> is <code>null</code> in darkness.
               </p>
               <pre><span class="kw">{</span> <span class="str">"chars"</span>: <span class="kw">[</span>
-  <span class="kw">{</span> <span class="str">"name"</span>: <span class="str">"Varek"</span>, <span class="str">"position"</span>: <span class="str">"standing"</span>, <span class="str">"is_npc"</span>: <span class="bool">false</span> <span class="kw">}</span>
+  <span class="kw">{</span> <span class="str">"name"</span>: <span class="str">"Varek"</span> <span class="kw">}</span>
 <span class="kw">]</span> <span class="kw">}</span>
 
 <span class="kw">{</span> <span class="str">"mobs"</span>: <span class="kw">[</span>
-  <span class="kw">{</span> <span class="str">"name"</span>: <span class="str">"a city guard"</span>, <span class="str">"position"</span>: <span class="str">"standing"</span> <span class="kw">}</span>
+  <span class="kw">{</span> <span class="str">"name"</span>: <span class="str">"a city guard"</span> <span class="kw">}</span>
 <span class="kw">]</span> <span class="kw">}</span>
 
 <span class="kw">{</span> <span class="str">"items"</span>: <span class="kw">[</span>
-  <span class="kw">{</span> <span class="str">"name"</span>: <span class="str">"a silver coin"</span>, <span class="str">"type"</span>: <span class="str">"MONEY"</span> <span class="kw">}</span>
+  <span class="kw">{</span> <span class="str">"name"</span>: <span class="str">"a silver coin"</span> <span class="kw">}</span>
 <span class="kw">]</span> <span class="kw">}</span></pre>
             </div>
           </div>
@@ -462,30 +541,49 @@
         <div class="packet-card">
           <div class="packet-card-header">
             <span class="packet-card-name">World.Time / World.Weather / World.Moons</span>
-            <span class="packet-card-desc">server time, sky conditions, moon phases</span>
+            <span class="packet-card-desc">server time, sky conditions, moon phases — broadcast to all players</span>
           </div>
           <div class="packet-card-body">
             <div>
               <label>World.Time</label>
               <pre><span class="kw">{</span>
-  <span class="str">"hour"</span>:        <span class="num">14</span>,
-  <span class="str">"day"</span>:         <span class="num">7</span>,
-  <span class="str">"month"</span>:       <span class="num">3</span>,
-  <span class="str">"year"</span>:        <span class="num">502</span>,
-  <span class="str">"time_of_day"</span>: <span class="str">"afternoon"</span>,
-  <span class="str">"timestamp"</span>:   <span class="num">1717000000</span>
+  <span class="str">"hour"</span>:         <span class="num">14</span>,
+  <span class="str">"day"</span>:          <span class="num">7</span>,
+  <span class="str">"month"</span>:        <span class="num">3</span>,
+  <span class="str">"year"</span>:         <span class="num">502</span>,
+  <span class="str">"sunlight"</span>:     <span class="num">2</span>,
+  <span class="str">"sunlight_name"</span>:<span class="str">"day"</span>,
+  <span class="str">"server_time"</span>:  <span class="num">1717000000</span>,
+  <span class="str">"timestamp"</span>:    <span class="num">1717000000</span>
 <span class="kw">}</span></pre>
+              <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:6px 0 0">
+                <code>sunlight</code>: <code>0</code>=dark, <code>1</code>=sunrise, <code>2</code>=day, <code>3</code>=sunset.
+                <code>server_time</code> is real-world UTC epoch seconds.
+              </p>
             </div>
             <div>
-              <label>World.Weather + World.Moons</label>
-              <pre><span class="kw">{</span> <span class="str">"sky"</span>: <span class="str">"cloudless"</span>, <span class="str">"sunlight"</span>: <span class="str">"light"</span> <span class="kw">}</span>
-
-<span class="kw">{</span>
-  <span class="str">"moons"</span>: <span class="kw">[</span>
-    <span class="kw">{</span> <span class="str">"name"</span>: <span class="str">"Selune"</span>, <span class="str">"phase"</span>: <span class="str">"full"</span>,     <span class="str">"is_visible"</span>: <span class="bool">true</span>  <span class="kw">}</span>,
-    <span class="kw">{</span> <span class="str">"name"</span>: <span class="str">"Shar"</span>,   <span class="str">"phase"</span>: <span class="str">"crescent"</span>, <span class="str">"is_visible"</span>: <span class="bool">false</span> <span class="kw">}</span>
-  <span class="kw">]</span>
+              <label>World.Weather</label>
+              <pre><span class="kw">{</span>
+  <span class="str">"sky"</span>:      <span class="num">0</span>,
+  <span class="str">"sky_name"</span>: <span class="str">"cloudless"</span>,
+  <span class="str">"sunlight"</span>: <span class="num">2</span>,
+  <span class="str">"mmhg"</span>:     <span class="num">1013</span>,
+  <span class="str">"timestamp"</span>:<span class="num">1717000000</span>
 <span class="kw">}</span></pre>
+              <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:6px 0 6px">
+                <code>sky</code>: <code>0</code>=cloudless, <code>1</code>=cloudy, <code>2</code>=raining, <code>3</code>=lightning.
+              </p>
+              <label>World.Moons</label>
+              <pre><span class="kw">{</span>
+  <span class="str">"nesteri"</span>:  <span class="kw">{</span> <span class="str">"phase"</span>: <span class="num">4</span>, <span class="str">"phase_name"</span>: <span class="str">"full moon"</span> <span class="kw">}</span>,
+  <span class="str">"avaerta"</span>:  <span class="kw">{</span> <span class="str">"phase"</span>: <span class="num">2</span>, <span class="str">"phase_name"</span>: <span class="str">"first quarter"</span> <span class="kw">}</span>,
+  <span class="str">"xequizox"</span>: <span class="kw">{</span> <span class="str">"phase"</span>: <span class="num">7</span>, <span class="str">"phase_name"</span>: <span class="str">"waning crescent"</span> <span class="kw">}</span>,
+  <span class="str">"timestamp"</span>:<span class="num">1717000000</span>
+<span class="kw">}</span></pre>
+              <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:6px 0 0">
+                Phases 0–7: new moon, waxing crescent, first quarter, waxing gibbous,
+                full moon, waning gibbous, third quarter, waning crescent.
+              </p>
             </div>
           </div>
         </div>
@@ -518,7 +616,7 @@
 
         <div class="packet-card">
           <div class="packet-card-header">
-            <span class="packet-card-name">Comm.Channel</span>
+            <span class="packet-card-name">Comm.Channel.Text</span>
             <span class="packet-card-desc">channel messages in both directions</span>
           </div>
           <div class="packet-card-body">
@@ -526,16 +624,17 @@
               <label>payload</label>
               <pre><span class="kw">{</span>
   <span class="str">"channel"</span>:   <span class="str">"gossip"</span>,
-  <span class="str">"speaker"</span>:   <span class="str">"Varek"</span>,
-  <span class="str">"direction"</span>: <span class="str">"in"</span>,
+  <span class="str">"talker"</span>:    <span class="str">"Varek"</span>,
   <span class="str">"text"</span>:      <span class="str">"anyone want to group?"</span>,
+  <span class="str">"direction"</span>: <span class="str">"received"</span>,
   <span class="str">"timestamp"</span>: <span class="num">1717000000</span>
 <span class="kw">}</span></pre>
             </div>
             <div>
               <label>notes</label>
               <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:0">
-                <code>direction</code>: <code>"in"</code> = received, <code>"out"</code> = sent by you.
+                <code>direction</code>: <code>"sent"</code> = you sent it, <code>"received"</code> = received from another.
+                <code>direction</code> is omitted on some channel types (informational sends).
                 <code>channel</code> values include <code>gossip</code>, <code>shout</code>,
                 <code>tell</code>, <code>clan</code>, <code>cabal</code>, <code>auction</code>, etc.
               </p>
@@ -738,7 +837,7 @@
   <span class="lua-kw">if</span> rc <span class="lua-kw">and</span> rc.chars <span class="lua-kw">and</span> <span class="lua-fn">#rc.chars</span> &gt; <span class="lua-num">0</span> <span class="lua-kw">then</span>
     <span class="lua-fn">cecho</span>(<span class="lua-str">"roomConsole"</span>, <span class="lua-str">"&lt;cyan&gt;Players:\n"</span>)
     <span class="lua-kw">for</span> _, ch <span class="lua-kw">in</span> <span class="lua-fn">ipairs</span>(rc.chars) <span class="lua-kw">do</span>
-      <span class="lua-fn">cecho</span>(<span class="lua-str">"roomConsole"</span>, <span class="lua-str">"  &lt;white&gt;"</span> .. ch.name .. <span class="lua-str">" &lt;grey&gt;"</span> .. ch.position .. <span class="lua-str">"\n"</span>)
+      <span class="lua-fn">cecho</span>(<span class="lua-str">"roomConsole"</span>, <span class="lua-str">"  &lt;white&gt;"</span> .. ch.name .. <span class="lua-str">"\n"</span>)
     <span class="lua-kw">end</span>
   <span class="lua-kw">end</span>
 
@@ -814,7 +913,7 @@
   <span class="lua-kw">local</span> t = gmcp.World.Time
   <span class="lua-kw">if</span> t <span class="lua-kw">then</span>
     <span class="lua-fn">cecho</span>(<span class="lua-str">"worldConsole"</span>,
-      <span class="lua-str">"&lt;gold&gt;"</span>  .. (t.time_of_day <span class="lua-kw">or</span> <span class="lua-str">""</span>) ..
+      <span class="lua-str">"&lt;gold&gt;"</span>  .. (t.sunlight_name <span class="lua-kw">or</span> <span class="lua-str">""</span>) ..
       <span class="lua-str">"&lt;grey&gt; h"</span> .. (t.hour <span class="lua-kw">or</span> <span class="lua-str">"?"</span>) ..
       <span class="lua-str">" d"</span>      .. (t.day  <span class="lua-kw">or</span> <span class="lua-str">"?"</span>) .. <span class="lua-str">"\n"</span>)
   <span class="lua-kw">end</span>
@@ -822,15 +921,16 @@
   <span class="lua-kw">local</span> w = gmcp.World.Weather
   <span class="lua-kw">if</span> w <span class="lua-kw">then</span>
     <span class="lua-fn">cecho</span>(<span class="lua-str">"worldConsole"</span>,
-      <span class="lua-str">"&lt;cyan&gt;sky: &lt;white&gt;"</span> .. (w.sky <span class="lua-kw">or</span> <span class="lua-str">"?"</span>) .. <span class="lua-str">"\n"</span>)
+      <span class="lua-str">"&lt;cyan&gt;sky: &lt;white&gt;"</span> .. (w.sky_name <span class="lua-kw">or</span> <span class="lua-str">"?"</span>) .. <span class="lua-str">"\n"</span>)
   <span class="lua-kw">end</span>
 
   <span class="lua-kw">local</span> m = gmcp.World.Moons
-  <span class="lua-kw">if</span> m <span class="lua-kw">and</span> m.moons <span class="lua-kw">then</span>
-    <span class="lua-kw">for</span> _, moon <span class="lua-kw">in</span> <span class="lua-fn">ipairs</span>(m.moons) <span class="lua-kw">do</span>
-      <span class="lua-kw">if</span> moon.is_visible <span class="lua-kw">then</span>
+  <span class="lua-kw">if</span> m <span class="lua-kw">then</span>
+    <span class="lua-kw">for</span> _, key <span class="lua-kw">in</span> <span class="lua-fn">ipairs</span>({<span class="lua-str">"nesteri"</span>, <span class="lua-str">"avaerta"</span>, <span class="lua-str">"xequizox"</span>}) <span class="lua-kw">do</span>
+      <span class="lua-kw">local</span> moon = m[key]
+      <span class="lua-kw">if</span> moon <span class="lua-kw">then</span>
         <span class="lua-fn">cecho</span>(<span class="lua-str">"worldConsole"</span>,
-          <span class="lua-str">"&lt;purple&gt;"</span> .. moon.name .. <span class="lua-str">" &lt;grey&gt;"</span> .. moon.phase .. <span class="lua-str">"\n"</span>)
+          <span class="lua-str">"&lt;purple&gt;"</span> .. key .. <span class="lua-str">" &lt;grey&gt;"</span> .. (moon.phase_name <span class="lua-kw">or</span> <span class="lua-str">""</span>) .. <span class="lua-str">"\n"</span>)
       <span class="lua-kw">end</span>
     <span class="lua-kw">end</span>
   <span class="lua-kw">end</span>
@@ -845,7 +945,7 @@
         <div class="mudlet-card">
           <div class="mudlet-card-header">
             <span class="mudlet-card-title">Channel Feed Window</span>
-            <span class="mudlet-card-uses">uses Comm.Channel</span>
+            <span class="mudlet-card-uses">uses Comm.Channel.Text</span>
           </div>
           <pre><span class="lua-cmt">-- Script: GMCP Channel Feed
 -- Appends to a scrollback console instead of clearing each time</span>
@@ -860,16 +960,16 @@
 }
 
 <span class="lua-kw">function</span> <span class="lua-fn">gmcp_channel</span>()
-  <span class="lua-kw">local</span> c   = gmcp.Comm.Channel
+  <span class="lua-kw">local</span> c   = gmcp.Comm.Channel.Text
   <span class="lua-kw">local</span> col = chanColor[c.channel] <span class="lua-kw">or</span> <span class="lua-str">"&lt;white&gt;"</span>
-  <span class="lua-kw">local</span> dir = c.direction == <span class="lua-str">"out"</span> <span class="lua-kw">and</span> <span class="lua-str">"&lt;grey&gt;→ "</span> <span class="lua-kw">or</span> <span class="lua-str">""</span>
+  <span class="lua-kw">local</span> dir = c.direction == <span class="lua-str">"sent"</span> <span class="lua-kw">and</span> <span class="lua-str">"&lt;grey&gt;→ "</span> <span class="lua-kw">or</span> <span class="lua-str">""</span>
   <span class="lua-fn">cecho</span>(<span class="lua-str">"chanConsole"</span>,
     dir .. col .. <span class="lua-str">"["</span> .. c.channel .. <span class="lua-str">"] "</span> ..
-    <span class="lua-str">"&lt;white&gt;"</span> .. c.speaker .. <span class="lua-str">": "</span> ..
+    <span class="lua-str">"&lt;white&gt;"</span> .. c.talker .. <span class="lua-str">": "</span> ..
     <span class="lua-str">"&lt;grey&gt;"</span>  .. c.text .. <span class="lua-str">"\n"</span>)
 <span class="lua-kw">end</span>
 
-<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Comm.Channel"</span>, <span class="lua-str">"gmcp_channel"</span>)</pre>
+<span class="lua-fn">registerAnonymousEventHandler</span>(<span class="lua-str">"gmcp.Comm.Channel.Text"</span>, <span class="lua-str">"gmcp_channel"</span>)</pre>
         </div>
 
       </div><!-- /mudlet-cards -->
