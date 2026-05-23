@@ -51,7 +51,7 @@
     triggers:       [],
     macros:         [],
     palette16:      {},
-    openPanels:     ['map', 'party', 'status', 'targets'],
+    openPanels:     ['map', 'channels', 'status', 'targets'],
     panelSides:     {
       map: 'left', channels: 'left', party: 'left',
       status: 'right', targets: 'right', inventory: 'right', equipment: 'right',
@@ -67,7 +67,41 @@
     panelOrder:     ['map', 'channels', 'party', 'status', 'targets', 'inventory', 'equipment'],
     tsSelectable:   true,
     logTimestamps:  true,
+    affectsView:    'details',
   };
+
+  function cloneDefaultSettings() {
+    return JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+  }
+
+  function ensureDefaultPanelLayout(settings) {
+    if (!settings) return settings;
+    if (!settings.panelSides || typeof settings.panelSides !== 'object') {
+      settings.panelSides = {};
+    }
+    if (!settings.openPanels || !Array.isArray(settings.openPanels)) {
+      settings.openPanels = [];
+    }
+    var legacyDefaultPanels = ['map', 'party', 'status', 'targets'];
+    var nextDefaultPanels = ['map', 'channels', 'status', 'targets'];
+    var sameAsLegacy = settings.openPanels.length === legacyDefaultPanels.length && legacyDefaultPanels.every(function (panelId) {
+      return settings.openPanels.indexOf(panelId) >= 0;
+    });
+    if (sameAsLegacy || (settings.openPanels.indexOf('channels') < 0 && settings.openPanels.indexOf('party') >= 0)) {
+      settings.openPanels = nextDefaultPanels.slice();
+    }
+    if (!settings.panelSides.map) settings.panelSides.map = 'left';
+    if (!settings.panelSides.channels) settings.panelSides.channels = 'left';
+    settings.panelSides.party = settings.panelSides.party || 'left';
+    if (!settings.panelSides.status) settings.panelSides.status = 'right';
+    if (!settings.panelSides.targets) settings.panelSides.targets = 'right';
+    settings.panelSides.inventory = settings.panelSides.inventory || 'right';
+    settings.panelSides.equipment = settings.panelSides.equipment || 'right';
+    if (settings.openPanels.length === 0) {
+      settings.openPanels = nextDefaultPanels.slice();
+    }
+    return settings;
+  }
 
   var state = {
     settings:       null,
@@ -105,6 +139,10 @@
       reduceMotionQuery: null,
       reduceMotionListener: null,
       visibilityListenerAttached: false,
+    },
+    floatingTooltip: {
+      visible: false,
+      anchorRect: null,
     },
     gmcp: {
       vitals: null,
@@ -155,12 +193,16 @@
   function bindEls() {
     el.workspace      = document.getElementById('workspace');
     el.terminal       = document.getElementById('terminal');
+    el.btnTerminalBottom = document.getElementById('btn-terminal-bottom');
     el.connStatus     = document.getElementById('conn-status');
     el.macroBar       = document.getElementById('macro-bar');
     el.cmdForm        = document.getElementById('cmd-form');
     el.cmdInput       = document.getElementById('cmd-input');
     el.cmdSend        = document.getElementById('cmd-send');
+    el.btnLanguage    = document.getElementById('btn-language');
     el.btnRepeat      = document.getElementById('btn-repeat');
+    el.languagePicker = document.getElementById('language-picker');
+    el.languagePickerList = document.getElementById('language-picker-list');
     el.btnDisconnect  = document.getElementById('btn-disconnect');
     el.btnConnectPublic = document.getElementById('btn-connect-public');
     el.btnConnectTest = document.getElementById('btn-connect-test');
@@ -240,6 +282,10 @@
     el.importSettings = document.getElementById('import-settings');
     el.resetSettings  = document.getElementById('reset-settings');
     el.importFile      = document.getElementById('import-file');
+    el.exportSettingsConfig = document.getElementById('export-settings-config');
+    el.importSettingsConfig = document.getElementById('import-settings-config');
+    el.resetSettingsConfig  = document.getElementById('reset-settings-config');
+    el.importFileConfig     = document.getElementById('import-file-config');
 
     el.ansiPaletteCfg   = document.getElementById('ansi-palette-cfg');
     el.cfgTsSelectable  = document.getElementById('cfg-ts-selectable');
@@ -248,6 +294,7 @@
     el.logPopupTs        = document.getElementById('log-popup-timestamps');
     el.logPopupSave      = document.getElementById('log-popup-save');
     el.logPopupClose     = document.getElementById('log-popup-close');
+    el.floatingTooltip   = null;
   }
 
   function bindUi() {
@@ -261,6 +308,39 @@
     el.btnRepeat.addEventListener('click', function () {
       if (state.lastCmd) sendCommand(state.lastCmd);
     });
+
+    if (el.btnTerminalBottom) {
+      el.btnTerminalBottom.addEventListener('click', function () {
+        scrollTerminalToBottom();
+      });
+    }
+
+    if (el.terminal) {
+      el.terminal.addEventListener('scroll', updateTerminalBottomButton);
+    }
+
+    window.addEventListener('resize', updateTerminalBottomButton);
+
+    if (el.btnLanguage) {
+      el.btnLanguage.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleLanguagePicker();
+      });
+    }
+
+    if (el.languagePickerList) {
+      el.languagePickerList.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-language-id]');
+        if (!btn) return;
+        var languageId = String(btn.dataset.languageId || '').trim();
+        if (!languageId) return;
+        var escaped = languageId.replace(/'/g, "\\'");
+        sendCommand("language set '" + escaped + "'", { skipHistory: true });
+        closeLanguagePicker();
+        if (el.cmdInput) el.cmdInput.focus();
+      });
+    }
 
     el.btnDisconnect.addEventListener('click', disconnect);
     el.spPublic.addEventListener('click',      function () { connectMud('public'); });
@@ -311,6 +391,43 @@
       });
     }
 
+    if (el.statusPanelBody) {
+      el.statusPanelBody.addEventListener('click', function (e) {
+        var toggleBtn = e.target.closest('[data-affects-view]');
+        if (!toggleBtn) return;
+        var view = toggleBtn.dataset.affectsView === 'icons' ? 'icons' : 'details';
+        state.settings.affectsView = view;
+        saveSettings();
+        renderStatusPanel();
+      });
+
+      el.statusPanelBody.addEventListener('mouseover', function (e) {
+        var tipTarget = e.target.closest('[data-tooltip]');
+        if (!tipTarget) return;
+        var icon = tipTarget.closest('.status-affect-icon');
+        if (!icon) return;
+        var text = String(tipTarget.dataset.tooltip || icon.dataset.tooltip || '').trim();
+        if (!text) return;
+        showFloatingTooltip(icon, text);
+      });
+
+      el.statusPanelBody.addEventListener('mousemove', function (e) {
+        if (!state.floatingTooltip.visible) return;
+        var icon = e.target.closest('.status-affect-icon');
+        if (!icon) return;
+        positionFloatingTooltip(icon);
+      });
+
+      el.statusPanelBody.addEventListener('mouseout', function (e) {
+        if (!state.floatingTooltip.visible) return;
+        var fromIcon = e.target.closest('.status-affect-icon');
+        if (!fromIcon) return;
+        var to = e.relatedTarget;
+        if (to && to.closest && to.closest('.status-affect-icon') === fromIcon) return;
+        hideFloatingTooltip();
+      });
+    }
+
     el.drawerClose.addEventListener('click', closeDrawer);
 
     document.addEventListener('click', function (e) {
@@ -318,6 +435,13 @@
       if (el.settingsDrawer.contains(e.target)) return;
       if (e.target.closest('.rnav-btn')) return;
       closeDrawer();
+    });
+
+    document.addEventListener('click', function (e) {
+      if (!el.languagePicker || el.languagePicker.hidden) return;
+      if (el.languagePicker.contains(e.target)) return;
+      if (el.btnLanguage && el.btnLanguage.contains(e.target)) return;
+      closeLanguagePicker();
     });
 
     /* Built-in panel nav buttons (initial binding; moved by applyPanelState later) */
@@ -417,10 +541,18 @@
       saveAndRefresh();
     });
 
-    el.exportSettings.addEventListener('click', exportSettings);
-    el.importSettings.addEventListener('click', function () { el.importFile.click(); });
-    el.resetSettings.addEventListener('click',  resetLocalSettings);
-    el.importFile.addEventListener('change',    importSettingsFile);
+    bindSettingsFileControls(
+      el.exportSettings,
+      el.importSettings,
+      el.resetSettings,
+      el.importFile
+    );
+    bindSettingsFileControls(
+      el.exportSettingsConfig,
+      el.importSettingsConfig,
+      el.resetSettingsConfig,
+      el.importFileConfig
+    );
 
     el.cfgTsSelectable.addEventListener('change', function () {
       state.settings.tsSelectable = !!el.cfgTsSelectable.checked;
@@ -467,6 +599,15 @@
     el.settingsDrawer.hidden = true;
     document.querySelectorAll('.rnav-btn').forEach(function (b) { b.classList.remove('active'); });
     state.activeDrawer = null;
+  }
+
+  function bindSettingsFileControls(exportBtn, importBtn, resetBtn, importInput) {
+    if (exportBtn) exportBtn.addEventListener('click', exportSettings);
+    if (importBtn && importInput) {
+      importBtn.addEventListener('click', function () { importInput.click(); });
+    }
+    if (resetBtn) resetBtn.addEventListener('click', resetLocalSettings);
+    if (importInput) importInput.addEventListener('change', importSettingsFile);
   }
 
   /* ═══════════════════════════════════════════════════════════════
@@ -818,11 +959,11 @@
   function spawnMotes(dt) {
     var canvas = state.atmosphereFx.canvas;
     if (!canvas) return;
-    var targetCount = 2;
+    var targetCount = 2.5;
     state.atmosphereFx.spawnBudget += dt;
 
-    while (state.atmosphereFx.motes.length < targetCount && state.atmosphereFx.spawnBudget >= 0.44) {
-      state.atmosphereFx.spawnBudget -= 0.44 + Math.random() * 0.26;
+    while (state.atmosphereFx.motes.length < targetCount && state.atmosphereFx.spawnBudget >= 0.35) {
+      state.atmosphereFx.spawnBudget -= 0.35 + Math.random() * 0.19;
       state.atmosphereFx.motes.push(makeMote(canvas.clientWidth || window.innerWidth, canvas.clientHeight || (window.innerHeight - getShellbarOffset())));
     }
   }
@@ -844,7 +985,7 @@
       vy: Math.sin(angle) * driftSpeed,
       life: life,
       age: 0,
-      size: 1.05 + Math.random() * 1.1,
+      size: 0.88 + Math.random() * 0.9,
       maxAlpha: palette.alphaBase + (Math.random() * palette.alphaJitter),
       hue: normalizeHue(palette.hueBase + (Math.random() - 0.5) * palette.hueJitter),
       sat: clampNum(palette.satBase + (Math.random() - 0.5) * palette.satJitter, 50, 100),
@@ -908,15 +1049,15 @@
 
       var radius = e.size;
       var g = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, radius * 4.2);
-      g.addColorStop(0, 'hsla(' + e.hue.toFixed(1) + ', ' + e.sat.toFixed(1) + '%, ' + (e.lit + 24).toFixed(1) + '%, ' + (alpha * 0.95).toFixed(3) + ')');
-      g.addColorStop(0.32, 'hsla(' + e.hue.toFixed(1) + ', ' + e.sat.toFixed(1) + '%, ' + (e.lit + 8).toFixed(1) + '%, ' + (alpha * 0.58).toFixed(3) + ')');
+      g.addColorStop(0, 'hsla(' + e.hue.toFixed(1) + ', ' + e.sat.toFixed(1) + '%, ' + (e.lit + 28).toFixed(1) + '%, ' + Math.min(1, alpha * 1.02).toFixed(3) + ')');
+      g.addColorStop(0.32, 'hsla(' + e.hue.toFixed(1) + ', ' + e.sat.toFixed(1) + '%, ' + (e.lit + 10).toFixed(1) + '%, ' + (alpha * 0.66).toFixed(3) + ')');
       g.addColorStop(1, 'hsla(' + e.hue.toFixed(1) + ', ' + e.sat.toFixed(1) + '%, ' + e.lit.toFixed(1) + '%, 0)');
       ctx.fillStyle = g;
       ctx.beginPath();
       ctx.arc(e.x, e.y, radius * 4.2, 0, Math.PI * 2);
       ctx.fill();
 
-      ctx.fillStyle = 'hsla(' + e.hue.toFixed(1) + ', ' + Math.min(100, e.sat + 8).toFixed(1) + '%, ' + Math.min(96, e.lit + 28).toFixed(1) + '%, ' + (alpha * 0.8).toFixed(3) + ')';
+      ctx.fillStyle = 'hsla(' + e.hue.toFixed(1) + ', ' + Math.min(100, e.sat + 10).toFixed(1) + '%, ' + Math.min(96, e.lit + 30).toFixed(1) + '%, ' + (alpha * 0.88).toFixed(3) + ')';
       ctx.beginPath();
       ctx.arc(e.x, e.y, radius, 0, Math.PI * 2);
       ctx.fill();
@@ -951,8 +1092,8 @@
     var satBase = clampNum(base.s * 100, 56, 96);
     var litBase = clampNum(Math.max(44, (base.l * 100) + 8), 44, 76);
     var litJitter = 18;
-    var alphaBase = 0.66;
-    var alphaJitter = 0.16;
+    var alphaBase = 0.7;
+    var alphaJitter = 0.18;
 
     if (satBase < 62) satBase = 62;
     if (Math.abs(hueBase - textTone.h) < 7 && satBase < 74) satBase = 74;
@@ -962,14 +1103,14 @@
       satBase = clampNum(Math.max(satBase, 68), 68, 100);
       litBase = clampNum((base.l * 100) - 18, 24, 44);
       litJitter = 12;
-      alphaBase = 0.72;
-      alphaJitter = 0.16;
+      alphaBase = 0.78;
+      alphaJitter = 0.18;
     } else {
       // Slightly brighter for dark themes while keeping warm glow.
-      litBase = clampNum(litBase + 6, 46, 84);
+      litBase = clampNum(litBase + 8, 48, 86);
       litJitter = 20;
-      alphaBase = 0.7;
-      alphaJitter = 0.18;
+      alphaBase = 0.74;
+      alphaJitter = 0.2;
     }
 
     return {
@@ -1124,11 +1265,11 @@
     try {
       var raw    = localStorage.getItem(STORAGE_KEY);
       var parsed = raw ? JSON.parse(raw) : {};
-      state.settings = mergeSettings(DEFAULT_SETTINGS, parsed);
+      state.settings = ensureDefaultPanelLayout(mergeSettings(cloneDefaultSettings(), parsed));
       var siteTheme  = themeApi ? themeApi.getThemeId() : localStorage.getItem(SITE_THEME_KEY);
       state.settings.theme = resolveTheme(siteTheme || state.settings.theme);
     } catch (_) {
-      state.settings = clone(DEFAULT_SETTINGS);
+      state.settings = ensureDefaultPanelLayout(cloneDefaultSettings());
     }
     rebuildPalette();
   }
@@ -1176,6 +1317,7 @@
     renderMacros();
     renderMacroBar();
     renderAnsiPaletteCfg();
+    renderLanguageUi();
   }
 
   /* ── Built-in panel side config (in Config drawer) ──────── */
@@ -1788,6 +1930,8 @@
       hp: hp, maxhp: maxHp,
       mana: mana, maxmana: maxMana,
       move: move, maxmove: maxMove,
+      hunger: numOr(data.hunger, 0),
+      thirst: numOr(data.thirst, 0),
       wimpy: numOr(data.wimpy, 0),
       position: data.position != null ? data.position : data.pos,
     };
@@ -2450,6 +2594,7 @@
     state.gmcp.charStatus = data;
     updateVitalsPosition(data.position != null ? data.position : data.pos);
     pulsePkgBadge('status', 'Char.Status');
+    renderLanguageUi();
     renderStatusPanel();
   }
 
@@ -2476,18 +2621,6 @@
     if (state.combatStaleTimer) {
       clearTimeout(state.combatStaleTimer);
       state.combatStaleTimer = null;
-    }
-
-    var targets = Array.isArray(data && data.targets) ? data.targets : [];
-    if (targets.length) {
-      state.combatStaleTimer = setTimeout(function () {
-        var c = state.gmcp.charCombat || {};
-        var activeTargets = Array.isArray(c.targets) ? c.targets : [];
-        if (!activeTargets.length) return;
-        state.gmcp.charCombat = { targets: [] };
-        renderStatusPanel();
-        renderTargetsPanel();
-      }, 3500);
     }
 
     pulsePkgBadge('status', 'Char.Combat');
@@ -2604,7 +2737,70 @@
     var groupedAffects = groupAffects(Array.isArray(af.affects) ? af.affects : []);
     var affectsCount = groupedAffects.length;
     var combatCount = Array.isArray(cb.targets) ? cb.targets.length : 0;
-    var affectsHtml = groupedAffects.length ? groupedAffects.map(function (a) {
+    var affectsView = (state.settings && state.settings.affectsView === 'icons') ? 'icons' : 'details';
+    var affectsHtml = affectsView === 'icons'
+      ? renderAffectsIconGrid(groupedAffects)
+      : renderAffectsDetails(groupedAffects);
+
+    var vit = state.gmcp.vitals || {};
+    var hpPct = pct(numOr(vit.hp, 0), Math.max(1, numOr(vit.maxhp, 1)));
+    var mpPct = pct(numOr(vit.mana, 0), Math.max(1, numOr(vit.maxmana, 1)));
+    var mvPct = pct(numOr(vit.move, 0), Math.max(1, numOr(vit.maxmove, 1)));
+    var hungerPct = pct(numOr(vit.hunger, 0), 48);
+    var thirstPct = pct(numOr(vit.thirst, 0), 48);
+    var hungerCritical = isNeedCritical(vit.hunger, s.hunger, 'starving');
+    var thirstCritical = isNeedCritical(vit.thirst, s.thirst, 'parched');
+    var xpVal = numOr(s.xp, 0);
+    var tnlVal = numOr(s.tnl, 0);
+    var xpGoal = Math.max(1, xpVal + tnlVal);
+    var xpPct = pct(xpVal, xpGoal);
+    var title = String(s.title || '').trim();
+    var displayName = String(s.name || 'Unknown') + (title ? (' ' + title) : '');
+    var levelRaceClass = 'Level ' + numOr(s.level, 0)
+      + ' ' + escHtml(titleCaseWords(String(s.race || '?')))
+      + ' ' + escHtml(titleCaseWords(String(s.class || '?')));
+
+    el.statusPanelBody.innerHTML =
+      '<div class="status-grid">'
+      + '<div class="status-card status-card-identity">'
+      + '<div class="status-title">Identity</div>'
+      + '<div class="status-lines">'
+      + '<div class="status-identity-name">' + escHtml(displayName) + '</div>'
+      + '<div class="status-identity-line">' + levelRaceClass + '</div>'
+      + '<div class="status-identity-line">TNL ' + tnlVal + ' · XP ' + xpVal + '</div>'
+      + '<div class="status-affect-timer status-xp-timer" title="XP progress to next level">'
+      + '<div class="status-affect-timer-fill status-xp-fill" style="width:' + xpPct + '%"></div>'
+      + '</div>'
+      + '<div class="status-needs">'
+      + renderNeedBar('hunger', hungerPct, hungerCritical, 'Hunger')
+      + renderNeedBar('thirst', thirstPct, thirstCritical, 'Thirst')
+      + '</div>'
+      + '</div>'
+      + '</div>'
+      + statusCard('Stats', [
+        'Gold: ' + numOr(w.gold, 0) + ' · Bank: ' + numOr(w.bank_gold, 0),
+        'Cabal Pts: ' + numOr(w.cabal_points, 0),
+        'Practice/Train: ' + numOr(s.practice, 0) + ' / ' + numOr(s.trains, 0),
+        'Hit/Dam: ' + numOr(st.hitroll, 0) + ' / ' + numOr(st.damroll, 0),
+        'STR INT WIS DEX CON: ' + [numOr(st.str, 0), numOr(st.int, 0), numOr(st.wis, 0), numOr(st.dex, 0), numOr(st.con, 0)].join(' '),
+        'Affects: ' + affectsCount + ' · Targets: ' + combatCount,
+      ])
+      + '</div>'
+      + '<div class="status-affects">'
+      + '<div class="status-head-row">'
+      + '<div class="status-title">Affects</div>'
+      + '<div class="status-affects-toggle" role="group" aria-label="Affects view">'
+      + '<button type="button" class="status-toggle-btn' + (affectsView === 'details' ? ' active' : '') + '" data-affects-view="details">Details</button>'
+      + '<button type="button" class="status-toggle-btn' + (affectsView === 'icons' ? ' active' : '') + '" data-affects-view="icons">Icons</button>'
+      + '</div>'
+      + '</div>'
+      + affectsHtml
+      + '</div>';
+  }
+
+  function renderAffectsDetails(groupedAffects) {
+    if (!groupedAffects.length) return '<div class="status-empty">No active affects.</div>';
+    return groupedAffects.map(function (a) {
       var modText = a.mods.length ? a.mods.join(' · ') : 'none';
       var levelText = a.level > 0 ? ('L' + a.level) : 'L0';
       return '<div class="status-affect">'
@@ -2615,45 +2811,127 @@
         + '<div class="status-affect-timer-fill' + (a.permanent ? ' perm' : '') + '" style="width:' + a.timerPct + '%"></div>'
         + '</div>'
         + '</div>';
-    }).join('') : '<div class="status-empty">No active affects.</div>';
+    }).join('');
+  }
 
-    var vit = state.gmcp.vitals || {};
-    var hpPct = pct(numOr(vit.hp, 0), Math.max(1, numOr(vit.maxhp, 1)));
-    var mpPct = pct(numOr(vit.mana, 0), Math.max(1, numOr(vit.maxmana, 1)));
-    var mvPct = pct(numOr(vit.move, 0), Math.max(1, numOr(vit.maxmove, 1)));
-    var hungerPct = pct(numOr(vit.hunger, 0), 48);
-    var thirstPct = pct(numOr(vit.thirst, 0), 48);
-    var title = String(s.title || '').trim();
-    var displayName = String(s.name || 'Unknown') + (title ? (' ' + title) : '');
+  function renderAffectsIconGrid(groupedAffects) {
+    if (!groupedAffects.length) return '<div class="status-empty">No active affects.</div>';
 
-    el.statusPanelBody.innerHTML =
-      '<div class="status-grid">'
-      + statusCard('Identity', [
-        escHtml(displayName),
-        'Race/Class: ' + escHtml(String(s.race || '?')) + ' / ' + escHtml(String(s.class || '?')),
-        'Level: ' + numOr(s.level, 0) + ' · TNL: ' + numOr(s.tnl, 0) + ' · XP: ' + numOr(s.xp, 0),
-      ])
-      + statusCard('Conditions', [
-        'Health: ' + hpConditionName(hpPct),
-        'Mana: ' + manaConditionName(mpPct),
-        'Move: ' + moveConditionName(mvPct),
-        'Hunger/Thirst: ' + hungerConditionName(hungerPct) + ' / ' + thirstConditionName(thirstPct),
-      ])
-      + statusCard('Resources', [
-        'Gold: ' + numOr(w.gold, 0) + ' · Bank: ' + numOr(w.bank_gold, 0),
-        'Cabal Pts: ' + numOr(w.cabal_points, 0),
-        'Practice/Train: ' + numOr(s.practice, 0) + ' / ' + numOr(s.trains, 0),
-      ])
-      + statusCard('Combat Stats', [
-        'Hit/Dam: ' + numOr(st.hitroll, 0) + ' / ' + numOr(st.damroll, 0),
-        'STR INT WIS DEX CON: ' + [numOr(st.str, 0), numOr(st.int, 0), numOr(st.wis, 0), numOr(st.dex, 0), numOr(st.con, 0)].join(' '),
-        'Affects: ' + affectsCount + ' · Targets: ' + combatCount,
-      ])
+    var sorted = groupedAffects.slice().sort(function (a, b) {
+      var ad = a.permanent ? Number.MAX_SAFE_INTEGER : numOr(a.duration, 0);
+      var bd = b.permanent ? Number.MAX_SAFE_INTEGER : numOr(b.duration, 0);
+      if (bd !== ad) return bd - ad;
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    });
+
+    return '<div class="status-affects-grid">' + sorted.map(function (a) {
+      var iconText = String(a.name || '?').trim().charAt(0).toUpperCase() || '?';
+      var timerText = a.permanent ? '∞' : escHtml(a.durationLabel);
+      var tooltipParts = [
+        String(a.name || 'Unknown effect'),
+        'Type: ' + String(a.kind || 'spell'),
+        'Duration: ' + String(a.durationLabel || (a.permanent ? 'perm' : 'unknown')),
+      ];
+      if (a.mods.length) {
+        tooltipParts.push('Effects:');
+        a.mods.forEach(function (mod) {
+          tooltipParts.push('• ' + String(mod || ''));
+        });
+      } else {
+        tooltipParts.push('Effects: No stat modifiers listed');
+      }
+      var tooltip = tooltipParts.join('\n');
+      return '<div class="status-affect-icon">'
+        + '<div class="status-affect-icon-hit" data-tooltip="' + escHtml(tooltip) + '"></div>'
+        + '<div class="status-affect-glyph">' + escHtml(iconText) + '</div>'
+        + '<div class="status-affect-icon-name">' + escHtml(a.name) + '</div>'
+        + '<div class="status-affect-icon-time">' + timerText + '</div>'
+        + '</div>';
+    }).join('') + '</div>';
+  }
+
+  function ensureFloatingTooltip() {
+    if (el.floatingTooltip && document.body.contains(el.floatingTooltip)) return el.floatingTooltip;
+    var node = document.createElement('div');
+    node.id = 'status-floating-tooltip';
+    node.hidden = true;
+    document.body.appendChild(node);
+    el.floatingTooltip = node;
+    return node;
+  }
+
+  function showFloatingTooltip(icon, text) {
+    var tip = ensureFloatingTooltip();
+    var lines = String(text || '').split(/\n+/).filter(Boolean);
+    tip.innerHTML = lines.map(function (line) {
+      return '<div class="status-floating-tooltip-line">' + escHtml(line) + '</div>';
+    }).join('');
+    tip.hidden = false;
+    state.floatingTooltip.visible = true;
+    positionFloatingTooltip(icon);
+  }
+
+  function hideFloatingTooltip() {
+    if (!el.floatingTooltip) return;
+    el.floatingTooltip.hidden = true;
+    state.floatingTooltip.visible = false;
+    state.floatingTooltip.anchorRect = null;
+  }
+
+  function positionFloatingTooltip(icon) {
+    if (!icon || !el.floatingTooltip || el.floatingTooltip.hidden) return;
+    var rect = icon.getBoundingClientRect();
+    state.floatingTooltip.anchorRect = rect;
+    var tip = el.floatingTooltip;
+    var margin = 10;
+    var vw = window.innerWidth || document.documentElement.clientWidth || 0;
+    var vh = window.innerHeight || document.documentElement.clientHeight || 0;
+
+    tip.style.left = '0px';
+    tip.style.top = '0px';
+    var tw = tip.offsetWidth;
+    var th = tip.offsetHeight;
+
+    var left = rect.left + (rect.width / 2) - (tw / 2);
+    left = Math.max(margin, Math.min(vw - tw - margin, left));
+
+    var top = rect.top - th - 12;
+    if (top < margin) {
+      top = Math.min(vh - th - margin, rect.bottom + 12);
+    }
+
+    tip.style.left = Math.round(left) + 'px';
+    tip.style.top = Math.round(top) + 'px';
+  }
+
+  function renderNeedBar(kind, pctVal, critical, label) {
+    var pctNum = Math.max(0, Math.min(100, numOr(pctVal, 0)));
+    var fillClass = kind === 'hunger' ? 'status-need-fill-hunger' : 'status-need-fill-thirst';
+    return '<div class="status-need-col status-need-' + escHtml(kind) + '">'
+      + '<div class="status-need-label">' + escHtml(label) + '</div>'
+      + '<div class="status-affect-timer status-need-timer" title="' + escHtml(label) + ' ' + Math.round(pctNum) + '%">'
+      + '<div class="status-affect-timer-fill status-need-fill ' + fillClass + (critical ? ' critical' : '') + '" style="width:' + pctNum + '%"></div>'
       + '</div>'
-      + '<div class="status-affects">'
-      + '<div class="status-title">Affects</div>'
-      + affectsHtml
       + '</div>';
+  }
+
+  function isNeedCritical(rawValue, labelValue, dangerToken) {
+    if (rawValue != null && numOr(rawValue, 0) <= 0) return true;
+    if (typeof labelValue === 'string' && labelValue.toLowerCase().indexOf(String(dangerToken).toLowerCase()) >= 0) return true;
+    return false;
+  }
+
+  function titleCaseWords(value) {
+    return String(value || '')
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .split(' ')
+      .map(function (w) {
+        if (!w) return w;
+        return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+      })
+      .join(' ');
   }
 
   function hpConditionName(pctVal) {
@@ -2923,6 +3201,118 @@
     el.vPos.textContent = out.charAt(0).toUpperCase() + out.slice(1);
   }
 
+  function renderLanguageUi() {
+    if (!el.btnLanguage) return;
+    var snapshot = languageSnapshot();
+    el.btnLanguage.textContent = snapshot.selected || 'Common';
+    el.btnLanguage.title = 'Select spoken language (' + (snapshot.selected || 'Common') + ')';
+    if (!el.languagePicker || el.languagePicker.hidden) {
+      setLanguagePickerOpenState(false);
+      return;
+    }
+    renderLanguagePickerList(snapshot);
+    setLanguagePickerOpenState(true);
+  }
+
+  function languageSnapshot() {
+    var s = state.gmcp.charStatus || {};
+    var selected = String(
+      s.selected_language != null ? s.selected_language
+      : (s.selectedLanguage != null ? s.selectedLanguage
+      : (s.language != null ? s.language : 'Common'))
+    ).trim() || 'Common';
+
+    var list = [];
+    if (Array.isArray(s.languages)) {
+      list = s.languages.map(function (entry) {
+        if (entry == null) return null;
+        if (typeof entry === 'string') {
+          return { id: entry, proficiency: 0 };
+        }
+        return {
+          id: String(entry.id != null ? entry.id : (entry.language || '')).trim(),
+          proficiency: Math.max(0, Math.min(100, numOr(entry.proficiency, 0))),
+        };
+      }).filter(function (entry) {
+        return entry && entry.id;
+      });
+    }
+
+    if (!list.length && s.language_learned && typeof s.language_learned === 'object') {
+      Object.keys(s.language_learned).forEach(function (key) {
+        var id = String(key || '').trim();
+        if (!id) return;
+        list.push({ id: id, proficiency: Math.max(0, Math.min(100, numOr(s.language_learned[key], 0))) });
+      });
+    }
+
+    if (!list.some(function (entry) { return entry.id.toLowerCase() === 'common'; })) {
+      list.push({ id: 'Common', proficiency: 100 });
+    }
+    if (!list.some(function (entry) { return entry.id.toLowerCase() === selected.toLowerCase(); })) {
+      list.push({ id: selected, proficiency: Math.max(0, Math.min(100, numOr(s.selected_language_proficiency, 0))) });
+    }
+
+    var byId = Object.create(null);
+    list.forEach(function (entry) {
+      var key = entry.id.toLowerCase();
+      if (!byId[key] || entry.proficiency > byId[key].proficiency) {
+        byId[key] = entry;
+      }
+    });
+
+    var deduped = Object.keys(byId).map(function (key) { return byId[key]; });
+    deduped.sort(function (a, b) { return a.id.localeCompare(b.id); });
+
+    return { selected: selected, languages: deduped };
+  }
+
+  function toggleLanguagePicker() {
+    if (!el.languagePicker) return;
+    if (el.languagePicker.hidden) {
+      openLanguagePicker();
+      return;
+    }
+    closeLanguagePicker();
+  }
+
+  function openLanguagePicker() {
+    if (!el.languagePicker) return;
+    renderLanguagePickerList(languageSnapshot());
+    el.languagePicker.hidden = false;
+    setLanguagePickerOpenState(true);
+  }
+
+  function closeLanguagePicker() {
+    if (!el.languagePicker) return;
+    el.languagePicker.hidden = true;
+    setLanguagePickerOpenState(false);
+  }
+
+  function setLanguagePickerOpenState(open) {
+    if (!el.btnLanguage) return;
+    el.btnLanguage.setAttribute('aria-expanded', open ? 'true' : 'false');
+    el.btnLanguage.dataset.open = open ? 'true' : 'false';
+  }
+
+  function renderLanguagePickerList(snapshot) {
+    if (!el.languagePickerList) return;
+    var selected = (snapshot && snapshot.selected) ? snapshot.selected : 'Common';
+    var languages = (snapshot && Array.isArray(snapshot.languages)) ? snapshot.languages : [];
+    if (!languages.length) {
+      el.languagePickerList.innerHTML = '<button type="button" class="language-picker-item active" data-language-id="Common"><span class="language-picker-name">Common</span><span class="language-picker-prof">100%</span></button>';
+      return;
+    }
+
+    el.languagePickerList.innerHTML = languages.map(function (entry) {
+      var active = entry.id.toLowerCase() === selected.toLowerCase();
+      return '<button type="button" class="language-picker-item' + (active ? ' active' : '') + '" data-language-id="' + escHtml(entry.id) + '">'
+        + '<span class="language-picker-name">' + escHtml(entry.id) + '</span>'
+        + '<span class="language-picker-prof">' + Math.max(0, Math.min(100, numOr(entry.proficiency, 0))) + '%</span>'
+        + '</button>';
+    }).join('');
+  }
+
   function segmentedFillHtml(kind, pctVal) {
     var p = Math.max(0, Math.min(100, numOr(pctVal, 0)));
     var cls = gaugeKindClass(kind);
@@ -3042,6 +3432,7 @@
     trimTerminal();
     scheduleScrollbackSave();
     if (atBottom) el.terminal.scrollTop = el.terminal.scrollHeight;
+    updateTerminalBottomButton();
   }
 
   function renderRowContent(row, line, highlighted) {
@@ -3069,6 +3460,7 @@
     state.partialRow = row;
     trimTerminal();
     if (atBottom) el.terminal.scrollTop = el.terminal.scrollHeight;
+    updateTerminalBottomButton();
   }
 
   function trimTerminal() {
@@ -3115,7 +3507,26 @@
       });
       trimTerminal();
       el.terminal.scrollTop = el.terminal.scrollHeight;
+      updateTerminalBottomButton();
     } catch (_) {}
+  }
+
+  function isTerminalAtBottom() {
+    if (!el.terminal) return true;
+    return el.terminal.scrollTop + el.terminal.clientHeight >= el.terminal.scrollHeight - 40;
+  }
+
+  function scrollTerminalToBottom() {
+    if (!el.terminal) return;
+    el.terminal.scrollTop = el.terminal.scrollHeight;
+    updateTerminalBottomButton();
+  }
+
+  function updateTerminalBottomButton() {
+    if (!el.btnTerminalBottom || !el.terminal) return;
+    var hasOverflow = el.terminal.scrollHeight > el.terminal.clientHeight + 16;
+    var atBottom = isTerminalAtBottom();
+    el.btnTerminalBottom.hidden = !hasOverflow || atBottom;
   }
 
   /* ═══════════════════════════════════════════════════════════════
@@ -3207,13 +3618,20 @@
      ═══════════════════════════════════════════════════════════════ */
 
   function exportSettings() {
-    var json = JSON.stringify(state.settings, null, 2);
+    var payload = {
+      schema: 'freign.play2.settings.export',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      settings: clone(state.settings),
+    };
+    var json = JSON.stringify(payload, null, 2);
     var blob = new Blob([json], { type: 'application/json' });
     var url  = URL.createObjectURL(blob);
     var a    = document.createElement('a');
     a.href = url; a.download = 'freign-play2-settings.json';
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
+    appendSystem('Settings exported.');
   }
 
   function importSettingsFile(e) {
@@ -3223,19 +3641,25 @@
     reader.onload = function () {
       try {
         var parsed = JSON.parse(String(reader.result || '{}'));
-        state.settings = mergeSettings(DEFAULT_SETTINGS, parsed);
+        var incoming = parsed;
+        if (parsed && typeof parsed === 'object' && parsed.settings && typeof parsed.settings === 'object') {
+          incoming = parsed.settings;
+        }
+        var defaults = cloneDefaultSettings();
+        state.settings = ensureDefaultPanelLayout(mergeSettings(defaults, incoming || {}));
         rebuildPalette(); saveAndRefresh();
-        appendSystem('Settings imported.');
+        appendSystem('Settings imported (defaults reset, then profile applied).');
       } catch (_) { appendSystem('Settings import failed: invalid JSON.'); }
     };
-    reader.readAsText(file); e.target.value = '';
+    reader.readAsText(file);
+    if (e.target) e.target.value = '';
   }
 
   function resetLocalSettings() {
     if (!window.confirm('Reset all FREIGN Play 2 settings? This cannot be undone.')) return;
     disconnect(); clearSavedKeys();
     localStorage.removeItem(SCROLLBACK_KEY);
-    state.settings   = clone(DEFAULT_SETTINGS);
+    state.settings   = ensureDefaultPanelLayout(cloneDefaultSettings());
     state.cmdHistory = []; state.historyIdx = -1;
     state.lineCarry  = ''; state.lastCmd    = '';
     if (state.partialRow && state.partialRow.parentNode) {
@@ -3288,6 +3712,7 @@
     })();
     out.tsSelectable  = typeof incoming.tsSelectable  === 'boolean' ? incoming.tsSelectable  : base.tsSelectable;
     out.logTimestamps = typeof incoming.logTimestamps === 'boolean' ? incoming.logTimestamps : base.logTimestamps;
+    out.affectsView   = oneOf(incoming.affectsView, ['details', 'icons'], base.affectsView || 'details');
     var inPW = incoming.panelWidths || {};
     out.panelWidths = {
       left:  clampWidth(inPW.left,  base.panelWidths.left),

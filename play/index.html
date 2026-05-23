@@ -192,6 +192,7 @@
 
       <!-- Game output terminal -->
       <div id="terminal" role="log" aria-live="polite" aria-label="Game output"></div>
+      <button id="btn-terminal-bottom" type="button" hidden title="Scroll to latest output" aria-label="Jump to latest output">Jump To Latest</button>
 
       <!-- Macro quick-access bar (hidden when no macros defined) -->
       <div id="macro-bar" aria-label="Macro shortcuts"></div>
@@ -252,8 +253,13 @@
         <div id="cmd-prompt" aria-hidden="true">&#8250;</div>
         <input id="cmd-input" type="text" placeholder="Enter command&#x2026;"
                spellcheck="false" autocomplete="off" autocorrect="off" />
+        <button id="btn-language" type="button" title="Select spoken language" aria-haspopup="true" aria-expanded="false">Common</button>
         <button id="btn-repeat" type="button" title="Repeat last command">&#x21BA;</button>
         <button id="cmd-send"   type="submit">Send</button>
+        <div id="language-picker" class="language-picker" hidden>
+          <div class="language-picker-title">Languages</div>
+          <div id="language-picker-list" class="language-picker-list"></div>
+        </div>
       </form>
 
     </div><!-- /center -->
@@ -427,6 +433,17 @@
                 <label for="cfg-stack-sep">Stack Separator</label>
                 <input id="cfg-stack-sep" type="text" maxlength="4" placeholder=";" />
               </div>
+            </div>
+
+            <div class="dpane-section">
+              <div class="dpane-label">Settings File</div>
+              <p class="hint-text">Export/import your panels, aliases, triggers, macros, colors, and other play settings.</p>
+              <div class="row-btns">
+                <button id="export-settings-config" type="button">Export JSON</button>
+                <button id="import-settings-config" type="button">Import JSON</button>
+              </div>
+              <button id="reset-settings-config" type="button" class="full-btn danger" style="margin-top:6px">Reset to Defaults</button>
+              <input id="import-file-config" type="file" accept="application/json" hidden />
             </div>
 
           </div><!-- /dpane-config -->
