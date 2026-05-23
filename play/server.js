@@ -13,6 +13,9 @@ const FORCED_TARGET_HOST = String(process.env.PLAY_TARGET_HOST || '').trim();
 const FORCED_TARGET_PORT = clampInt(process.env.PLAY_TARGET_PORT, 1, 65535, 0);
 const FORCED_TARGET_TLS = parseBool(process.env.PLAY_TARGET_TLS, false);
 const ENABLE_MCCP2 = parseBool(process.env.PLAY_ENABLE_MCCP2, false);
+const ENABLE_WS_COMPRESSION = parseBool(process.env.PLAY_ENABLE_WS_COMPRESSION, true);
+const WS_COMPRESSION_THRESHOLD = clampInt(process.env.PLAY_WS_COMPRESSION_THRESHOLD, 64, 65536, 512);
+const WS_COMPRESSION_LEVEL = clampInt(process.env.PLAY_WS_COMPRESSION_LEVEL, 1, 9, 6);
 const HOST_ALLOWLIST = (process.env.PLAY_ALLOW_HOSTS || '')
   .split(',')
   .map((h) => h.trim().toLowerCase())
@@ -47,7 +50,20 @@ process.on('unhandledRejection', (reason) => {
 
 const WS_HEARTBEAT_INTERVAL = 25000; // 25 s — server → client WebSocket ping
 
-const wss = new WebSocketServer({ port: PORT, path: PATH });
+const wss = new WebSocketServer({
+  port: PORT,
+  path: PATH,
+  perMessageDeflate: ENABLE_WS_COMPRESSION
+    ? {
+        threshold: WS_COMPRESSION_THRESHOLD,
+        clientNoContextTakeover: true,
+        serverNoContextTakeover: true,
+        zlibDeflateOptions: {
+          level: WS_COMPRESSION_LEVEL,
+        },
+      }
+    : false,
+});
 
 wss.on('connection', (ws, req) => {
   const state = {
@@ -771,5 +787,6 @@ console.log(
   `FREIGN play bridge listening on ws://0.0.0.0:${PORT}${PATH}`
   + `${shouldSendProxyV2() ? ' (PROXY v2 enabled)' : ''}`
   + `${ENABLE_MCCP2 ? ' (MCCP2 enabled)' : ' (MCCP2 disabled)'}`
+  + `${ENABLE_WS_COMPRESSION ? ` (WS permessage-deflate enabled; threshold=${WS_COMPRESSION_THRESHOLD}, level=${WS_COMPRESSION_LEVEL})` : ' (WS permessage-deflate disabled)'}`
   + `${isForcedTargetEnabled() ? ` (target locked to ${FORCED_TARGET_HOST}:${FORCED_TARGET_PORT || '?'}${FORCED_TARGET_TLS ? ' TLS' : ''})` : ''}`
 );
