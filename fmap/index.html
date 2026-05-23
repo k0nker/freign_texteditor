@@ -1,0 +1,1059 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SVN AF World Map</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: #0d1117; color: #c9d1d9; overflow: hidden; height: 100vh; display: flex; }
+
+  #sidebar {
+    width: 260px; min-width: 260px; background: #161b22; border-right: 1px solid #30363d;
+    display: flex; flex-direction: column; z-index: 10;
+  }
+  #sidebar-header { padding: 12px 14px; border-bottom: 1px solid #30363d; }
+  #sidebar-header h1 { font-size: 15px; color: #f85149; margin-bottom: 6px; font-weight: 600; }
+  #search {
+    width: 100%; padding: 5px 10px; background: #0d1117; border: 1px solid #30363d;
+    border-radius: 6px; color: #c9d1d9; font-size: 12px; outline: none;
+  }
+  #search:focus { border-color: #58a6ff; }
+  #search::placeholder { color: #484f58; }
+  #section-list { flex: 1; overflow-y: auto; padding: 4px; }
+  #section-list::-webkit-scrollbar { width: 6px; }
+  #section-list::-webkit-scrollbar-track { background: transparent; }
+  #section-list::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+  .section-item {
+    padding: 5px 8px; border-radius: 5px; cursor: pointer; font-size: 11px;
+    display: flex; align-items: center; gap: 6px; margin-bottom: 1px;
+  }
+  .section-item:hover { background: #1c2333; }
+  .section-item.active { background: #1a2332; border: 1px solid #f85149; }
+  .section-item .dot { width: 7px; height: 7px; border-radius: 2px; flex-shrink: 0; }
+  .section-item .name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+  .section-item .rooms { font-size: 10px; color: #484f58; flex-shrink: 0; }
+  #section-detail {
+    padding: 12px 14px; border-top: 1px solid #30363d; font-size: 11px; min-height: 100px;
+  }
+  #section-detail h2 { font-size: 13px; color: #f85149; margin-bottom: 3px; font-weight: 600; }
+  #section-detail .detail-row { margin-bottom: 2px; color: #8b949e; }
+  #section-detail .detail-row span { color: #c9d1d9; }
+  #section-detail .connections { margin-top: 5px; }
+  #section-detail .connections a {
+    display: inline-block; padding: 1px 6px; margin: 1px 3px 1px 0; background: #21262d;
+    border: 1px solid #30363d; border-radius: 3px; font-size: 10px; color: #8b949e;
+    text-decoration: none; cursor: pointer;
+  }
+  #section-detail .connections a:hover { background: #f85149; color: #fff; border-color: #f85149; }
+
+  #main { flex: 1; position: relative; overflow: hidden; }
+  #canvas { display: block; width: 100%; height: 100%; }
+
+  #tooltip {
+    position: absolute; pointer-events: none; background: #161b22; border: 1px solid #30363d;
+    border-radius: 6px; padding: 8px 12px; font-size: 11px; display: none; z-index: 100;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4); max-width: 280px;
+  }
+  #tooltip .tt-name { color: #58a6ff; font-weight: 600; font-size: 12px; margin-bottom: 1px; }
+  #tooltip .tt-section { color: #8b949e; font-size: 10px; margin-bottom: 4px; }
+  #tooltip .tt-row { color: #484f58; font-size: 10px; }
+  #tooltip .tt-row span { color: #c9d1d9; }
+
+  #zoom-controls {
+    position: absolute; bottom: 12px; right: 12px; display: flex; flex-direction: column;
+    gap: 2px; z-index: 10;
+  }
+  #zoom-controls button {
+    width: 30px; height: 30px; background: #161b22; border: 1px solid #30363d;
+    border-radius: 5px; color: #8b949e; font-size: 15px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #zoom-controls button:hover { background: #21262d; color: #c9d1d9; }
+
+  #legend {
+    position: absolute; top: 10px; right: 10px; background: #161b22; border: 1px solid #30363d;
+    border-radius: 6px; padding: 8px 12px; z-index: 10; font-size: 10px;
+    max-height: 65vh; overflow-y: auto;
+  }
+  #legend h3 { font-size: 11px; color: #f85149; margin-bottom: 4px; font-weight: 600; }
+  .legend-item { display: flex; align-items: center; gap: 6px; margin-bottom: 1px; }
+  .legend-dot { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+  .legend-label { color: #8b949e; }
+
+  #minimap {
+    position: absolute; bottom: 12px; left: 12px; width: 160px; height: 100px;
+    background: #161b22; border: 1px solid #30363d; border-radius: 6px; z-index: 10;
+    overflow: hidden;
+  }
+  #minimap canvas { width: 100%; height: 100%; }
+  #minimap-viewport {
+    position: absolute; border: 1.5px solid #f85149; background: rgba(248,81,73,0.08);
+    border-radius: 1px; pointer-events: none;
+  }
+
+  #loading {
+    position: absolute; inset: 0; background: #0d1117; display: flex;
+    align-items: center; justify-content: center; z-index: 200; flex-direction: column; gap: 12px;
+  }
+  #loading .spinner {
+    width: 32px; height: 32px; border: 3px solid #21262d; border-top-color: #f85149;
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #loading p { color: #484f58; font-size: 12px; }
+
+  #stats {
+    position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+    background: #161b22; border: 1px solid #30363d; border-radius: 5px;
+    padding: 4px 12px; font-size: 10px; color: #484f58; z-index: 10;
+    display: flex; gap: 14px;
+  }
+  #stats span { color: #8b949e; }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <div id="sidebar-header">
+    <h1>SVN AF World Map</h1>
+    <input type="text" id="search" placeholder="Search rooms or sections..." autocomplete="off">
+  </div>
+  <div id="section-list"></div>
+  <div id="section-detail">
+    <div style="color:#484f58; font-style:italic;">Click a room on the map</div>
+  </div>
+</div>
+
+<div id="main">
+  <canvas id="canvas"></canvas>
+  <div id="tooltip"></div>
+  <div id="zoom-controls">
+    <button id="zoom-in" title="Zoom In">+</button>
+    <button id="zoom-out" title="Zoom Out">-</button>
+    <button id="zoom-reset" title="Reset Zoom">0</button>
+  </div>
+  <div id="legend"></div>
+  <div id="minimap">
+    <canvas id="minimap-canvas"></canvas>
+    <div id="minimap-viewport"></div>
+  </div>
+  <div id="stats">
+    <div>Sections: <span id="stat-sections">0</span></div>
+    <div>Rooms: <span id="stat-rooms">0</span></div>
+    <div>Zoom: <span id="stat-zoom">1.0x</span></div>
+  </div>
+  <div id="loading">
+    <div class="spinner"></div>
+    <p>Loading world data...</p>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// CONSTANTS
+// ═══════════════════════════════════════════════════════════
+const CELL = 14;
+const GAP = 8;
+const SPACING = CELL + GAP; // 22px per grid cell
+
+const DIR_NAMES = ['N', 'E', 'S', 'W', 'U', 'D'];
+const DIR_ARROWS = ['↑N', '→E', '↓S', '←W', '↑U', '↓D'];
+
+const SECTOR_COLORS = {
+  0:  { color: '#6a3d7d', label: 'Inside (dungeon/tower)' },
+  1:  { color: '#5a6a7a', label: 'City/Plain' },
+  2:  { color: '#4a8a5a', label: 'Field/Forest' },
+  3:  { color: '#2d6b3f', label: 'Forest/Wood' },
+  4:  { color: '#8a6a4a', label: 'Mountain/Hill' },
+  5:  { color: '#7a5a3a', label: 'Mountain Pass' },
+  6:  { color: '#3a6a8a', label: 'Water/River' },
+  7:  { color: '#5a7a3a', label: 'Swamp/Marsh' },
+  8:  { color: '#c4a35a', label: 'Desert' },
+  9:  { color: '#8a2a2a', label: 'Hellscape' },
+  10: { color: '#5a9aba', label: 'Astral/Ethereal' },
+  11: { color: '#7a7a7a', label: 'Unallocated' },
+  12: { color: '#9a8a6a', label: 'Neutral/Wilderness' },
+};
+
+// ═══════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════
+let worldSections = [];
+let sectionMap = {};
+let areaMap = {};       // name -> area object
+let allRooms = {};      // vnum -> room object
+let roomList = [];      // flat array of all rooms
+
+let selectedRoom = null;
+let hoveredRoom = null;
+
+// Camera
+let camera = { x: 0, y: 0, zoom: 1 };
+const MIN_ZOOM = 0.02;
+const MAX_ZOOM = 20;
+const LABEL_ZOOM = 1.8;
+const AREA_LABEL_ZOOM = 0.06;
+
+// Canvas
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const minimapCanvas = document.getElementById('minimap-canvas');
+const minimapCtx = minimapCanvas.getContext('2d');
+
+// Cached minimap
+let minimapCache = null;
+let minimapCacheDirty = true;
+
+// Render throttle
+let needsRender = false;
+let renderPending = false;
+
+function requestRender() {
+  if (renderPending) return;
+  renderPending = true;
+  requestAnimationFrame(() => {
+    renderPending = false;
+    render();
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// LOAD WORLD DATA
+// ═══════════════════════════════════════════════════════════
+async function loadWorld() {
+  try {
+    const resp = await fetch('data/world.json');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    worldSections = data.world || [];
+    const areas = data.areas || {};
+
+    worldSections.forEach(s => { sectionMap[s.n] = s; });
+
+    // Build area objects and room list
+    for (const name of worldSections.map(s => s.n)) {
+      const ad = areas[name];
+      if (!ad) continue;
+
+      const wa = sectionMap[name];
+      const areaPX = wa.wx * SPACING;
+      const areaPY = wa.wy * SPACING;
+
+      areaMap[name] = {
+        shortName: name,
+        name: ad.name || name,
+        sector: wa.s,
+        px: areaPX,
+        py: areaPY,
+        w: ad.w * SPACING,
+        h: ad.h * SPACING,
+        gridW: ad.w,
+        gridH: ad.h,
+        minZ: ad.minZ || 0,
+        maxZ: ad.maxZ || 0,
+        rooms: [],
+        roomKeySet: Object.create(null),
+      };
+
+      for (const rj of ad.rooms) {
+        const wx = areaPX + rj.x * SPACING + SPACING / 2;
+        const wy = areaPY + rj.y * SPACING + SPACING / 2;
+        const rz = rj.z || 0;
+
+        const room = {
+          vnum: rj.v,
+          name: rj.n,
+          area: name,
+          sector: rj.s,
+          gridX: rj.x,
+          gridY: rj.y,
+          gridZ: rz,
+          worldX: wx,
+          worldY: wy,
+          exits: rj.ex || [],
+        };
+        allRooms[rj.v] = room;
+        areaMap[name].rooms.push(room);
+        areaMap[name].roomKeySet[rj.x + ',' + rj.y] = true;
+        roomList.push(room);
+      }
+    }
+
+    buildLegend();
+    buildSectionList();
+    initCamera();
+    hideLoading();
+    updateStats();
+    render();
+  } catch (e) {
+    document.getElementById('loading').innerHTML = `
+      <p style="color:#f85149;">Failed to load world data</p>
+      <p style="color:#8b949e;font-size:12px;">${e.message}</p>
+    `;
+  }
+}
+
+function hideLoading() {
+  document.getElementById('loading').style.display = 'none';
+}
+
+// ═══════════════════════════════════════════════════════════
+// CAMERA
+// ═══════════════════════════════════════════════════════════
+function initCamera() {
+  if (!roomList.length) return;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const r of roomList) {
+    if (r.worldX < minX) minX = r.worldX;
+    if (r.worldX > maxX) maxX = r.worldX;
+    if (r.worldY < minY) minY = r.worldY;
+    if (r.worldY > maxY) maxY = r.worldY;
+  }
+
+  const mainEl = document.getElementById('main');
+  const w = mainEl.clientWidth;
+  const h = mainEl.clientHeight;
+  const pad = SPACING * 3;
+
+  const scaleX = (w * 0.96) / Math.max(1, (maxX - minX + pad * 2));
+  const scaleY = (h * 0.96) / Math.max(1, (maxY - minY + pad * 2));
+  camera.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.min(scaleX, scaleY)));
+
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  camera.x = w / 2 - cx * camera.zoom;
+  camera.y = h / 2 - cy * camera.zoom;
+  minimapCacheDirty = true;
+}
+
+function worldToScreen(wx, wy) {
+  return {
+    x: wx * camera.zoom + camera.x,
+    y: wy * camera.zoom + camera.y,
+  };
+}
+
+function screenToWorld(sx, sy) {
+  return {
+    x: (sx - camera.x) / camera.zoom,
+    y: (sy - camera.y) / camera.zoom,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════
+// RENDERING
+// ═══════════════════════════════════════════════════════════
+function resizeCanvas() {
+  const mainEl = document.getElementById('main');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = mainEl.clientWidth * dpr;
+  canvas.height = mainEl.clientHeight * dpr;
+  canvas.style.width = mainEl.clientWidth + 'px';
+  canvas.style.height = mainEl.clientHeight + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  const mm = document.getElementById('minimap');
+  minimapCanvas.width = mm.clientWidth * dpr;
+  minimapCanvas.height = mm.clientHeight * dpr;
+  minimapCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function render() {
+  const mainEl = document.getElementById('main');
+  const w = mainEl.clientWidth;
+  const h = mainEl.clientHeight;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#0d1117';
+  ctx.fillRect(0, 0, w, h);
+
+  drawAreaBackplates();
+  drawConnections();
+  drawAreaLabels();
+  drawRooms();
+  drawMinimap();
+  updateStats();
+}
+
+function drawAreaBackplates() {
+  ctx.save();
+  const mainEl = document.getElementById('main');
+  const tl = screenToWorld(0, 0);
+  const br = screenToWorld(mainEl.clientWidth, mainEl.clientHeight);
+  const margin = SPACING * 5;
+
+  for (const name in areaMap) {
+    const a = areaMap[name];
+    if (a.px + a.w + margin < tl.x) continue;
+    if (a.py + a.h + margin < tl.y) continue;
+    if (a.px - margin > br.x) continue;
+    if (a.py - margin > br.y) continue;
+
+    const sec = SECTOR_COLORS[a.sector] || { color: '#555', border: '#333' };
+    const fillAlpha = 0.07;
+    const edgeAlpha = 0.14;
+
+    // Draw room footprint tints
+    const tile = Math.max(8, CELL * camera.zoom * 1.75);
+    const halfTile = tile * 0.5;
+    ctx.fillStyle = hexToRgba(sec.color, fillAlpha);
+    for (const r of a.rooms) {
+      const rs = worldToScreen(r.worldX, r.worldY);
+      if (rs.x < -tile || rs.x > mainEl.clientWidth + tile) continue;
+      if (rs.y < -tile || rs.y > mainEl.clientHeight + tile) continue;
+      ctx.fillRect(rs.x - halfTile, rs.y - halfTile, tile, tile);
+    }
+
+    // Draw exposed room edges as contour
+    const edgeHalf = Math.max(halfTile, SPACING * camera.zoom * 0.45);
+    ctx.strokeStyle = hexToRgba(sec.color, edgeAlpha);
+    ctx.lineWidth = Math.max(0.6, camera.zoom * 0.45);
+    ctx.beginPath();
+    const keySet = a.roomKeySet;
+    for (const r of a.rooms) {
+      const es = worldToScreen(r.worldX, r.worldY);
+      if (es.x < -edgeHalf || es.x > mainEl.clientWidth + edgeHalf) continue;
+      if (es.y < -edgeHalf || es.y > mainEl.clientHeight + edgeHalf) continue;
+
+      const x0 = es.x - edgeHalf, x1 = es.x + edgeHalf;
+      const y0 = es.y - edgeHalf, y1 = es.y + edgeHalf;
+
+      if (!keySet[(r.gridX - 1) + ',' + r.gridY]) { ctx.moveTo(x0, y0); ctx.lineTo(x0, y1); }
+      if (!keySet[(r.gridX + 1) + ',' + r.gridY]) { ctx.moveTo(x1, y0); ctx.lineTo(x1, y1); }
+      if (!keySet[r.gridX + ',' + (r.gridY - 1)]) { ctx.moveTo(x0, y0); ctx.lineTo(x1, y0); }
+      if (!keySet[r.gridX + ',' + (r.gridY + 1)]) { ctx.moveTo(x0, y1); ctx.lineTo(x1, y1); }
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawConnections() {
+  if (camera.zoom < 0.18) return;
+
+  const mainEl = document.getElementById('main');
+  const tl = screenToWorld(0, 0);
+  const br = screenToWorld(mainEl.clientWidth, mainEl.clientHeight);
+  const margin = SPACING * 5;
+
+  ctx.lineWidth = Math.max(0.5, camera.zoom * 0.6);
+
+  // Draw each connection once (lower vnum draws it)
+  for (const vnum in allRooms) {
+    const r = allRooms[vnum];
+    if (r.worldX < tl.x - margin || r.worldX > br.x + margin) continue;
+    if (r.worldY < tl.y - margin || r.worldY > br.y + margin) continue;
+
+    const rs = worldToScreen(r.worldX, r.worldY);
+    const inPath = selectedRoom && (vnum === selectedRoom.vnum);
+
+    for (const ex of r.exits) {
+      const nb = allRooms[ex.v];
+      if (!nb) continue;
+      if (ex.v < +vnum) continue;
+
+      const ns = worldToScreen(nb.worldX, nb.worldY);
+
+      const isPathEdge = inPath && !!allRooms[ex.v];
+      if (isPathEdge) {
+        ctx.strokeStyle = 'rgba(244,220,126,0.90)';
+        ctx.lineWidth = Math.max(1.5, camera.zoom * 1.2);
+      } else {
+        ctx.strokeStyle = 'rgba(122,140,178,0.52)';
+        ctx.lineWidth = Math.max(0.5, camera.zoom * 0.6);
+      }
+
+      ctx.beginPath();
+      ctx.moveTo(rs.x, rs.y);
+      ctx.lineTo(ns.x, ns.y);
+      ctx.stroke();
+    }
+  }
+}
+
+function drawAreaLabels() {
+  if (camera.zoom < AREA_LABEL_ZOOM) return;
+
+  const mainEl = document.getElementById('main');
+  const tl = screenToWorld(0, 0);
+  const br = screenToWorld(mainEl.clientWidth, mainEl.clientHeight);
+  const margin = SPACING * 5;
+
+  for (const name in areaMap) {
+    const a = areaMap[name];
+    if (a.px + a.w + margin < tl.x) continue;
+    if (a.py + a.h + margin < tl.y) continue;
+    if (a.px - margin > br.x) continue;
+    if (a.py - margin > br.y) continue;
+
+    const sec = SECTOR_COLORS[a.sector] || { border: '#555' };
+    const labelText = (a.name || '').toUpperCase();
+    const sp = worldToScreen(a.px, a.py);
+    const boxW = a.w * camera.zoom;
+    const boxH = a.h * camera.zoom;
+    const lx = sp.x + boxW / 2;
+    const ly = sp.y + boxH / 2;
+
+    const zoomedIn = camera.zoom >= 0.55;
+
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    if (zoomedIn) {
+      // Zoomed in: pin label to top-left of area bounds
+      const areaWeight = Math.sqrt(Math.max(1, a.gridW * a.gridH));
+      let fontTop = Math.max(10, Math.min(18, 13 + Math.log(areaWeight + 1) * 1.0));
+      ctx.font = `700 ${fontTop.toFixed(1)}px "Trebuchet MS", "Segoe UI", sans-serif`;
+
+      const topTextW = ctx.measureText(labelText).width;
+      const topPadX = Math.max(4, fontTop * 0.34);
+      const topPadY = Math.max(2, fontTop * 0.2);
+      const maxTopW = Math.max(18, boxW * 0.9);
+      let desiredTopW = topTextW + topPadX * 2;
+      if (desiredTopW > maxTopW) {
+        const scaleTop = maxTopW / desiredTopW;
+        fontTop = Math.max(9, fontTop * scaleTop);
+        ctx.font = `700 ${fontTop.toFixed(1)}px "Trebuchet MS", "Segoe UI", sans-serif`;
+        topTextW = ctx.measureText(labelText).width;
+        topPadX = Math.max(3, fontTop * 0.30);
+      }
+      const topW = Math.min(maxTopW, topTextW + topPadX * 2);
+      const topH = fontTop + topPadY * 2;
+      const topX = sp.x;
+      const topY = sp.y - topH - 1;
+      const topR = Math.max(3, topH * 0.24);
+
+      ctx.textAlign = 'left';
+      ctx.globalAlpha = 0.62;
+      ctx.fillStyle = '#0d1117';
+      roundedRect(ctx, topX, topY, topW, topH, topR);
+      ctx.fill();
+
+      ctx.globalAlpha = 0.9;
+      ctx.strokeStyle = 'rgba(8,8,12,0.45)';
+      ctx.lineWidth = 1;
+      roundedRect(ctx, topX, topY, topW, topH, topR);
+      ctx.stroke();
+
+      ctx.globalAlpha = 0.96;
+      ctx.fillStyle = sec.border;
+      ctx.fillText(labelText, topX + topPadX, topY + topH / 2 + 0.5);
+    } else {
+      // Zoomed out: centered badge
+      const areaWeight = Math.sqrt(Math.max(1, a.gridW * a.gridH));
+      const baseSize = 12 + Math.min(16, Math.log(areaWeight + 1) * 3.2);
+      const zoomOutBoost = Math.max(0.85, Math.min(1.45, Math.pow(1 / Math.max(camera.zoom, 0.08), 0.2)));
+      let fontCenter = Math.max(8, Math.min(28, baseSize * zoomOutBoost));
+      ctx.font = `700 ${fontCenter.toFixed(1)}px "Trebuchet MS", "Segoe UI", sans-serif`;
+
+      const textW = ctx.measureText(labelText).width;
+      const padX = Math.max(4, fontCenter * 0.30);
+      const padY = Math.max(3, fontCenter * 0.22);
+      const maxBw = Math.max(20, boxW - 6);
+      let desiredBw = textW + padX * 2;
+      if (desiredBw > maxBw) {
+        const scaleCenter = maxBw / desiredBw;
+        fontCenter = Math.max(7, fontCenter * scaleCenter);
+        ctx.font = `700 ${fontCenter.toFixed(1)}px "Trebuchet MS", "Segoe UI", sans-serif`;
+        textW = ctx.measureText(labelText).width;
+        padX = Math.max(3, fontCenter * 0.25);
+      }
+      const bw = Math.min(maxBw, textW + padX * 2);
+      const bh = fontCenter + padY * 2;
+      const bx = Math.max(sp.x + 2, Math.min(sp.x + boxW - bw - 2, lx - bw / 2));
+      const by = Math.max(sp.y + 2, Math.min(sp.y + boxH - bh - 2, ly - bh / 2));
+      const rr = Math.max(4, bh * 0.28);
+
+      ctx.globalAlpha = Math.max(0.35, Math.min(0.75, 0.3 + camera.zoom * 0.9));
+      ctx.fillStyle = '#0d1117';
+      roundedRect(ctx, bx, by, bw, bh, rr);
+      ctx.fill();
+
+      ctx.globalAlpha = Math.max(0.55, Math.min(0.95, 0.45 + camera.zoom * 0.7));
+      ctx.strokeStyle = 'rgba(8,8,12,0.45)';
+      ctx.lineWidth = Math.max(1, fontCenter * 0.08);
+      roundedRect(ctx, bx, by, bw, bh, rr);
+      ctx.stroke();
+
+      ctx.globalAlpha = Math.max(0.9, Math.min(1.0, 0.86 + camera.zoom * 0.2));
+      ctx.fillStyle = sec.border;
+      ctx.fillText(labelText, bx + bw / 2, by + bh / 2 + 0.5);
+    }
+
+    ctx.restore();
+  }
+}
+
+function drawRooms() {
+  const mainEl = document.getElementById('main');
+  const tl = screenToWorld(0, 0);
+  const br = screenToWorld(mainEl.clientWidth, mainEl.clientHeight);
+  const margin = SPACING * 5;
+
+  const cellPx = CELL * camera.zoom;
+  const half = cellPx / 2;
+
+  for (const r of roomList) {
+    if (r.worldX < tl.x - margin || r.worldX > br.x + margin) continue;
+    if (r.worldY < tl.y - margin || r.worldY > br.y + margin) continue;
+
+    const rs = worldToScreen(r.worldX, r.worldY);
+    const sec = SECTOR_COLORS[r.sector] || { color: '#555', border: '#333' };
+
+    const isOrigin = (r.vnum === selectedRoom?.vnum);
+    const isHovered = (r.vnum === hoveredRoom?.vnum);
+
+    // Room square
+    ctx.fillStyle = hexToRgba(sec.color, 0.90);
+    ctx.fillRect(rs.x - half, rs.y - half, cellPx, cellPx);
+
+    // Border
+    if (isOrigin) {
+      ctx.strokeStyle = '#e0c87a';
+      ctx.lineWidth = Math.max(1.5, camera.zoom * 1.5);
+    } else if (isHovered) {
+      ctx.strokeStyle = '#707090';
+      ctx.lineWidth = Math.max(1, camera.zoom);
+    } else {
+      ctx.strokeStyle = sec.border;
+      ctx.lineWidth = Math.max(0.5, camera.zoom * 0.7);
+    }
+    ctx.strokeRect(rs.x - half, rs.y - half, cellPx, cellPx);
+
+    // Selection dot
+    if (isOrigin) {
+      const dotR = Math.max(2, cellPx * 0.25);
+      ctx.fillStyle = '#e0c87a';
+      ctx.beginPath();
+      ctx.arc(rs.x, rs.y, dotR, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Room name label at close zoom
+    if (camera.zoom >= LABEL_ZOOM && r.name) {
+      ctx.fillStyle = '#d6c9ad';
+      ctx.font = '10px Consolas, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(r.name, rs.x, rs.y + half + 10);
+    }
+  }
+}
+
+function drawMinimap() {
+  if (!roomList.length) return;
+  const mmW = document.getElementById('minimap').clientWidth;
+  const mmH = document.getElementById('minimap').clientHeight;
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const r of roomList) {
+    if (r.worldX < minX) minX = r.worldX;
+    if (r.worldY < minY) minY = r.worldY;
+    if (r.worldX > maxX) maxX = r.worldX;
+    if (r.worldY > maxY) maxY = r.worldY;
+  }
+
+  const padding = 3;
+  const scaleX = (mmW - padding * 2) / (maxX - minX + 1);
+  const scaleY = (mmH - padding * 2) / (maxY - minY + 1);
+  const scale = Math.min(scaleX, scaleY);
+
+  const offX = padding - minX * scale;
+  const offY = padding - minY * scale;
+
+  if (!minimapCache || minimapCache.width !== mmW || minimapCache.height !== mmH) {
+    minimapCache = document.createElement('canvas');
+    minimapCache.width = mmW;
+    minimapCache.height = mmH;
+    minimapCacheDirty = true;
+  }
+  const mctx = minimapCache.getContext('2d');
+
+  if (minimapCacheDirty) {
+    mctx.clearRect(0, 0, mmW, mmH);
+    // Draw rooms as tiny colored dots
+    for (const r of roomList) {
+      const sec = SECTOR_COLORS[r.sector] || { color: '#555' };
+      mctx.fillStyle = sec.color;
+      const px = r.worldX * scale + offX;
+      const py = r.worldY * scale + offY;
+      const pr = Math.max(0.5, scale * 0.4);
+      mctx.fillRect(px, py, pr, pr);
+    }
+    minimapCacheDirty = false;
+  }
+
+  minimapCtx.clearRect(0, 0, mmW, mmH);
+  minimapCtx.drawImage(minimapCache, 0, 0);
+
+  // Viewport
+  const tl = screenToWorld(0, 0);
+  const br = screenToWorld(document.getElementById('main').clientWidth, document.getElementById('main').clientHeight);
+
+  const vp = document.getElementById('minimap-viewport');
+  vp.style.left = (tl.x * scale + offX) + 'px';
+  vp.style.top = (tl.y * scale + offY) + 'px';
+  vp.style.width = ((br.x - tl.x) * scale) + 'px';
+  vp.style.height = ((br.y - tl.y) * scale) + 'px';
+}
+
+function roundedRect(context, x, y, w, h, r) {
+  const rr = Math.min(r, w / 2, h / 2);
+  context.beginPath();
+  context.moveTo(x + rr, y);
+  context.lineTo(x + w - rr, y);
+  context.quadraticCurveTo(x + w, y, x + w, y + rr);
+  context.lineTo(x + w, y + h - rr);
+  context.quadraticCurveTo(x + w, y + h, x + w - rr, y + h);
+  context.lineTo(x + rr, y + h);
+  context.quadraticCurveTo(x, y + h, x, y + h - rr);
+  context.lineTo(x, y + rr);
+  context.quadraticCurveTo(x, y, x + rr, y);
+  context.closePath();
+}
+
+// ═══════════════════════════════════════════════════════════
+// UI
+// ═══════════════════════════════════════════════════════════
+function buildLegend() {
+  const legend = document.getElementById('legend');
+  let html = '<h3>Sector Types</h3>';
+  Object.entries(SECTOR_COLORS).forEach(([key, val]) => {
+    html += `<div class="legend-item"><div class="legend-dot" style="background:${val.color}"></div><span class="legend-label">${val.label}</span></div>`;
+  });
+  legend.innerHTML = html;
+}
+
+function buildSectionList(filter = '') {
+  const list = document.getElementById('section-list');
+  const lowerFilter = filter.toLowerCase();
+  const filtered = worldSections.filter(s =>
+    s.n.toLowerCase().includes(lowerFilter) ||
+    s.long.toLowerCase().includes(lowerFilter)
+  );
+  filtered.sort((a, b) => b.r - a.r);
+
+  list.innerHTML = filtered.map(s => {
+    const sec = SECTOR_COLORS[s.s] || { color: '#555' };
+    const isActive = selectedRoom && s.n === selectedRoom.area;
+    return `<div class="section-item ${isActive ? 'active' : ''}" data-name="${s.n}">
+      <div class="dot" style="background:${sec.color}"></div>
+      <span class="name">${s.n}</span>
+      <span class="rooms">${s.r.toLocaleString()}r</span>
+    </div>`;
+  }).join('');
+
+  list.querySelectorAll('.section-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const s = sectionMap[el.dataset.name];
+      if (s) centerOnArea(s);
+    });
+  });
+}
+
+function showSectionDetail(r) {
+  const a = areaMap[r.area] || {};
+  const sec = SECTOR_COLORS[r.sector] || { color: '#555', label: 'Unknown' };
+
+  document.getElementById('section-detail').innerHTML = `
+    <h2>${esc(r.name)}</h2>
+    <div class="detail-row">Area: <span>${a.name || r.area}</span></div>
+    <div class="detail-row">Sector: <span style="color:${sec.color}">■</span> ${sec.label}</div>
+    <div class="detail-row">vnum: <span>${r.vnum}</span></div>
+    <div class="detail-row">Grid: <span>(${r.gridX}, ${r.gridY}, z${r.gridZ})</span></div>
+    <div class="detail-row">World: <span>(${r.worldX.toFixed(0)}, ${r.worldY.toFixed(0)})</span></div>
+    ${r.exits.length ? `<div class="connections">Exits: ${r.exits.map(e => {
+      const nb = allRooms[e.v];
+      const dirLabel = (e.d >= 0 && e.d <= 5) ? DIR_NAMES[e.d] : '?';
+      return `<a data-vnum="${e.v}" title="${nb ? nb.name : '?'}">${dirLabel}</a>`;
+    }).join('')}</div>` : ''}
+  `;
+
+  document.querySelectorAll('#section-detail .connections a').forEach(a => {
+    a.addEventListener('click', () => {
+      const room = allRooms[a.dataset.vnum];
+      if (room) selectRoom(room);
+    });
+  });
+}
+
+function selectRoom(r) {
+  selectedRoom = r;
+  const mainEl = document.getElementById('main');
+  camera.x = mainEl.clientWidth / 2 - r.worldX * camera.zoom;
+  camera.y = mainEl.clientHeight / 2 - r.worldY * camera.zoom;
+
+  buildSectionList(document.getElementById('search').value);
+  showSectionDetail(r);
+  render();
+}
+
+function centerOnArea(s) {
+  const a = areaMap[s.n];
+  if (!a) return;
+  const mainEl = document.getElementById('main');
+  camera.x = mainEl.clientWidth / 2 - (a.px + a.w / 2) * camera.zoom;
+  camera.y = mainEl.clientHeight / 2 - (a.py + a.h / 2) * camera.zoom;
+  const scaleX = mainEl.clientWidth / (a.w + SPACING * 8);
+  const scaleY = mainEl.clientHeight / (a.h + SPACING * 8);
+  camera.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.min(scaleX, scaleY)));
+  minimapCacheDirty = true;
+  render();
+}
+
+function deselectAll() {
+  selectedRoom = null;
+  buildSectionList(document.getElementById('search').value);
+  document.getElementById('section-detail').innerHTML =
+    '<div style="color:#484f58; font-style:italic;">Click a room on the map</div>';
+  render();
+}
+
+// ═══════════════════════════════════════════════════════════
+// TOOLTIP
+// ═══════════════════════════════════════════════════════════
+function showTooltip(room, sx, sy) {
+  const a = areaMap[room.area] || {};
+  const sec = SECTOR_COLORS[room.sector] || { color: '#555', label: 'Unknown' };
+  const tt = document.getElementById('tooltip');
+
+  tt.innerHTML = `
+    <div class="tt-name">${esc(room.name)}</div>
+    <div class="tt-section">${esc(a.name || room.area)}</div>
+    <div class="tt-row">Sector: <span style="color:${sec.color}">■</span> ${sec.label}</div>
+    <div class="tt-row">vnum: <span>${room.vnum}</span></div>
+    <div class="tt-row">Grid: <span>(${room.gridX}, ${room.gridY}, z${room.gridZ})</span></div>
+    <div class="tt-row">Exits: <span>${room.exits.length}</span></div>
+  `;
+  tt.style.display = 'block';
+
+  const mainEl = document.getElementById('main');
+  const rect = mainEl.getBoundingClientRect();
+  let tx = sx + 12;
+  let ty = sy - 8;
+  if (tx + 280 > rect.width) tx = sx - 290;
+  if (ty + 120 > rect.height) ty = rect.height - 130;
+  if (ty < 0) ty = 8;
+  tt.style.left = tx + 'px';
+  tt.style.top = ty + 'px';
+}
+
+function hideTooltip() {
+  document.getElementById('tooltip').style.display = 'none';
+}
+
+// ═══════════════════════════════════════════════════════════
+// STATS
+// ═══════════════════════════════════════════════════════════
+function updateStats() {
+  document.getElementById('stat-sections').textContent = worldSections.length;
+  document.getElementById('stat-rooms').textContent = roomList.length.toLocaleString();
+  document.getElementById('stat-zoom').textContent = camera.zoom.toFixed(2) + 'x';
+}
+
+// ═══════════════════════════════════════════════════════════
+// INPUT
+// ═══════════════════════════════════════════════════════════
+let isDragging = false;
+let dragStart = { x: 0, y: 0 };
+let camStart = { x: 0, y: 0 };
+let dragMoved = false;
+
+canvas.addEventListener('mousedown', e => {
+  if (e.button === 0) {
+    isDragging = true;
+    dragStart = { x: e.clientX, y: e.clientY };
+    camStart = { x: camera.x, y: camera.y };
+    dragMoved = false;
+    canvas.style.cursor = 'grabbing';
+  }
+});
+
+window.addEventListener('mousemove', e => {
+  const mainEl = document.getElementById('main');
+  const rect = mainEl.getBoundingClientRect();
+  const sx = e.clientX - rect.left;
+  const sy = e.clientY - rect.top;
+
+  if (isDragging) {
+    const dx = e.clientX - dragStart.x;
+    const dy = e.clientY - dragStart.y;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragMoved = true;
+    camera.x = camStart.x + dx;
+    camera.y = camStart.y + dy;
+    requestRender();
+    return;
+  }
+
+  // Hit-test for room hover
+  const w = screenToWorld(sx, sy);
+  let best = null, bestDist = (SPACING / 2) * (SPACING / 2);
+  for (const r of roomList) {
+    const dx = r.worldX - w.x, dy = r.worldY - w.y;
+    const d2 = dx * dx + dy * dy;
+    if (d2 < bestDist) { bestDist = d2; best = r; }
+  }
+
+  if (best !== hoveredRoom) {
+    hoveredRoom = best;
+    canvas.style.cursor = best ? 'pointer' : 'grab';
+    requestRender();
+  }
+
+  if (best) {
+    showTooltip(best, sx, sy);
+  } else {
+    hideTooltip();
+  }
+});
+
+window.addEventListener('mouseup', e => {
+  if (isDragging) {
+    if (!dragMoved) {
+      const mainEl = document.getElementById('main');
+      const rect = mainEl.getBoundingClientRect();
+      const w = screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+      let best = null, bestDist = (SPACING / 2) * (SPACING / 2);
+      for (const r of roomList) {
+        const dx = r.worldX - w.x, dy = r.worldY - w.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < bestDist) { bestDist = d2; best = r; }
+      }
+      if (best) {
+        selectRoom(best);
+      } else {
+        deselectAll();
+      }
+    }
+    isDragging = false;
+    canvas.style.cursor = hoveredRoom ? 'pointer' : 'grab';
+  }
+});
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  const mainEl = document.getElementById('main');
+  const rect = mainEl.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  const worldBefore = screenToWorld(mx, my);
+  const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+  camera.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, camera.zoom * factor));
+  const worldAfter = screenToWorld(mx, my);
+
+  camera.x += (worldAfter.x - worldBefore.x) * camera.zoom;
+  camera.y += (worldAfter.y - worldBefore.y) * camera.zoom;
+  minimapCacheDirty = true;
+  requestRender();
+}, { passive: false });
+
+// Touch
+let lastTouchDist = 0;
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  if (e.touches.length === 1) {
+    isDragging = true;
+    dragStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    camStart = { x: camera.x, y: camera.y };
+    dragMoved = false;
+  } else if (e.touches.length === 2) {
+    isDragging = false;
+    lastTouchDist = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY
+    );
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (e.touches.length === 1 && isDragging) {
+    camera.x = camStart.x + (e.touches[0].clientX - dragStart.x);
+    camera.y = camStart.y + (e.touches[0].clientY - dragStart.y);
+    minimapCacheDirty = true;
+    requestRender();
+  } else if (e.touches.length === 2) {
+    const dist = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY
+    );
+    const factor = dist / lastTouchDist;
+    const rect = canvas.getBoundingClientRect();
+    const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
+    const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top;
+
+    const worldBefore = screenToWorld(cx, cy);
+    camera.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, camera.zoom * factor));
+    const worldAfter = screenToWorld(cx, cy);
+    camera.x += (worldAfter.x - worldBefore.x) * camera.zoom;
+    camera.y += (worldAfter.y - worldBefore.y) * camera.zoom;
+    lastTouchDist = dist;
+    minimapCacheDirty = true;
+    requestRender();
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', e => {
+  if (e.touches.length === 0 && isDragging) isDragging = false;
+});
+
+// Zoom buttons
+document.getElementById('zoom-in').addEventListener('click', () => {
+  const mainEl = document.getElementById('main');
+  const cx = mainEl.clientWidth / 2;
+  const cy = mainEl.clientHeight / 2;
+  const worldBefore = screenToWorld(cx, cy);
+  camera.zoom = Math.min(MAX_ZOOM, camera.zoom * 1.5);
+  const worldAfter = screenToWorld(cx, cy);
+  camera.x += (worldAfter.x - worldBefore.x) * camera.zoom;
+  camera.y += (worldAfter.y - worldBefore.y) * camera.zoom;
+  minimapCacheDirty = true;
+  requestRender();
+});
+
+document.getElementById('zoom-out').addEventListener('click', () => {
+  const mainEl = document.getElementById('main');
+  const cx = mainEl.clientWidth / 2;
+  const cy = mainEl.clientHeight / 2;
+  const worldBefore = screenToWorld(cx, cy);
+  camera.zoom = Math.max(MIN_ZOOM, camera.zoom / 1.5);
+  const worldAfter = screenToWorld(cx, cy);
+  camera.x += (worldAfter.x - worldBefore.x) * camera.zoom;
+  camera.y += (worldAfter.y - worldBefore.y) * camera.zoom;
+  minimapCacheDirty = true;
+  requestRender();
+});
+
+document.getElementById('zoom-reset').addEventListener('click', () => {
+  initCamera();
+  minimapCacheDirty = true;
+  requestRender();
+});
+
+// Search
+document.getElementById('search').addEventListener('input', e => {
+  buildSectionList(e.target.value);
+});
+
+// Resize
+window.addEventListener('resize', () => { resizeCanvas(); render(); });
+
+// Utility
+function hexToRgba(hex, alpha) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Init
+resizeCanvas();
+loadWorld();
+</script>
+</body>
+</html>

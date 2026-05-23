@@ -1,8 +1,12 @@
+@import url('https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@400;700&display=swap');
+
 .fr-shellbar {
   width: 100%;
   position: relative;
   border-bottom: 1px solid color-mix(in srgb, var(--panel-border, #3d3452) 70%, transparent);
   background: color-mix(in srgb, var(--bg, #12101a) 92%, transparent);
+  font-size: 13px;
+  font-family: 'Azeret Mono', Consolas, 'Courier New', monospace;
 }
 
 .fr-shellbar-inner {
@@ -26,14 +30,14 @@
 
 .fr-theme-addr {
   color: var(--muted, #9e95b4);
-  font-size: 14px;
+  font-size: 13px;
   letter-spacing: 0.06em;
   white-space: nowrap;
 }
 
 .fr-theme-sep {
   color: color-mix(in srgb, var(--muted, #9e95b4) 45%, var(--bg, #12101a));
-  font-size: 14px;
+  font-size: 13px;
   user-select: none;
   white-space: nowrap;
   display: inline-block;
@@ -48,7 +52,7 @@
   line-height: inherit;
   text-decoration: none;
   color: var(--muted, #9e95b4);
-  font-size: 14px;
+  font-size: 13px;
   letter-spacing: 0.08em;
   text-transform: lowercase;
   border-bottom: 1px solid transparent;
@@ -134,13 +138,13 @@
 
 .fr-theme-label {
   color: var(--muted, #9e95b4);
-  font-size: 14px;
+  font-size: 13px;
   letter-spacing: 0.08em;
   text-transform: lowercase;
 }
 
 #site-theme-select {
-  font-size: 14px;
+  font-size: 13px;
   padding: 2px 6px;
   min-height: 22px;
   border-radius: 5px;

@@ -3,6 +3,7 @@
 
 const net = require('net');
 const tls = require('tls');
+const zlib = require('zlib');
 const { WebSocketServer } = require('ws');
 
 const PORT = parseInt(process.env.PLAY_WS_PORT || '9001', 10);
@@ -11,6 +12,7 @@ const PROXY_PROTOCOL = String(process.env.PLAY_PROXY_PROTOCOL || '').trim().toLo
 const FORCED_TARGET_HOST = String(process.env.PLAY_TARGET_HOST || '').trim();
 const FORCED_TARGET_PORT = clampInt(process.env.PLAY_TARGET_PORT, 1, 65535, 0);
 const FORCED_TARGET_TLS = parseBool(process.env.PLAY_TARGET_TLS, false);
+const ENABLE_MCCP2 = parseBool(process.env.PLAY_ENABLE_MCCP2, false);
 const HOST_ALLOWLIST = (process.env.PLAY_ALLOW_HOSTS || '')
   .split(',')
   .map((h) => h.trim().toLowerCase())
@@ -24,6 +26,8 @@ const WILL = 251;
 const SB = 250;
 const SE = 240;
 const OPT_NAWS = 31;
+const OPT_MCCP2 = 86;
+const OPT_GMCP = 201;
 const PROXY_V2_SIGNATURE = Buffer.from([
   0x0d, 0x0a, 0x0d, 0x0a,
   0x00, 0x0d, 0x0a, 0x51,
@@ -53,6 +57,14 @@ wss.on('connection', (ws, req) => {
     client: getClientInfo(req),
     cols: 120,
     rows: 40,
+    telnet: {
+      pending: Buffer.alloc(0),
+      mccp2Active: false,
+      inflater: null,
+      mccpFailed: false,
+      gmcpOffered: false,
+      mccpOffered: false,
+    },
   };
 
   /* ── WebSocket protocol-level heartbeat ────────────────────────────────
@@ -152,14 +164,24 @@ function openMudConnection(ws, state, msg) {
   sock.on('connect', () => {
     sendProxyHeader(sock, state.client);
     ws.send(json({ type: 'status', message: `Connected${useTls ? ' (TLS)' : ''}.` }));
+    // Proactively request protocol features so lobby can mark GMCP/MCCP2 immediately.
+    sendIac(sock, DO, OPT_GMCP);
+    if (ENABLE_MCCP2) sendIac(sock, DO, OPT_MCCP2);
+    // Prime lobby TelnetDecoder decode path even before user types a command.
+    sendIac(sock, 241); // IAC NOP
+    sendIac(sock, WILL, OPT_NAWS);
     sendNaws(sock, state.cols, state.rows);
+
+    // Retry shortly after connect to avoid first-command race when upstream delays negotiation.
+    setTimeout(() => {
+      if (state.socket !== sock || sock.destroyed) return;
+      sendIac(sock, DO, OPT_GMCP);
+      if (ENABLE_MCCP2) sendIac(sock, DO, OPT_MCCP2);
+    }, 250);
   });
 
   sock.on('data', (buf) => {
-    const clean = stripAndNegotiateTelnet(buf, sock);
-    if (clean.length > 0) {
-      ws.send(json({ type: 'data', data: clean.toString('utf8') }));
-    }
+    processSocketData(ws, state, buf);
   });
 
   sock.on('error', (err) => {
@@ -213,6 +235,196 @@ function stripAndNegotiateTelnet(buf, socket) {
   return Buffer.from(out);
 }
 
+function processSocketData(ws, state, buf) {
+  const telnet = state.telnet;
+  if (telnet.mccp2Active) {
+    feedMccp2(ws, state, buf);
+    return;
+  }
+  processPlainTelnet(ws, state, buf, true);
+}
+
+function processPlainTelnet(ws, state, buf, allowMccpStart) {
+  const socket = state.socket;
+  const telnet = state.telnet;
+  if (!socket) return;
+
+  const src = telnet.pending.length > 0 ? Buffer.concat([telnet.pending, buf]) : buf;
+  const out = [];
+  let i = 0;
+
+  while (i < src.length) {
+    const b = src[i];
+    if (b !== IAC) {
+      out.push(b);
+      i += 1;
+      continue;
+    }
+
+    if (i + 1 >= src.length) break;
+    const cmd = src[i + 1];
+
+    if (cmd === IAC) {
+      out.push(IAC);
+      i += 2;
+      continue;
+    }
+
+    if (cmd === DO || cmd === DONT || cmd === WILL || cmd === WONT) {
+      if (i + 2 >= src.length) break;
+      const opt = src[i + 2];
+      if (cmd === WILL && opt === OPT_GMCP && !telnet.gmcpOffered) {
+        telnet.gmcpOffered = true;
+        ws.send(json({ type: 'status', message: 'GMCP negotiation detected (WILL 201).' }));
+      }
+      if (cmd === WILL && opt === OPT_MCCP2 && !telnet.mccpOffered) {
+        telnet.mccpOffered = true;
+        ws.send(json({ type: 'status', message: 'MCCP2 negotiation detected (WILL 86).' }));
+      }
+      negotiate(socket, cmd, opt);
+      i += 3;
+      continue;
+    }
+
+    if (cmd === SB) {
+      const sb = parseSubnegotiation(src, i + 2);
+      if (!sb) break;
+      handleSubnegotiation(ws, state, sb.option, sb.payload, allowMccpStart);
+      i = sb.nextIndex;
+
+      if (telnet.mccp2Active) {
+        if (out.length > 0) {
+          ws.send(json({ type: 'data', data: Buffer.from(out).toString('utf8') }));
+        }
+        telnet.pending = Buffer.alloc(0);
+        if (i < src.length) {
+          feedMccp2(ws, state, src.subarray(i));
+        }
+        return;
+      }
+
+      continue;
+    }
+
+    // Unknown 2-byte IAC command; skip it.
+    i += 2;
+  }
+
+  telnet.pending = (i < src.length) ? src.subarray(i) : Buffer.alloc(0);
+  if (out.length > 0) {
+    ws.send(json({ type: 'data', data: Buffer.from(out).toString('utf8') }));
+  }
+}
+
+function parseSubnegotiation(buf, start) {
+  if (start >= buf.length) return null;
+  const option = buf[start];
+  const payload = [];
+  let i = start + 1;
+
+  while (i < buf.length) {
+    const b = buf[i];
+    if (b !== IAC) {
+      payload.push(b);
+      i += 1;
+      continue;
+    }
+
+    if (i + 1 >= buf.length) return null;
+    const next = buf[i + 1];
+
+    if (next === IAC) {
+      payload.push(IAC);
+      i += 2;
+      continue;
+    }
+
+    if (next === SE) {
+      return {
+        option,
+        payload: Buffer.from(payload),
+        nextIndex: i + 2,
+      };
+    }
+
+    // Unexpected command inside subnegotiation; skip command byte pair.
+    i += 2;
+  }
+
+  return null;
+}
+
+function handleSubnegotiation(ws, state, option, payload, allowMccpStart) {
+  if (option === OPT_GMCP) {
+    forwardGmcp(ws, payload);
+    return;
+  }
+
+  if (option === OPT_MCCP2 && allowMccpStart) {
+    if (!ENABLE_MCCP2) return;
+    enableMccp2(ws, state);
+  }
+}
+
+function forwardGmcp(ws, payload) {
+  if (!payload || payload.length === 0) return;
+  const raw = payload.toString('utf8');
+  if (!raw) return;
+
+  const split = raw.indexOf(' ');
+  const pkg = split >= 0 ? raw.slice(0, split).trim() : raw.trim();
+  const jsonPart = split >= 0 ? raw.slice(split + 1).trim() : '';
+  if (!pkg) return;
+
+  let data = {};
+  if (jsonPart) {
+    try {
+      data = JSON.parse(jsonPart);
+    } catch {
+      data = { raw: jsonPart };
+    }
+  }
+
+  ws.send(json({ type: 'gmcp', package: pkg, data }));
+}
+
+function enableMccp2(ws, state) {
+  const telnet = state.telnet;
+  if (telnet.mccp2Active || telnet.mccpFailed) return;
+
+  const inflater = zlib.createInflate();
+  telnet.inflater = inflater;
+  telnet.mccp2Active = true;
+
+  inflater.on('data', (chunk) => {
+    processPlainTelnet(ws, state, chunk, false);
+  });
+
+  inflater.on('error', () => {
+    telnet.mccpFailed = true;
+    telnet.mccp2Active = false;
+    telnet.inflater = null;
+    ws.send(json({ type: 'status', message: 'MCCP2 decode failed; continuing without compression.' }));
+  });
+}
+
+function feedMccp2(ws, state, buf) {
+  const telnet = state.telnet;
+  if (!telnet.inflater || !telnet.mccp2Active) {
+    processPlainTelnet(ws, state, buf, false);
+    return;
+  }
+
+  try {
+    telnet.inflater.write(buf);
+  } catch {
+    telnet.mccpFailed = true;
+    telnet.mccp2Active = false;
+    telnet.inflater = null;
+    ws.send(json({ type: 'status', message: 'MCCP2 stream error; continuing without compression.' }));
+  }
+}
+
 function negotiate(socket, cmd, opt) {
   if (cmd === DO) {
     if (opt === OPT_NAWS) sendIac(socket, WILL, opt);
@@ -221,9 +433,14 @@ function negotiate(socket, cmd, opt) {
   }
 
   if (cmd === WILL) {
-    // Permit only ECHO(1) and SGA(3), reject others.
-    if (opt === 1 || opt === 3) sendIac(socket, DO, opt);
-    else sendIac(socket, DONT, opt);
+    // Accept ECHO(1), SGA(3), GMCP(201), and MCCP2(86); reject others.
+    if (opt === OPT_MCCP2 && !ENABLE_MCCP2) {
+      sendIac(socket, DONT, opt);
+    } else if (opt === 1 || opt === 3 || opt === OPT_GMCP || opt === OPT_MCCP2) {
+      sendIac(socket, DO, opt);
+    } else {
+      sendIac(socket, DONT, opt);
+    }
     return;
   }
 
@@ -250,6 +467,10 @@ function sendNaws(socket, cols, rows) {
 }
 
 function sendIac(socket, command, option) {
+  if (option === undefined || option === null) {
+    socket.write(Buffer.from([IAC, command]));
+    return;
+  }
   socket.write(Buffer.from([IAC, command, option]));
 }
 
@@ -267,6 +488,18 @@ function sendProxyHeader(socket, client) {
 }
 
 function closeMud(state, ws, status) {
+  if (state.telnet && state.telnet.inflater) {
+    try { state.telnet.inflater.end(); } catch {}
+  }
+  state.telnet = {
+    pending: Buffer.alloc(0),
+    mccp2Active: false,
+    inflater: null,
+    mccpFailed: false,
+    gmcpOffered: false,
+    mccpOffered: false,
+  };
+
   if (state.socket) {
     try { state.socket.destroy(); } catch {}
     state.socket = null;
@@ -537,5 +770,6 @@ function json(obj) {
 console.log(
   `FREIGN play bridge listening on ws://0.0.0.0:${PORT}${PATH}`
   + `${shouldSendProxyV2() ? ' (PROXY v2 enabled)' : ''}`
+  + `${ENABLE_MCCP2 ? ' (MCCP2 enabled)' : ' (MCCP2 disabled)'}`
   + `${isForcedTargetEnabled() ? ` (target locked to ${FORCED_TARGET_HOST}:${FORCED_TARGET_PORT || '?'}${FORCED_TARGET_TLS ? ' TLS' : ''})` : ''}`
 );

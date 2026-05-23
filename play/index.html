@@ -3,114 +3,511 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FREIGN Web MUD Client</title>
-  <link rel="stylesheet" href="../site-shell.css?v=2" />
-  <link rel="stylesheet" href="styles.css?v=17" />
+  <title>FREIGN Play</title>
+  <!-- Google Fonts: open-source monospace collection -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@400;700&family=Courier+Prime:wght@400;700&family=Fira+Code:wght@400;700&family=IBM+Plex+Mono:wght@400;700&family=Inconsolata:wght@400;700&family=JetBrains+Mono:wght@400;700&family=Noto+Sans+Mono:wght@400;700&family=PT+Mono&family=Roboto+Mono:wght@400;700&family=Share+Tech+Mono&family=Source+Code+Pro:wght@400;700&family=Space+Mono:wght@400;700&display=swap" />
+  <link rel="stylesheet" href="../site-shell.css?v=3" />
+  <link rel="stylesheet" href="style.css?v=3" />
 </head>
 <body data-theme="amethyst">
   <div id="fr-shellbar-mount" data-active-nav="play"></div>
 
-  <div id="app">
-    <main id="terminal-shell">
-      <header id="terminal-header">
-        <div class="brand">FREIGN PLAY</div>
-        <div id="connection-state" class="state-offline">Offline</div>
+  <!--
+    Layout: [left-rail] [center-terminal] [right-rail]
+    Left rail  = collapsible panels (panels whose side = left)
+    Center     = terminal output, vitals bar, command input
+    Right rail = collapsible panels (side = right) + icon strip + settings drawer
+    Default: map/channels/party on left; all can be moved via Config
+  -->
+  <div id="workspace" data-layout="rounded">
+
+    <!-- LEFT PANEL RAIL -->
+    <div id="left-rail">
+      <nav id="left-nav" aria-label="Side panels">
+        <button class="panel-nav-btn" data-panel="map"      type="button" title="Map">
+          <span class="pnav-icon" aria-hidden="true">&#8862;</span>
+          <span class="pnav-label">Map</span>
+        </button>
+        <button class="panel-nav-btn" data-panel="channels" type="button" title="Channels">
+          <span class="pnav-icon" aria-hidden="true">&#8779;</span>
+          <span class="pnav-label">Channels</span>
+        </button>
+        <button class="panel-nav-btn" data-panel="party"    type="button" title="Party">
+          <span class="pnav-icon" aria-hidden="true">&#8277;</span>
+          <span class="pnav-label">Party</span>
+        </button>
+        <button class="panel-nav-btn" data-panel="status"   type="button" title="Status">
+          <span class="pnav-icon" aria-hidden="true">&#9673;</span>
+          <span class="pnav-label">Status</span>
+        </button>
+        <button class="panel-nav-btn" data-panel="targets" type="button" title="Targets">
+          <span class="pnav-icon" aria-hidden="true">&#9678;</span>
+          <span class="pnav-label">Targets</span>
+        </button>
+        <button class="panel-nav-btn" data-panel="inventory" type="button" title="Inventory">
+          <span class="pnav-icon" aria-hidden="true">&#9636;</span>
+          <span class="pnav-label">Inventory</span>
+        </button>
+        <button class="panel-nav-btn" data-panel="equipment" type="button" title="Equipment">
+          <span class="pnav-icon" aria-hidden="true">&#9876;</span>
+          <span class="pnav-label">Equipment</span>
+        </button>
+        <!-- Custom GMCP panel buttons injected by JS -->
+        <div id="left-panel-btns"></div>
+      </nav>
+
+      <div id="left-panels">
+
+        <!-- Map panel (placeholder until GMCP Room.Info) -->
+        <div class="panel active" id="panel-map">
+          <div class="panel-head">
+            <span>Map</span>
+            <span class="pkg-badge" id="pkg-map">&#128230; Room.Info</span>
+            <button class="panel-close" data-panel="map" type="button" title="Close">&#x2715;</button>
+          </div>
+          <div class="panel-body map-placeholder" id="map-panel-body">
+            <div class="ph-icon" aria-hidden="true">&#8862;</div>
+            <div class="ph-title">Mapper</div>
+            <div class="ph-sub">Awaiting GMCP<br>room data</div>
+          </div>
+        </div>
+
+        <!-- Channels panel -->
+        <div class="panel" id="panel-channels">
+          <div class="panel-head">
+            <span>Channels</span>
+            <span class="pkg-badge" id="pkg-channels">&#128230; Comm.Channel.Text</span>
+            <button class="panel-close" data-panel="channels" type="button" title="Close">&#x2715;</button>
+          </div>
+          <div class="panel-body channels-pane" id="channels-pane" aria-live="polite">
+            <div class="channels-tabs" id="channels-tabs" role="tablist" aria-label="Channel Filters">
+              <button type="button" class="channels-tab active" data-channel-tab="all" role="tab" aria-selected="true">All</button>
+              <button type="button" class="channels-tab" data-channel-tab="world" role="tab" aria-selected="false">World</button>
+              <button type="button" class="channels-tab" data-channel-tab="comms" role="tab" aria-selected="false">Comms</button>
+              <button type="button" class="channels-tab" data-channel-tab="system" role="tab" aria-selected="false">System</button>
+            </div>
+            <div class="ph-centered" id="channels-log">
+              <div class="ph-icon" aria-hidden="true">&#8779;</div>
+              <div class="ph-title">Channels</div>
+              <div class="ph-sub">Awaiting GMCP<br>channel data</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Party panel -->
+        <div class="panel" id="panel-party">
+          <div class="panel-head">
+            <span>Party</span>
+            <span class="pkg-badge" id="pkg-party">&#128230; Group.Info</span>
+            <button class="panel-close" data-panel="party" type="button" title="Close">&#x2715;</button>
+          </div>
+          <div class="panel-body ph-centered" id="party-list">
+            <div class="ph-icon" aria-hidden="true">&#8277;</div>
+            <div class="ph-title">Party</div>
+            <div class="ph-sub">Awaiting GMCP<br>group data</div>
+          </div>
+        </div>
+
+        <!-- Status panel -->
+        <div class="panel" id="panel-status">
+          <div class="panel-head">
+            <span>Status</span>
+            <span class="pkg-badge" id="pkg-status">&#128230; Char.Status</span>
+            <button class="panel-close" data-panel="status" type="button" title="Close">&#x2715;</button>
+          </div>
+          <div class="panel-body ph-centered" id="status-panel-body">
+            <div class="ph-icon" aria-hidden="true">&#9673;</div>
+            <div class="ph-title">Status</div>
+            <div class="ph-sub">Awaiting GMCP<br>character data</div>
+          </div>
+        </div>
+
+        <!-- Targets panel -->
+        <div class="panel" id="panel-targets">
+          <div class="panel-head">
+            <span>Targets</span>
+            <span class="pkg-badge" id="pkg-targets">&#128230; Char.Combat</span>
+            <button class="panel-close" data-panel="targets" type="button" title="Close">&#x2715;</button>
+          </div>
+          <div class="panel-body ph-centered" id="targets-panel-body">
+            <div class="ph-icon" aria-hidden="true">&#9678;</div>
+            <div class="ph-title">Targets</div>
+            <div class="ph-sub">Awaiting GMCP<br>combat data</div>
+          </div>
+        </div>
+
+        <!-- Inventory panel -->
+        <div class="panel" id="panel-inventory">
+          <div class="panel-head">
+            <span>Inventory</span>
+            <span class="pkg-badge" id="pkg-inventory">&#128230; Char.Inventory</span>
+            <button class="panel-close" data-panel="inventory" type="button" title="Close">&#x2715;</button>
+          </div>
+          <div class="panel-body ph-centered" id="inventory-panel-body">
+            <div class="ph-icon" aria-hidden="true">&#9636;</div>
+            <div class="ph-title">Inventory</div>
+            <div class="ph-sub">Awaiting GMCP<br>inventory snapshot</div>
+          </div>
+        </div>
+
+        <!-- Equipment panel -->
+        <div class="panel" id="panel-equipment">
+          <div class="panel-head">
+            <span>Equipment</span>
+            <span class="pkg-badge" id="pkg-equipment">&#128230; Char.Equipment</span>
+            <button class="panel-close" data-panel="equipment" type="button" title="Close">&#x2715;</button>
+          </div>
+          <div class="panel-body ph-centered" id="equipment-panel-body">
+            <div class="ph-icon" aria-hidden="true">&#9876;</div>
+            <div class="ph-title">Equipment</div>
+            <div class="ph-sub">Awaiting GMCP<br>equipment snapshot</div>
+          </div>
+        </div>
+
+        <!-- Left-side custom GMCP panels injected by JS -->
+        <div id="left-gmcp-panels"></div>
+
+      </div><!-- /left-panels -->
+      <div class="resize-handle" id="resize-left" aria-hidden="true"></div>
+    </div><!-- /left-rail -->
+
+    <!-- CENTER TERMINAL -->
+    <div id="center">
+
+      <!-- Top bar: brand + connection status/buttons -->
+      <header id="topbar">
+        <div id="topbar-left">
+          <span class="brand-text">FREIGN</span>
+          <span class="brand-sep" aria-hidden="true">//</span>
+          <button id="btn-connect-public" type="button" class="hdr-btn mini">Connect PUBLIC</button>
+          <button id="btn-connect-test" type="button" class="hdr-btn mini">Connect TEST</button>
+        </div>
+        <div id="topbar-right">
+          <span id="conn-status" class="offline" aria-live="polite">&#9679; Offline</span>
+          <button id="btn-disconnect" type="button" class="hdr-btn danger">Disconnect</button>
+        </div>
       </header>
-      <section id="terminal" aria-live="polite"></section>
-      <form id="input-form" autocomplete="off">
+
+      <!-- Game output terminal -->
+      <div id="terminal" role="log" aria-live="polite" aria-label="Game output"></div>
+
+      <!-- Macro quick-access bar (hidden when no macros defined) -->
+      <div id="macro-bar" aria-label="Macro shortcuts"></div>
+
+      <!-- Vitals bar: floats above the command input; hidden until Char.Vitals GMCP data arrives -->
+      <div id="vitals-strip" aria-label="Character Vitals" hidden>
+        <div class="vbar-vital" title="Hit Points">
+          <div class="condition-badge hp">
+            <span class="status-text" id="v-hp-val">HP &#8212;</span>
+            <div class="status-bar-segment" id="v-hp-gauge">
+              <div class="status-bar-segments-grid">
+                <div class="bar-segment-block"><div class="status-bar-fill hp"></div></div>
+                <div class="bar-segment-block"><div class="status-bar-fill hp"></div></div>
+                <div class="bar-segment-block"><div class="status-bar-fill hp"></div></div>
+                <div class="bar-segment-block"><div class="status-bar-fill hp"></div></div>
+                <div class="bar-segment-block"><div class="status-bar-fill hp"></div></div>
+              </div>
+              <span class="wimpy-tick" id="v-wimpy" title="Wimpy threshold"></span>
+            </div>
+          </div>
+        </div>
+        <div class="vbar-sep" aria-hidden="true"></div>
+        <div class="vbar-vital" title="Mana Points">
+          <div class="condition-badge mana">
+            <span class="status-text" id="v-mp-val">MP &#8212;</span>
+            <div class="status-bar-segment" id="v-mp-gauge">
+              <div class="status-bar-segments-grid">
+                <div class="bar-segment-block"><div class="status-bar-fill mana"></div></div>
+                <div class="bar-segment-block"><div class="status-bar-fill mana"></div></div>
+                <div class="bar-segment-block"><div class="status-bar-fill mana"></div></div>
+                <div class="bar-segment-block"><div class="status-bar-fill mana"></div></div>
+                <div class="bar-segment-block"><div class="status-bar-fill mana"></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="vbar-sep" aria-hidden="true"></div>
+        <div class="vbar-vital" title="Movement">
+          <div class="condition-badge move">
+            <span class="status-text" id="v-mv-val">MV &#8212;</span>
+            <div class="status-bar-segment" id="v-mv-gauge">
+              <div class="status-bar-segments-grid">
+                <div class="bar-segment-block"><div class="status-bar-fill move"></div></div>
+                <div class="bar-segment-block"><div class="status-bar-fill move"></div></div>
+                <div class="bar-segment-block"><div class="status-bar-fill move"></div></div>
+                <div class="bar-segment-block"><div class="status-bar-fill move"></div></div>
+                <div class="bar-segment-block"><div class="status-bar-fill move"></div></div>
+              </div>
+            </div>
+          </div>
+          <span class="vbar-position" id="v-position">Standing</span>
+        </div>
+      </div>
+
+      <!-- Command input -->
+      <form id="cmd-form" autocomplete="off" aria-label="Command input">
         <label for="cmd-input" class="sr-only">Command</label>
-        <input id="cmd-input" type="text" placeholder="Type command and press Enter" />
-        <button type="submit">Send</button>
+        <div id="cmd-prompt" aria-hidden="true">&#8250;</div>
+        <input id="cmd-input" type="text" placeholder="Enter command&#x2026;"
+               spellcheck="false" autocomplete="off" autocorrect="off" />
+        <button id="btn-repeat" type="button" title="Repeat last command">&#x21BA;</button>
+        <button id="cmd-send"   type="submit">Send</button>
       </form>
-      <section id="macro-bar" aria-label="Macro Bar"></section>
-    </main>
 
-    <aside id="sidebar">
-      <section class="panel">
-        <h2>Connection</h2>
-        <div class="grid two" hidden>
-          <label hidden>Saved MUD</label>
-          <select id="mud-select" hidden></select>
+    </div><!-- /center -->
 
-          <label hidden>Name</label>
-          <input id="mud-name" type="text" hidden readonly />
+    <!-- RIGHT PANEL RAIL (mirrors left-rail: panel nav + panels, no settings) -->
+    <div id="right-panels-rail">
 
-          <label hidden>Host</label>
-          <input id="mud-host" type="text" hidden readonly />
+      <!-- Drag handle: left edge of rail — drag left to widen panels -->
+      <div class="resize-handle" id="resize-right" aria-hidden="true"></div>
 
-          <label hidden>Port</label>
-          <input id="mud-port" type="number" min="1" max="65535" hidden readonly />
+      <!-- Collapsible right-side panel area -->
+      <div id="right-panels">
+        <!-- Right-side custom GMCP panels injected by JS -->
+        <div id="right-gmcp-panels"></div>
+      </div>
 
-          <label hidden>TLS</label>
-          <input id="mud-tls" type="checkbox" hidden disabled />
+      <!-- Panel icon strip: right-side panels only (mirrors left-nav) -->
+      <nav id="right-panels-nav" aria-label="Right panel tabs">
+        <!-- Panel toggle buttons injected by JS -->
+        <div id="right-panel-btns"></div>
+      </nav>
+
+    </div><!-- /right-panels-rail -->
+
+    <!-- RIGHT SETTINGS RAIL -->
+    <div id="right-settings-rail">
+
+      <!-- Settings icon strip -->
+      <nav id="right-nav" aria-label="Settings">
+        <button class="rnav-btn" data-drawer="connect"  type="button" title="Connection">
+          <span class="rnav-icon" aria-hidden="true">&#9889;</span>
+          <span class="rnav-label">Connect</span>
+        </button>
+        <button class="rnav-btn" data-drawer="config"   type="button" title="Config">
+          <span class="rnav-icon" aria-hidden="true">&#9881;</span>
+          <span class="rnav-label">Config</span>
+        </button>
+        <button class="rnav-btn" data-drawer="aliases"  type="button" title="Aliases">
+          <span class="rnav-icon" aria-hidden="true">&#8652;</span>
+          <span class="rnav-label">Aliases</span>
+        </button>
+        <button class="rnav-btn" data-drawer="triggers" type="button" title="Triggers">
+          <span class="rnav-icon" aria-hidden="true">&#9678;</span>
+          <span class="rnav-label">Triggers</span>
+        </button>
+        <button class="rnav-btn" data-drawer="macros"   type="button" title="Macros">
+          <span class="rnav-icon" aria-hidden="true">&#8984;</span>
+          <span class="rnav-label">Macros</span>
+        </button>
+        <button class="rnav-btn" data-drawer="colors"  type="button" title="ANSI Colors">
+          <span class="rnav-icon" aria-hidden="true">&#9671;</span>
+          <span class="rnav-label">Colors</span>
+        </button>
+        <button class="rnav-btn" data-drawer="panels"  type="button" title="Panels">
+          <span class="rnav-icon" aria-hidden="true">&#9638;</span>
+          <span class="rnav-label">Panels</span>
+        </button>
+        <!-- Save Log: bottom-aligned, not a drawer -->
+        <button class="rnav-btn" id="btn-save-log" type="button" title="Save Session Log">
+          <span class="rnav-icon" aria-hidden="true">&#8595;</span>
+          <span class="rnav-label">Log</span>
+        </button>
+      </nav>
+
+      <!-- Settings drawer: slides out to the left of the icon strip -->
+      <div id="settings-drawer" aria-label="Settings" hidden>
+        <div id="drawer-header">
+          <span id="drawer-title">Settings</span>
+          <button id="drawer-close" type="button" title="Close">&#x2715;</button>
         </div>
-        <div class="row" hidden>
-          <button id="mud-add" type="button" hidden>Add/Update</button>
-          <button id="mud-remove" type="button" hidden>Remove</button>
+        <div id="drawer-body">
+
+          <!-- CONNECTION -->
+          <div class="drawer-pane" id="dpane-connect">
+            <div class="dpane-section">
+              <div class="dpane-label">Server</div>
+              <div class="stacked-btns">
+                <button id="sp-public"     type="button" class="full-btn">Connect &#x2014; Public</button>
+                <button id="sp-test"       type="button" class="full-btn">Connect &#x2014; Test</button>
+                <button id="sp-disconnect" type="button" class="full-btn danger">Disconnect</button>
+              </div>
+            </div>
+            <div class="dpane-section">
+              <div class="dpane-label">Settings File</div>
+              <div class="row-btns">
+                <button id="export-settings" type="button">Export JSON</button>
+                <button id="import-settings" type="button">Import JSON</button>
+              </div>
+              <button id="reset-settings" type="button" class="full-btn danger" style="margin-top:6px">Reset to Defaults</button>
+              <input id="import-file" type="file" accept="application/json" hidden />
+            </div>
+          </div>
+
+          <!-- CONFIGURATION -->
+          <div class="drawer-pane" id="dpane-config">
+
+            <div class="dpane-section">
+              <div class="dpane-label">Appearance</div>
+              <div class="field-row">
+                <label for="cfg-font">Font</label>
+                <select id="cfg-font">
+                  <option value="JetBrains Mono">JetBrains Mono</option>
+                  <option value="Fira Code">Fira Code</option>
+                  <option value="Source Code Pro">Source Code Pro</option>
+                  <option value="Roboto Mono">Roboto Mono</option>
+                  <option value="Inconsolata">Inconsolata</option>
+                  <option value="Space Mono">Space Mono</option>
+                  <option value="IBM Plex Mono">IBM Plex Mono</option>
+                  <option value="Noto Sans Mono">Noto Sans Mono</option>
+                  <option value="PT Mono">PT Mono</option>
+                  <option value="Share Tech Mono">Share Tech Mono</option>
+                  <option value="Azeret Mono">Azeret Mono</option>
+                  <option value="Courier Prime">Courier Prime</option>
+                </select>
+              </div>
+              <div class="field-row">
+                <label for="cfg-layout">Layout Style</label>
+                <select id="cfg-layout">
+                  <option value="block">Block (default)</option>
+                  <option value="rounded">Rounded</option>
+                </select>
+              </div>
+              <div class="field-row">
+                <label for="cfg-console-width">Console Width <span class="hint-text">(px)</span></label>
+                <input id="cfg-console-width" type="number" min="320" max="1920" step="10" style="width:80px" />
+              </div>
+            </div>
+
+            <div class="dpane-section">
+              <div class="dpane-label">Display</div>
+              <div class="field-row">
+                <label for="cfg-timestamps">Timestamps</label>
+                <input id="cfg-timestamps" type="checkbox" />
+              </div>
+              <div class="field-row">
+                <label for="cfg-ts-selectable">Timestamps selectable</label>
+                <input id="cfg-ts-selectable" type="checkbox" />
+              </div>
+              <div class="field-row">
+                <label for="cfg-wrap">Line Wrap</label>
+                <input id="cfg-wrap" type="checkbox" />
+              </div>
+              <div class="field-row">
+                <label for="cfg-particles">Atmosphere particles</label>
+                <input id="cfg-particles" type="checkbox" />
+              </div>
+              <div class="field-row">
+                <label for="cfg-wrap-width">Wrap Width <span class="hint-text">(0=off)</span></label>
+                <input id="cfg-wrap-width" type="number" min="0" max="999" step="1" style="width:70px" />
+              </div>
+            </div>
+
+            <div class="dpane-section">
+              <div class="dpane-label">Console</div>
+              <div class="field-row">
+                <label for="cfg-history-max">History <span class="hint-text">(0=no limit)</span></label>
+                <input id="cfg-history-max" type="number" min="0" step="100" style="width:80px" />
+              </div>
+              <div class="field-row">
+                <button id="cfg-clear-history" type="button" class="danger-btn">Clear history</button>
+              </div>
+            </div>
+
+            <div class="dpane-section">
+              <div class="dpane-label">Input</div>
+              <div class="field-row">
+                <label for="cfg-keep-input">Keep input after send</label>
+                <input id="cfg-keep-input" type="checkbox" />
+              </div>
+              <div class="field-row">
+                <label for="cfg-stack-sep">Stack Separator</label>
+                <input id="cfg-stack-sep" type="text" maxlength="4" placeholder=";" />
+              </div>
+            </div>
+
+          </div><!-- /dpane-config -->
+
+          <!-- ANSI COLORS -->
+          <div class="drawer-pane" id="dpane-colors">
+            <div class="dpane-section">
+              <div class="dpane-label">ANSI Colors</div>
+              <p class="hint-text">Customize the 16 terminal colors. Changes apply immediately to all output.</p>
+              <div id="ansi-palette-cfg"></div>
+            </div>
+          </div>
+
+          <!-- PANELS -->
+          <div class="drawer-pane" id="dpane-panels">
+            <div class="dpane-section">
+              <div class="dpane-label">Built-in Panels</div>
+              <p class="hint-text">Reorder with &#8593;&#8595;, assign each panel to the left or right rail.</p>
+              <div id="builtin-panel-cfg"></div>
+            </div>
+            <div class="dpane-section">
+              <div class="dpane-label">Custom GMCP Panels</div>
+              <p class="hint-text">Add panels for specific GMCP packages. Choose which side each panel appears on.</p>
+              <div id="gmcp-panel-list" class="item-list"></div>
+              <button id="add-gmcp-panel" type="button" class="add-btn">+ Add Panel</button>
+            </div>
+          </div>
+
+          <!-- ALIASES -->
+          <div class="drawer-pane" id="dpane-aliases">
+            <div class="dpane-section">
+              <div class="dpane-label">Aliases</div>
+              <p class="hint-text">Pattern is matched as a regular expression against commands you type. Matching text is replaced before sending.</p>
+              <div id="alias-list" class="item-list"></div>
+              <button id="add-alias" type="button" class="add-btn">+ Add Alias</button>
+            </div>
+          </div>
+
+          <!-- TRIGGERS -->
+          <div class="drawer-pane" id="dpane-triggers">
+            <div class="dpane-section">
+              <div class="dpane-label">Triggers</div>
+              <p class="hint-text">Pattern matched against incoming game text. Actions: highlight the line, send a command, or show a notification.</p>
+              <div id="trigger-list" class="item-list"></div>
+              <button id="add-trigger" type="button" class="add-btn">+ Add Trigger</button>
+            </div>
+          </div>
+
+          <!-- MACROS -->
+          <div class="drawer-pane" id="dpane-macros">
+            <div class="dpane-section">
+              <div class="dpane-label">Macros</div>
+              <p class="hint-text">Macros appear as quick-access buttons above the input bar.</p>
+              <div id="macro-list" class="item-list"></div>
+              <button id="add-macro" type="button" class="add-btn">+ Add Macro</button>
+            </div>
+          </div>
+
+        </div><!-- /drawer-body -->
+      </div><!-- /settings-drawer -->
+
+      <!-- Log save popup -->
+      <div id="log-save-popup" hidden>
+        <div class="log-popup-header">
+          <span>Save Session Log</span>
+          <button id="log-popup-close" type="button" title="Close">&#x2715;</button>
         </div>
-        <div class="connection-actions">
-          <button id="connect-public-btn" type="button">Connect Public</button>
-          <button id="connect-test-btn" type="button">Connect Test</button>
-          <button id="disconnect-btn" type="button">Disconnect</button>
-          <button id="connect-btn" type="button" hidden>Connect</button>
+        <div class="field-row">
+          <label for="log-popup-timestamps">Include timestamps</label>
+          <input id="log-popup-timestamps" type="checkbox" />
         </div>
-      </section>
+        <button id="log-popup-save" type="button" class="full-btn" style="margin-top:10px">Save .txt</button>
+      </div>
 
-      <section class="panel">
-        <h2>Behavior</h2>
-        <div class="grid two">
-          <label>Timestamps</label>
-          <input id="timestamps" type="checkbox" checked />
+    </div><!-- /right-settings-rail -->
 
-          <label>Wrap</label>
-          <input id="wrap-lines" type="checkbox" checked />
-
-          <label>Command Stacker</label>
-          <input id="stack-separator" type="text" maxlength="4" placeholder=";" />
-
-          <input id="bridge-url" type="hidden" />
-          <select id="theme-select" hidden aria-hidden="true"></select>
-        </div>
-      </section>
-
-      <section class="panel">
-        <h2>Aliases</h2>
-        <div class="table" id="aliases-table"></div>
-        <button id="add-alias" type="button">Add Alias</button>
-      </section>
-
-      <section class="panel">
-        <h2>Triggers</h2>
-        <div class="table" id="triggers-table"></div>
-        <button id="add-trigger" type="button">Add Trigger</button>
-      </section>
-
-      <section class="panel">
-        <h2>Macros</h2>
-        <div class="table" id="macros-table"></div>
-        <button id="add-macro" type="button">Add Macro</button>
-      </section>
-
-      <section class="panel">
-        <h2>ANSI Colors (0-15)</h2>
-        <div id="ansi-colors" class="ansi-grid"></div>
-      </section>
-
-      <section class="panel">
-        <h2>Settings</h2>
-        <div class="row">
-          <button id="export-settings" type="button">Export JSON</button>
-          <button id="import-settings" type="button">Import JSON</button>
-          <button id="reset-settings" type="button" class="danger">Reset Local Settings</button>
-          <input id="import-file" type="file" accept="application/json" hidden />
-        </div>
-      </section>
-    </aside>
-  </div>
+  </div><!-- /workspace -->
 
   <script src="../site-themes.js?v=1" defer></script>
   <script src="../site-shell.js?v=3" defer></script>
-  <script src="ansi.js?v=15" defer></script>
-  <script src="app.js?v=16" defer></script>
+  <script src="../play/ansi.js?v=15" defer></script>
+  <script src="app.js?v=3" defer></script>
 </body>
 </html>

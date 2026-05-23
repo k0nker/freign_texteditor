@@ -22,6 +22,7 @@
     var areaIndex = {};   // shortName -> {x, y, z, minX, maxX, minY, maxY, minZ, maxZ}
     var sourceData = null;
     var trueMappingEnabled = false;
+    var cubeModeEnabled    = false;
     var activeGridId = 'global';
 
     var SPACING = 14;     // world units per grid cell (matches world.json scale)
@@ -67,6 +68,16 @@
         r = Math.round(r + (255 - r) * amount);
         g = Math.round(g + (255 - g) * amount);
         b = Math.round(b + (255 - b) * amount);
+        return '#'
+            + r.toString(16).padStart(2, '0')
+            + g.toString(16).padStart(2, '0')
+            + b.toString(16).padStart(2, '0');
+    }
+
+    function darkenHex(hex, factor) {
+        var r = Math.round(parseInt(hex.slice(1, 3), 16) * factor);
+        var g = Math.round(parseInt(hex.slice(3, 5), 16) * factor);
+        var b = Math.round(parseInt(hex.slice(5, 7), 16) * factor);
         return '#'
             + r.toString(16).padStart(2, '0')
             + g.toString(16).padStart(2, '0')
@@ -266,7 +277,7 @@
                     // spread out rather than piling at origin.
                     fallX: areaPX + rj.x * SPACING,
                     fallZ: areaPZ + rj.y * SPACING,
-                    y: (rj.gz || rj.z || 0) * SPACING,
+                    y: (rj.gz != null ? rj.gz : (rj.z || 0)) * SPACING,
                     exits: rj.ex || [],
                     hasCoords: hasCoords,
                 };
@@ -379,7 +390,7 @@
                     areaShort: wa.n,
                     areaName: ad.name || wa.n,
                     x:     tx,
-                    y:     (rj.z || 0) * SPACING,       // vertical axis
+                    y:     (trueMap ? (trueMap.byVnum[rj.v] ? trueMap.byVnum[rj.v].y : (rj.gz != null ? rj.gz : (rj.z || 0)) * SPACING) : (rj.z || 0) * SPACING),
                     z:     tz,
                     sector: rj.s,
                     exits: rj.ex || [],
@@ -549,6 +560,68 @@
         };
     }
 
+    // ---- 3D Cube room drawing ----
+    // Draws a perspective-correct 3-faced cube for a single room.
+    // Faces are shaded: top = brightest, one side = medium, other side = dark.
+    // highlightStroke/Width apply an outline to the top (or bottom) face.
+    function drawRoomCube3d(rx, ry, rz, hs, fill, border, roomAlpha, highlightStroke, highlightWidth) {
+        var showTop   = eyeY >= ry;
+        var showEast  = eyeX >= rx;
+        var showSouth = eyeZ >= rz;
+
+        // Project all 8 corners. Bit pattern: bit2=x, bit1=y, bit0=z (0=min, 1=max).
+        var p000 = proj(rx-hs, ry-hs, rz-hs);
+        var p001 = proj(rx-hs, ry-hs, rz+hs);
+        var p010 = proj(rx-hs, ry+hs, rz-hs);
+        var p011 = proj(rx-hs, ry+hs, rz+hs);
+        var p100 = proj(rx+hs, ry-hs, rz-hs);
+        var p101 = proj(rx+hs, ry-hs, rz+hs);
+        var p110 = proj(rx+hs, ry+hs, rz-hs);
+        var p111 = proj(rx+hs, ry+hs, rz+hs);
+        if (!p000 || !p001 || !p010 || !p011 || !p100 || !p101 || !p110 || !p111) return;
+
+        ctx.globalAlpha = roomAlpha;
+
+        function fillFace(a, b, c, d, shade) {
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.lineTo(c.x, c.y);
+            ctx.lineTo(d.x, d.y);
+            ctx.closePath();
+            ctx.fillStyle   = darkenHex(fill, shade);
+            ctx.fill();
+            ctx.strokeStyle = hexToRgba(border, 0.55);
+            ctx.lineWidth   = 0.7;
+            ctx.stroke();
+        }
+
+        // Side faces drawn first (back-to-front doesn't matter between perpendicular
+        // faces sharing an edge), then the horizontal face last so it sits on top.
+        var xFace  = showEast  ? [p100, p110, p111, p101] : [p000, p010, p011, p001];
+        var zFace  = showSouth ? [p001, p101, p111, p011] : [p000, p100, p110, p010];
+        var yFace  = showTop   ? [p010, p110, p111, p011] : [p000, p100, p101, p001];
+
+        fillFace(zFace[0], zFace[1], zFace[2], zFace[3], 0.60); // darkest side
+        fillFace(xFace[0], xFace[1], xFace[2], xFace[3], 0.78); // medium side
+        fillFace(yFace[0], yFace[1], yFace[2], yFace[3], 1.00); // brightest face (top/bottom)
+
+        // Highlight outline on the horizontal face
+        if (highlightStroke) {
+            ctx.beginPath();
+            ctx.moveTo(yFace[0].x, yFace[0].y);
+            ctx.lineTo(yFace[1].x, yFace[1].y);
+            ctx.lineTo(yFace[2].x, yFace[2].y);
+            ctx.lineTo(yFace[3].x, yFace[3].y);
+            ctx.closePath();
+            ctx.strokeStyle = highlightStroke;
+            ctx.lineWidth   = highlightWidth;
+            ctx.stroke();
+        }
+
+        ctx.globalAlpha = 1.0;
+    }
+
     // ---- Render ----
     function render() {
         if (!canvas) return;
@@ -643,7 +716,8 @@
         }
         visRooms.sort(function (a, b) { return b.p.depth - a.p.depth; });
 
-        // Square half-size: closer = bigger, capped. Depth fog fades distant rooms.
+        // Room drawing: cubes for nearby rooms (when cube mode on), squares otherwise.
+        var CUBE_HS = SPACING * 0.42; // world-unit half-size; gives a small gap between adjacent rooms
         for (var i = 0; i < visRooms.length; i++) {
             var item = visRooms[i];
             var p = item.p, r = item.r;
@@ -653,35 +727,35 @@
             var roomAlpha = depthAlpha(p.depth, 1.0, 0.12);
             var roomStyle = sectorStyle(r.sector);
             var isOrigin = r.vnum === selectedOrigin;
-            var isDest = r.vnum === selectedDest;
-            var isPath = !!selectedPathSet[r.vnum];
-            var isHover = r.vnum === hoveredVnum;
-            ctx.globalAlpha = roomAlpha;
-            ctx.fillStyle = roomStyle.fill;
-            ctx.fillRect(p.x - sz, p.y - sz, sz*2, sz*2);
-            if (isOrigin) {
-                ctx.strokeStyle = 'rgba(232,212,120,0.98)';
-                ctx.lineWidth = sz > 4 ? 2.0 : 1.5;
-            } else if (isDest) {
-                ctx.strokeStyle = 'rgba(140,195,255,0.98)';
-                ctx.lineWidth = sz > 4 ? 2.0 : 1.5;
-            } else if (isPath) {
-                ctx.strokeStyle = 'rgba(205,175,95,0.96)';
-                ctx.lineWidth = sz > 3 ? 1.6 : 1.0;
-            } else if (isHover) {
-                ctx.strokeStyle = 'rgba(230,240,255,0.95)';
-                ctx.lineWidth = sz > 3 ? 1.5 : 1.0;
+            var isDest   = r.vnum === selectedDest;
+            var isPath   = !!selectedPathSet[r.vnum];
+            var isHover  = r.vnum === hoveredVnum;
+
+            // Highlight color for special states
+            var hlStroke = null, hlWidth = 1.5;
+            if (isOrigin)     { hlStroke = 'rgba(232,212,120,0.98)'; hlWidth = sz > 4 ? 2.0 : 1.5; }
+            else if (isDest)  { hlStroke = 'rgba(140,195,255,0.98)'; hlWidth = sz > 4 ? 2.0 : 1.5; }
+            else if (isPath)  { hlStroke = 'rgba(205,175,95,0.96)';  hlWidth = sz > 3 ? 1.6 : 1.0; }
+            else if (isHover) { hlStroke = 'rgba(230,240,255,0.95)'; hlWidth = sz > 3 ? 1.5 : 1.0; }
+
+            // Cube mode: project full 3-faced box for nearby rooms; fall back to square for tiny/distant ones
+            if (cubeModeEnabled && sz >= 3) {
+                drawRoomCube3d(r.x, r.y, r.z, CUBE_HS, roomStyle.fill, roomStyle.border, roomAlpha, hlStroke, hlWidth);
             } else {
-                ctx.strokeStyle = hexToRgba(roomStyle.border, 0.88);
-                ctx.lineWidth = sz > 4 ? 1.0 : 0.6;
+                // Original flat square
+                ctx.globalAlpha = roomAlpha;
+                ctx.fillStyle   = roomStyle.fill;
+                ctx.fillRect(p.x - sz, p.y - sz, sz*2, sz*2);
+                ctx.strokeStyle = hlStroke ? hlStroke : hexToRgba(roomStyle.border, 0.88);
+                ctx.lineWidth   = hlStroke ? hlWidth : (sz > 4 ? 1.0 : 0.6);
+                ctx.strokeRect(p.x - sz, p.y - sz, sz*2, sz*2);
+                // Corner highlight for a flat 3D feel
+                if (sz >= 3) {
+                    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+                    ctx.fillRect(p.x - sz, p.y - sz, sz, sz);
+                }
+                ctx.globalAlpha = 1.0;
             }
-            ctx.strokeRect(p.x - sz, p.y - sz, sz*2, sz*2);
-            // Bright highlight on the top-left corner for a 3D feel
-            if (sz >= 3) {
-                ctx.fillStyle = 'rgba(255,255,255,0.22)';
-                ctx.fillRect(p.x - sz, p.y - sz, sz, sz);
-            }
-            ctx.globalAlpha = 1.0;
         }
 
         // -- Draw floating area labels --
@@ -1004,6 +1078,13 @@
         },
         isTrueMappingEnabled: function () {
             return !!trueMappingEnabled;
+        },
+        setCubeMode: function (enabled) {
+            cubeModeEnabled = !!enabled;
+            render();
+        },
+        isCubeModeEnabled: function () {
+            return !!cubeModeEnabled;
         },
         resize: function (w, h) {
             if (!canvas) return;

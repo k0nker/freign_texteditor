@@ -343,8 +343,10 @@
     var toggle3d      = document.getElementById('toggle-3d');
     var modeOpts2d    = document.getElementById('mode-options-2d');
     var modeOpts3d    = document.getElementById('mode-options-3d');
+    var controlsHint  = document.getElementById('controls-hint');
     var layerModeChk  = document.getElementById('layer-mode-chk');
     var trueMapChk    = document.getElementById('true-map-chk');
+    var cubeModeChk   = document.getElementById('cube-mode-chk');
     var mode3d        = false;
     var trueMapping3d = false;
 
@@ -353,12 +355,18 @@
         Map3D.setTrueMapping(trueMapping3d);
     }
 
+    function applyCubeMode() {
+        if (!window.Map3D || typeof Map3D.setCubeMode !== 'function') return;
+        Map3D.setCubeMode(cubeModeChk ? cubeModeChk.checked : false);
+    }
+
     function setViewMode(is3d) {
         mode3d = is3d;
         if (toggle2d) toggle2d.classList.toggle('active', !is3d);
         if (toggle3d) toggle3d.classList.toggle('active',  is3d);
         if (modeOpts2d) modeOpts2d.style.display = is3d ? 'none' : 'flex';
         if (modeOpts3d) modeOpts3d.style.display = is3d ? 'flex'  : 'none';
+        if (controlsHint) controlsHint.style.display = is3d ? 'none' : '';
     }
 
     function enter3D() {
@@ -371,6 +379,7 @@
         if (_worldData) {
             Map3D.init(canvas3d, _worldData);
             apply3DTrueMappingMode();
+            applyCubeMode();
             sync3DSelectionState();
         }
     }
@@ -388,6 +397,12 @@
         trueMapChk.addEventListener('change', function () {
             trueMapping3d = trueMapChk.checked;
             if (mode3d) apply3DTrueMappingMode();
+        });
+    }
+
+    if (cubeModeChk) {
+        cubeModeChk.addEventListener('change', function () {
+            if (mode3d) applyCubeMode();
         });
     }
 
@@ -571,9 +586,14 @@
                 var wx = areaPX + rj.x * SPACING + SPACING / 2;
                 var wy = areaPY + rj.y * SPACING + SPACING / 2;
                 var rz = rj.z || 0;
+                var wgz = (rj.gz != null ? rj.gz : rz);
 
-                if (rz < globalMinLayer) globalMinLayer = rz;
-                if (rz > globalMaxLayer) globalMaxLayer = rz;
+                if (wgz < globalMinLayer) globalMinLayer = wgz;
+                if (wgz > globalMaxLayer) globalMaxLayer = wgz;
+
+                var hasGxGy = (rj.gx != null && rj.gy != null);
+                var gxW = hasGxGy ? (rj.gx * SPACING + SPACING / 2) : null;
+                var gyW = hasGxGy ? (-rj.gy * SPACING + SPACING / 2) : null;
 
                 var room = {
                     vnum:   rj.v,
@@ -583,6 +603,9 @@
                     gridX:  rj.x,
                     gridY:  rj.y,
                     gridZ:  rz,
+                    worldGz: wgz,
+                    gxW:    gxW,
+                    gyW:    gyW,
                     worldX: wx,
                     worldY: wy,
                     packedX: wx,
@@ -768,6 +791,7 @@
         if (layerMode !== 'expanded') {
             for (var an in areaMap) {
                 var a = areaMap[an];
+                if (!a.rooms.length) continue;
                 if (a.px + a.w + margin < tl.x) continue;
                 if (a.py + a.h + margin < tl.y) continue;
                 if (a.px - margin > br.x) continue;
@@ -787,7 +811,7 @@
                 if (r.worldY < tl.y - margin || r.worldY > br.y + margin) continue;
 
                 // In expanded mode only draw exits from the current layer
-                if (layerMode === 'expanded' && r.gridZ !== currentLayer) continue;
+                if (layerMode === 'expanded' && r.worldGz !== currentLayer) continue;
 
                 var rs = worldToScreen(r.worldX, r.worldY);
                 var inPath = !!pathSet[vnum];
@@ -802,7 +826,7 @@
                     // In expanded mode: skip U/D exits (drawn as indicators) and cross-layer exits
                     if (layerMode === 'expanded') {
                         if (ex.d >= 4) continue;
-                        if (nb.gridZ !== currentLayer) continue;
+                        if (nb.worldGz !== currentLayer) continue;
                     }
 
                     var ns = worldToScreen(nb.worldX, nb.worldY);
@@ -838,7 +862,7 @@
             // Layer filtering in expanded mode
             var layerDiff = 0;
             if (layerMode === 'expanded') {
-                layerDiff = Math.abs(r.gridZ - currentLayer);
+                layerDiff = Math.abs(r.worldGz - currentLayer);
                 if (layerDiff > 1) continue;
                 ctx.globalAlpha = layerDiff === 1 ? 0.36 : 1.0;
             }
@@ -936,7 +960,92 @@
 
         // ---- Draw area labels on top of rooms (centered mode only) ----
         if (s >= AREA_LABEL_ZOOM) {
-            drawAreaLabels(visibleAreas, s, 'centered');
+            if (layerMode === 'expanded') {
+                drawExpandedAreaLabels(s);
+            } else {
+                drawAreaLabels(visibleAreas, s, 'centered');
+            }
+        }
+    }
+
+    function drawExpandedAreaLabels(zoomScale) {
+        for (var an in areaMap) {
+            var a = areaMap[an];
+            if (!a.rooms.length) continue;
+
+            // Collect rooms on the current layer and compute centroid
+            var sumX = 0, sumY = 0, count = 0;
+            var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+            for (var ri = 0; ri < a.rooms.length; ri++) {
+                var rr = a.rooms[ri];
+                if (rr.worldGz !== currentLayer) continue;
+                sumX += rr.worldX; sumY += rr.worldY;
+                if (rr.worldX < minX) minX = rr.worldX;
+                if (rr.worldX > maxX) maxX = rr.worldX;
+                if (rr.worldY < minY) minY = rr.worldY;
+                if (rr.worldY > maxY) maxY = rr.worldY;
+                count++;
+            }
+            if (!count) continue;
+
+            var cx = sumX / count;
+            var cy = sumY / count;
+            var sp = worldToScreen(cx, cy);
+
+            // Viewport cull
+            if (sp.x < -200 || sp.x > canvas.width + 200) continue;
+            if (sp.y < -200 || sp.y > canvas.height + 200) continue;
+
+            var boxW = (maxX - minX + SPACING) * zoomScale;
+            var boxH = (maxY - minY + SPACING) * zoomScale;
+            var areaWeight = Math.sqrt(Math.max(1, count));
+            var secStyle = sectorStyle(a.sector);
+            var labelColor = secStyle.border;
+            var labelText = (a.name || '').toUpperCase();
+
+            ctx.save();
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            var baseSize = 12 + Math.min(16, Math.log(areaWeight + 1) * 3.2);
+            var zoomOutBoost = Math.max(0.85, Math.min(1.45, Math.pow(1 / Math.max(zoomScale, 0.08), 0.2)));
+            var fontCenter = Math.max(8, Math.min(28, baseSize * zoomOutBoost));
+            ctx.font = '700 ' + fontCenter.toFixed(1) + 'px "Trebuchet MS", "Segoe UI", sans-serif';
+
+            var textW = ctx.measureText(labelText).width;
+            var padX = Math.max(4, fontCenter * 0.30);
+            var padY = Math.max(3, fontCenter * 0.22);
+            var maxBw = Math.max(20, boxW - 6);
+            var desiredBw = textW + padX * 2;
+            if (desiredBw > maxBw) {
+                var scaleC = maxBw / desiredBw;
+                fontCenter = Math.max(7, fontCenter * scaleC);
+                ctx.font = '700 ' + fontCenter.toFixed(1) + 'px "Trebuchet MS", "Segoe UI", sans-serif';
+                textW = ctx.measureText(labelText).width;
+                padX = Math.max(3, fontCenter * 0.25);
+            }
+            var bw = Math.min(maxBw, textW + padX * 2);
+            var bh = fontCenter + padY * 2;
+            var bx = sp.x - bw / 2;
+            var by = sp.y - bh / 2;
+            var rr2 = Math.max(4, bh * 0.28);
+
+            ctx.globalAlpha = Math.max(0.35, Math.min(0.75, 0.3 + zoomScale * 0.9));
+            ctx.fillStyle = activePalette.canvasBg;
+            roundedRect(ctx, bx, by, bw, bh, rr2);
+            ctx.fill();
+
+            ctx.globalAlpha = Math.max(0.55, Math.min(0.95, 0.45 + zoomScale * 0.7));
+            ctx.strokeStyle = activePalette.areaLabelStroke;
+            ctx.lineWidth = Math.max(1, fontCenter * 0.08);
+            roundedRect(ctx, bx, by, bw, bh, rr2);
+            ctx.stroke();
+
+            ctx.globalAlpha = Math.max(0.9, Math.min(1.0, 0.86 + zoomScale * 0.2));
+            ctx.fillStyle = labelColor;
+            ctx.fillText(labelText, bx + bw / 2, by + bh / 2 + 0.5);
+
+            ctx.restore();
         }
     }
 
@@ -1547,8 +1656,9 @@
                 layerMode = 'expanded';
                 currentLayer = 0;
                 for (var v in rooms) {
-                    rooms[v].worldX = rooms[v].bfsX;
-                    rooms[v].worldY = rooms[v].bfsY;
+                    var r = rooms[v];
+                    r.worldX = (r.gxW != null) ? r.gxW : r.bfsX;
+                    r.worldY = (r.gyW != null) ? r.gyW : r.bfsY;
                 }
             } else {
                 layerMode = 'collapsed';
