@@ -20,7 +20,34 @@ const PLAYER_CENTER_SPRITE_CACHE = new Map();
 const EDGE_SPRITE_CACHE = new Map();
 const EXTRA_EXIT_SPRITE_CACHE = new Map();
 const ROOM_STATIC_SPRITE_CACHE = new Map();
+const ROOM_WALL_SPRITE_CACHE = new Map();
+const SECTOR_TILE_VARIANT_CACHE = new Map();
+const MAX_TRAIL_SPRITE_CACHE = 256;
+const MAX_EDGE_SPRITE_CACHE = 512;
+const MAX_EXTRA_EXIT_SPRITE_CACHE = 256;
+const MAX_ROOM_STATIC_SPRITE_CACHE = 5000;
+const MAX_ROOM_WALL_SPRITE_CACHE = 4096;
+const MAX_SECTOR_TILE_VARIANT_CACHE = 1024;
+const MAX_MOB_DOT_SPRITE_CACHE = 512;
+const MAX_POI_SPRITE_CACHE = 512;
+const MAX_WATER_DROP_SPRITE_CACHE = 256;
+const MAX_PLAYER_CENTER_SPRITE_CACHE = 256;
 const DEFAULT_SCAN_DISTANCE = 3;
+const SECTOR_VARIANT_COUNT = 6;
+const TEXTURED_SECTORS = new Set([
+  "city",
+  "field",
+  "forest",
+  "hills",
+  "mountain",
+  "swamp",
+  "water_swim",
+  "water_noswim",
+  "air",
+  "desert",
+  "lava",
+  "snow"
+]);
 const MOB_DOT_PALETTE = {
   glowInner: "rgba(255, 70, 70, 0.56)",
   glowOuter: "rgba(255, 20, 20, 0)",
@@ -53,10 +80,11 @@ const SECTOR_ORDER = [
   "mountain",
   "water_swim",
   "water_noswim",
-  "underwater",
+  "swamp",
   "air",
   "desert",
-  "dungeon"
+  "lava",
+  "snow"
 ];
 
 const SECTOR_ALIASES = {
@@ -64,7 +92,7 @@ const SECTOR_ALIASES = {
   indoor: "inside",
   town: "city",
   plains: "field",
-  swamp: "field",
+  swamp: "swamp",
   hill: "hills",
   mountains: "mountain",
   water: "water_swim",
@@ -73,10 +101,12 @@ const SECTOR_ALIASES = {
   water_no_swim: "water_noswim",
   water_noswimming: "water_noswim",
   no_swim: "water_noswim",
-  under_water: "underwater",
+  under_water: "water_swim",
+  underwater: "water_swim",
   sky: "air",
-  cave: "dungeon",
-  caves: "dungeon"
+  cave: "mountain",
+  caves: "mountain",
+  dungeon: "inside"
 };
 
 const DIRECTION_VECTORS = {
@@ -183,6 +213,814 @@ const state = {
     toCoord: null
   }
 };
+
+function hashStringFNV1a(input) {
+  const text = String(input || "");
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+function mulberry32(seed) {
+  let t = seed >>> 0;
+  return function nextRand() {
+    t += 0x6d2b79f5;
+    let v = Math.imul(t ^ (t >>> 15), t | 1);
+    v ^= v + Math.imul(v ^ (v >>> 7), v | 61);
+    return ((v ^ (v >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function clamp01(value) {
+  if (value <= 0) return 0;
+  if (value >= 1) return 1;
+  return value;
+}
+
+function mixColor(a, b, t) {
+  const tt = clamp01(t);
+  return {
+    r: Math.round(a.r + (b.r - a.r) * tt),
+    g: Math.round(a.g + (b.g - a.g) * tt),
+    b: Math.round(a.b + (b.b - a.b) * tt)
+  };
+}
+
+function colorToStyle(color, alpha) {
+  return `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha})`;
+}
+
+function setCappedCache(cache, key, value, maxEntries) {
+  if (cache.has(key)) {
+    cache.delete(key);
+  }
+  cache.set(key, value);
+  while (cache.size > maxEntries) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey === undefined) break;
+    cache.delete(oldestKey);
+  }
+}
+
+function getSectorVariantIndex(room) {
+  if (!room || !TEXTURED_SECTORS.has(room.sector)) return -1;
+  const variantSeed = [
+    String(room.sector || ""),
+    String(room.id || ""),
+    String(room.areaID ?? ""),
+    String(room.localID ?? "")
+  ].join("|");
+  return hashStringFNV1a(variantSeed) % SECTOR_VARIANT_COUNT;
+}
+
+function getRoomTileImage(room, tilePx) {
+  const sector = String((room && room.sector) || "inside");
+  const baseIcon = state.sectorIcons.get(sector) || state.sectorIcons.get("inside") || null;
+  const variant = getSectorVariantIndex(room);
+  if (variant < 0) {
+    return baseIcon;
+  }
+
+  const cacheKey = `${sector}:${variant}:${tilePx}`;
+  const cached = SECTOR_TILE_VARIANT_CACHE.get(cacheKey);
+  if (cached) return cached;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = tilePx;
+  canvas.height = tilePx;
+  const g = canvas.getContext("2d");
+  if (!g) return null;
+
+  if (baseIcon) {
+    renderSectorVariantTile(g, baseIcon, sector, variant, tilePx);
+  } else {
+    renderProceduralSectorFallback(g, sector, variant, tilePx);
+  }
+  setCappedCache(SECTOR_TILE_VARIANT_CACHE, cacheKey, canvas, MAX_SECTOR_TILE_VARIANT_CACHE);
+  return canvas;
+}
+
+function applySeamlessOverlay(g, size, rgba, phaseX, phaseY, intensity) {
+  const alphaScale = Math.max(0, Math.min(1, intensity));
+  g.save();
+  g.fillStyle = rgba;
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const nx = (x / size) * Math.PI * 2;
+      const ny = (y / size) * Math.PI * 2;
+      const wave = 0.5
+        + 0.28 * Math.sin(nx * 2 + phaseX)
+        + 0.22 * Math.cos(ny * 2 + phaseY)
+        + 0.12 * Math.sin((nx + ny) * 2 + phaseX * 0.6);
+      const a = Math.max(0, Math.min(1, wave * alphaScale));
+      if (a <= 0.01) continue;
+      g.globalAlpha = a;
+      g.fillRect(x, y, 1, 1);
+    }
+  }
+  g.restore();
+}
+
+function drawSubtleSectorAccent(g, size, sector, variant, rng) {
+  if (sector === "field") {
+    g.save();
+    g.strokeStyle = "rgba(176, 202, 120, 0.16)";
+    g.lineWidth = Math.max(0.7, size * 0.012);
+    for (let i = 0; i < 4; i += 1) {
+      const y = size * (0.18 + i * 0.2) + (variant - 2.5) * 0.14;
+      g.beginPath();
+      g.moveTo(size * 0.08, y);
+      g.bezierCurveTo(size * 0.26, y - size * 0.04, size * 0.72, y + size * 0.04, size * 0.92, y);
+      g.stroke();
+    }
+    g.strokeStyle = "rgba(114, 136, 78, 0.14)";
+    g.lineWidth = Math.max(0.55, size * 0.01);
+    for (let i = 0; i < 18; i += 1) {
+      const x = size * (0.1 + rng() * 0.8);
+      const y = size * (0.2 + rng() * 0.62);
+      const h = size * (0.02 + rng() * 0.035);
+      g.beginPath();
+      g.moveTo(x, y + h);
+      g.lineTo(x + size * 0.01, y - h);
+      g.stroke();
+    }
+    g.restore();
+    return;
+  }
+
+  if (sector === "forest") {
+    g.save();
+    g.strokeStyle = "rgba(46, 74, 42, 0.2)";
+    g.lineWidth = Math.max(0.7, size * 0.012);
+    for (let i = 0; i < 5; i += 1) {
+      const x = size * (0.16 + rng() * 0.68);
+      const top = size * (0.2 + rng() * 0.18);
+      const bottom = size * (0.66 + rng() * 0.16);
+      g.beginPath();
+      g.moveTo(x, top);
+      g.lineTo(x, bottom);
+      g.stroke();
+    }
+    g.fillStyle = "rgba(66, 112, 62, 0.16)";
+    for (let i = 0; i < 10; i += 1) {
+      const cx = size * (0.14 + rng() * 0.72);
+      const cy = size * (0.14 + rng() * 0.66);
+      const r = size * (0.03 + rng() * 0.03);
+      g.beginPath();
+      g.arc(cx, cy, r, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.restore();
+    return;
+  }
+
+  if (sector === "hills") {
+    g.save();
+    g.strokeStyle = "rgba(94, 126, 86, 0.18)";
+    g.lineWidth = Math.max(0.8, size * 0.013);
+    for (let i = 0; i < 4; i += 1) {
+      const y = size * (0.22 + i * 0.18) + (variant - 2.5) * 0.12;
+      g.beginPath();
+      g.moveTo(size * 0.09, y);
+      g.quadraticCurveTo(size * 0.38, y - size * 0.07, size * 0.7, y + size * 0.05);
+      g.quadraticCurveTo(size * 0.82, y + size * 0.03, size * 0.92, y - size * 0.03);
+      g.stroke();
+    }
+    g.restore();
+    return;
+  }
+
+  if (sector === "mountain") {
+    g.save();
+    g.strokeStyle = "rgba(58, 62, 76, 0.2)";
+    g.lineWidth = Math.max(0.8, size * 0.013);
+    for (let i = 0; i < 6; i += 1) {
+      const x = size * (0.12 + rng() * 0.76);
+      const y = size * (0.2 + rng() * 0.58);
+      g.beginPath();
+      g.moveTo(x - size * 0.05, y + size * 0.05);
+      g.lineTo(x, y - size * 0.06);
+      g.lineTo(x + size * 0.05, y + size * 0.05);
+      g.stroke();
+    }
+    g.restore();
+    return;
+  }
+
+  if (sector === "city") {
+    g.save();
+    const stoneCount = 14 + Math.floor(rng() * 8);
+    for (let i = 0; i < stoneCount; i += 1) {
+      const cx = size * (0.1 + rng() * 0.8);
+      const cy = size * (0.1 + rng() * 0.8);
+      const w = size * (0.045 + rng() * 0.065);
+      const h = size * (0.032 + rng() * 0.055);
+      const r = Math.max(1, Math.min(w, h) * (0.24 + rng() * 0.22));
+      const roll = rng();
+      if (roll > 0.68) g.fillStyle = "rgba(98, 80, 62, 0.28)"; // dark brown stone
+      else if (roll > 0.35) g.fillStyle = "rgba(62, 64, 70, 0.3)"; // dark grey stone
+      else g.fillStyle = "rgba(126, 128, 134, 0.22)"; // light grey stone
+      roundedRectPath(g, cx - w * 0.5, cy - h * 0.5, w, h, r);
+      g.fill();
+    }
+    g.strokeStyle = "rgba(44, 42, 40, 0.2)";
+    g.lineWidth = Math.max(0.65, size * 0.011);
+    for (let i = 0; i < 4; i += 1) {
+      const y = size * (0.2 + i * 0.18) + (variant - 2.5) * 0.1;
+      g.beginPath();
+      g.moveTo(size * 0.08, y + (rng() - 0.5) * size * 0.03);
+      g.bezierCurveTo(
+        size * 0.28,
+        y - size * (0.02 + rng() * 0.02),
+        size * 0.7,
+        y + size * (0.02 + rng() * 0.03),
+        size * 0.92,
+        y + (rng() - 0.5) * size * 0.03
+      );
+      g.stroke();
+    }
+    g.restore();
+    return;
+  }
+
+  if (sector === "water_swim" || sector === "water_noswim") {
+    g.save();
+    g.strokeStyle = "rgba(208, 232, 250, 0.18)";
+    g.lineWidth = Math.max(0.7, size * 0.012);
+    for (let i = 0; i < 5; i += 1) {
+      const y = size * (0.16 + i * 0.16) + (variant - 2.5) * 0.12;
+      g.beginPath();
+      g.moveTo(size * 0.1, y);
+      g.bezierCurveTo(size * 0.24, y - size * 0.03, size * 0.72, y + size * 0.03, size * 0.9, y);
+      g.stroke();
+    }
+    g.restore();
+    return;
+  }
+
+  if (sector === "air") {
+    g.save();
+    g.fillStyle = "rgba(235, 245, 252, 0.18)";
+    for (let i = 0; i < 6; i += 1) {
+      const cx = size * (0.14 + rng() * 0.72);
+      const cy = size * (0.18 + rng() * 0.64);
+      const r = size * (0.024 + rng() * 0.03);
+      g.beginPath();
+      g.arc(cx, cy, r, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.restore();
+    return;
+  }
+
+  if (sector === "desert") {
+    g.save();
+    g.strokeStyle = "rgba(150, 126, 82, 0.16)";
+    g.lineWidth = Math.max(0.7, size * 0.012);
+    for (let i = 0; i < 4; i += 1) {
+      const y = size * (0.22 + i * 0.18) + (variant - 2.5) * 0.12;
+      g.beginPath();
+      g.moveTo(size * 0.1, y);
+      g.bezierCurveTo(size * 0.28, y - size * 0.04, size * 0.74, y + size * 0.05, size * 0.92, y);
+      g.stroke();
+    }
+    g.restore();
+    return;
+  }
+
+  if (sector === "swamp") {
+    g.save();
+    g.fillStyle = "rgba(98, 122, 88, 0.18)";
+    for (let i = 0; i < 7; i += 1) {
+      const cx = size * (0.12 + rng() * 0.76);
+      const cy = size * (0.14 + rng() * 0.72);
+      const rx = size * (0.03 + rng() * 0.05);
+      const ry = size * (0.02 + rng() * 0.04);
+      g.beginPath();
+      g.ellipse(cx, cy, rx, ry, rng() * Math.PI, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.restore();
+    return;
+  }
+
+  if (sector === "lava") {
+    g.save();
+    g.strokeStyle = "rgba(248, 122, 44, 0.22)";
+    g.lineWidth = Math.max(0.9, size * 0.014);
+    for (let i = 0; i < 4; i += 1) {
+      const y = size * (0.16 + i * 0.18) + (variant - 2.5) * 0.12;
+      g.beginPath();
+      g.moveTo(size * 0.1, y);
+      g.bezierCurveTo(size * 0.3, y - size * 0.06, size * 0.68, y + size * 0.06, size * 0.9, y - size * 0.01);
+      g.stroke();
+    }
+    g.restore();
+    return;
+  }
+
+  if (sector === "snow") {
+    g.save();
+    g.fillStyle = "rgba(252, 254, 255, 0.2)";
+    for (let i = 0; i < 14; i += 1) {
+      const cx = size * (0.1 + rng() * 0.8);
+      const cy = size * (0.1 + rng() * 0.8);
+      const r = size * (0.006 + rng() * 0.012);
+      g.beginPath();
+      g.arc(cx, cy, r, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.restore();
+  }
+}
+
+function drawEdgeContinuityBand(g, size, palette) {
+  const edge = Math.max(2, Math.floor(size * 0.08));
+  const dark = palette.edgeDark;
+  const light = palette.edgeLight;
+
+  for (let i = 0; i < size; i += 1) {
+    const t = i / Math.max(1, size - 1);
+    const wave = 0.5 + 0.5 * Math.sin(t * Math.PI * 4);
+    const c = mixColor(dark, light, wave);
+    g.fillStyle = colorToStyle(c, 0.34);
+    g.fillRect(i, 0, 1, edge);
+    g.fillRect(i, size - edge, 1, edge);
+    g.fillRect(0, i, edge, 1);
+    g.fillRect(size - edge, i, edge, 1);
+  }
+}
+
+function drawInteriorGrain(g, size, rng, color, count, minR, maxR, inset) {
+  const edgeInset = Math.max(2, inset);
+  for (let i = 0; i < count; i += 1) {
+    const x = edgeInset + rng() * Math.max(1, size - edgeInset * 2);
+    const y = edgeInset + rng() * Math.max(1, size - edgeInset * 2);
+    const r = minR + rng() * (maxR - minR);
+    g.fillStyle = colorToStyle(color, 0.22 + rng() * 0.18);
+    g.beginPath();
+    g.arc(x, y, r, 0, Math.PI * 2);
+    g.fill();
+  }
+}
+
+function drawFieldTexture(g, size, variant, rng) {
+  const palette = {
+    base: { r: 92, g: 134, b: 62 },
+    grainA: { r: 122, g: 164, b: 84 },
+    grainB: { r: 70, g: 108, b: 46 },
+    edgeDark: { r: 62, g: 94, b: 40 },
+    edgeLight: { r: 128, g: 170, b: 90 }
+  };
+
+  g.fillStyle = colorToStyle(palette.base, 1);
+  g.fillRect(0, 0, size, size);
+  drawEdgeContinuityBand(g, size, palette);
+  drawInteriorGrain(g, size, rng, palette.grainA, 32 + variant * 2, 0.8, 2.2, size * 0.11);
+  drawInteriorGrain(g, size, rng, palette.grainB, 24 + variant, 0.6, 1.8, size * 0.11);
+
+  g.strokeStyle = "rgba(178, 202, 120, 0.28)";
+  g.lineWidth = Math.max(0.75, size * 0.014);
+  for (let i = 0; i < 5; i += 1) {
+    const y = size * (0.16 + i * 0.17) + (variant - 2.5) * 0.2;
+    g.beginPath();
+    g.moveTo(size * 0.1, y);
+    g.bezierCurveTo(size * 0.3, y - size * 0.06, size * 0.7, y + size * 0.06, size * 0.9, y);
+    g.stroke();
+  }
+}
+
+function drawForestTexture(g, size, variant, rng) {
+  const palette = {
+    base: { r: 34, g: 74, b: 44 },
+    canopyA: { r: 52, g: 102, b: 60 },
+    canopyB: { r: 30, g: 62, b: 36 },
+    edgeDark: { r: 22, g: 48, b: 28 },
+    edgeLight: { r: 58, g: 112, b: 68 }
+  };
+
+  g.fillStyle = colorToStyle(palette.base, 1);
+  g.fillRect(0, 0, size, size);
+  drawEdgeContinuityBand(g, size, palette);
+  drawInteriorGrain(g, size, rng, palette.canopyA, 24 + variant * 3, 1.1, 3.1, size * 0.1);
+  drawInteriorGrain(g, size, rng, palette.canopyB, 20 + variant * 2, 1.0, 2.8, size * 0.1);
+
+  g.strokeStyle = "rgba(78, 130, 84, 0.34)";
+  g.lineWidth = Math.max(0.9, size * 0.016);
+  for (let i = 0; i < 4; i += 1) {
+    const x = size * (0.16 + i * 0.22) + (variant - 2.5) * 0.25;
+    g.beginPath();
+    g.moveTo(x, size * 0.16);
+    g.lineTo(x + size * 0.03, size * 0.86);
+    g.stroke();
+  }
+}
+
+function drawHillsTexture(g, size, variant, rng) {
+  const palette = {
+    base: { r: 84, g: 114, b: 74 },
+    ridgeA: { r: 112, g: 142, b: 94 },
+    ridgeB: { r: 70, g: 94, b: 60 },
+    edgeDark: { r: 56, g: 78, b: 48 },
+    edgeLight: { r: 122, g: 154, b: 102 }
+  };
+
+  g.fillStyle = colorToStyle(palette.base, 1);
+  g.fillRect(0, 0, size, size);
+  drawEdgeContinuityBand(g, size, palette);
+
+  const ridgeCount = 5;
+  for (let i = 0; i < ridgeCount; i += 1) {
+    const y = size * (0.14 + i * 0.18) + (variant - 2.5) * 0.18;
+    g.strokeStyle = i % 2 === 0 ? colorToStyle(palette.ridgeA, 0.36) : colorToStyle(palette.ridgeB, 0.32);
+    g.lineWidth = Math.max(1, size * 0.018);
+    g.beginPath();
+    g.moveTo(size * 0.08, y);
+    g.quadraticCurveTo(size * 0.35, y - size * (0.08 + rng() * 0.02), size * 0.6, y + size * (0.05 + rng() * 0.03));
+    g.quadraticCurveTo(size * 0.78, y + size * (0.03 + rng() * 0.03), size * 0.92, y - size * (0.04 + rng() * 0.02));
+    g.stroke();
+  }
+}
+
+function drawMountainTexture(g, size, variant, rng) {
+  const palette = {
+    base: { r: 88, g: 92, b: 104 },
+    facetA: { r: 122, g: 128, b: 142 },
+    facetB: { r: 60, g: 64, b: 78 },
+    edgeDark: { r: 54, g: 58, b: 70 },
+    edgeLight: { r: 128, g: 132, b: 146 }
+  };
+
+  g.fillStyle = colorToStyle(palette.base, 1);
+  g.fillRect(0, 0, size, size);
+  drawEdgeContinuityBand(g, size, palette);
+
+  const tris = 12 + variant * 2;
+  for (let i = 0; i < tris; i += 1) {
+    const x = size * (0.1 + rng() * 0.8);
+    const y = size * (0.12 + rng() * 0.76);
+    const w = size * (0.07 + rng() * 0.14);
+    const h = size * (0.05 + rng() * 0.12);
+    g.fillStyle = i % 2 === 0 ? colorToStyle(palette.facetA, 0.3) : colorToStyle(palette.facetB, 0.3);
+    g.beginPath();
+    g.moveTo(x, y - h);
+    g.lineTo(x - w, y + h);
+    g.lineTo(x + w, y + h);
+    g.closePath();
+    g.fill();
+  }
+}
+
+function drawCityTexture(g, size, variant, rng) {
+  const palette = {
+    base: { r: 96, g: 98, b: 102 },
+    stoneA: { r: 138, g: 140, b: 144 },
+    stoneB: { r: 76, g: 78, b: 84 },
+    stoneBrown: { r: 112, g: 94, b: 76 },
+    mortar: { r: 52, g: 50, b: 52 },
+    edgeDark: { r: 62, g: 62, b: 66 },
+    edgeLight: { r: 140, g: 136, b: 130 }
+  };
+
+  g.fillStyle = colorToStyle(palette.base, 1);
+  g.fillRect(0, 0, size, size);
+  drawEdgeContinuityBand(g, size, palette);
+
+  const rowH = Math.max(4.8, size * 0.115);
+  const colW = Math.max(7.4, size * 0.16);
+  const inset = Math.max(3, size * 0.1);
+  let row = 0;
+  for (let y = inset; y < size - inset - rowH * 0.6; y += rowH) {
+    const offset = row % 2 === 0 ? 0 : colW * 0.5;
+    for (let x = inset - colW; x < size - inset + colW; x += colW) {
+      const cx = x + offset + colW * 0.5;
+      const cy = y + rowH * 0.5;
+      if (cx < inset || cx > size - inset) continue;
+
+      const w = colW * (0.78 + (rng() - 0.5) * 0.18);
+      const h = rowH * (0.72 + (rng() - 0.5) * 0.2);
+      const radius = Math.max(1.2, Math.min(w, h) * 0.28);
+      const roll = rng();
+      g.fillStyle = roll > 0.72
+        ? colorToStyle(palette.stoneBrown, 0.88)
+        : (roll > 0.38 ? colorToStyle(palette.stoneA, 0.9) : colorToStyle(palette.stoneB, 0.88));
+      roundedRectPath(g, cx - w * 0.5, cy - h * 0.5, w, h, radius);
+      g.fill();
+
+      g.strokeStyle = colorToStyle(palette.mortar, 0.42);
+      g.lineWidth = Math.max(0.55, size * 0.011);
+      g.stroke();
+    }
+    row += 1;
+  }
+
+  // Faint road wear bands for less rigid, used-in traffic feel.
+  g.strokeStyle = "rgba(44, 42, 40, 0.2)";
+  g.lineWidth = Math.max(1.2, size * 0.023);
+  for (let i = 0; i < 2; i += 1) {
+    const y = size * (0.33 + i * 0.28) + (variant - 2.5) * 0.25;
+    g.beginPath();
+    g.moveTo(size * 0.08, y);
+    g.bezierCurveTo(size * 0.26, y - size * 0.03, size * 0.72, y + size * 0.03, size * 0.92, y - size * 0.01);
+    g.stroke();
+  }
+}
+
+function drawSwampTexture(g, size, variant, rng) {
+  const palette = {
+    base: { r: 62, g: 80, b: 54 },
+    mudA: { r: 88, g: 104, b: 72 },
+    mudB: { r: 48, g: 62, b: 42 },
+    edgeDark: { r: 36, g: 48, b: 32 },
+    edgeLight: { r: 96, g: 118, b: 84 }
+  };
+
+  g.fillStyle = colorToStyle(palette.base, 1);
+  g.fillRect(0, 0, size, size);
+  drawEdgeContinuityBand(g, size, palette);
+  drawInteriorGrain(g, size, rng, palette.mudA, 32 + variant * 2, 1.2, 3.2, size * 0.1);
+  drawInteriorGrain(g, size, rng, palette.mudB, 26 + variant, 0.9, 2.8, size * 0.1);
+
+  g.fillStyle = "rgba(112, 142, 126, 0.24)";
+  for (let i = 0; i < 6; i += 1) {
+    const x = size * (0.12 + rng() * 0.76);
+    const y = size * (0.12 + rng() * 0.76);
+    const rx = size * (0.045 + rng() * 0.06);
+    const ry = size * (0.03 + rng() * 0.05);
+    g.beginPath();
+    g.ellipse(x, y, rx, ry, rng() * Math.PI, 0, Math.PI * 2);
+    g.fill();
+  }
+
+  g.strokeStyle = "rgba(84, 108, 76, 0.28)";
+  g.lineWidth = Math.max(0.8, size * 0.014);
+  for (let i = 0; i < 4; i += 1) {
+    const x0 = size * (0.12 + rng() * 0.76);
+    const y0 = size * (0.12 + rng() * 0.76);
+    g.beginPath();
+    g.moveTo(x0, y0);
+    g.lineTo(x0 + size * (0.05 + rng() * 0.08), y0 - size * (0.08 + rng() * 0.12));
+    g.stroke();
+  }
+}
+
+function drawWaterTexture(g, size, variant, rng, isShallow) {
+  const palette = isShallow
+    ? {
+        base: { r: 42, g: 92, b: 126 },
+        waveA: { r: 84, g: 142, b: 178 },
+        waveB: { r: 28, g: 68, b: 102 },
+        edgeDark: { r: 24, g: 58, b: 86 },
+        edgeLight: { r: 96, g: 160, b: 196 }
+      }
+    : {
+        base: { r: 24, g: 56, b: 86 },
+        waveA: { r: 56, g: 104, b: 146 },
+        waveB: { r: 16, g: 40, b: 64 },
+        edgeDark: { r: 12, g: 30, b: 52 },
+        edgeLight: { r: 68, g: 122, b: 168 }
+      };
+
+  g.fillStyle = colorToStyle(palette.base, 1);
+  g.fillRect(0, 0, size, size);
+  drawEdgeContinuityBand(g, size, palette);
+
+  g.lineWidth = Math.max(1, size * 0.017);
+  for (let i = 0; i < 6; i += 1) {
+    const y = size * (0.11 + i * 0.15) + (variant - 2.5) * 0.2;
+    g.strokeStyle = i % 2 === 0 ? colorToStyle(palette.waveA, 0.34) : colorToStyle(palette.waveB, 0.28);
+    g.beginPath();
+    g.moveTo(size * 0.07, y);
+    g.bezierCurveTo(size * 0.22, y - size * (0.04 + rng() * 0.02), size * 0.72, y + size * (0.04 + rng() * 0.03), size * 0.93, y - size * 0.01);
+    g.stroke();
+  }
+}
+
+function drawAirTexture(g, size, variant, rng) {
+  const palette = {
+    base: { r: 132, g: 180, b: 218 },
+    cloudA: { r: 224, g: 238, b: 248 },
+    cloudB: { r: 176, g: 208, b: 232 },
+    edgeDark: { r: 96, g: 142, b: 182 },
+    edgeLight: { r: 210, g: 232, b: 246 }
+  };
+
+  g.fillStyle = colorToStyle(palette.base, 1);
+  g.fillRect(0, 0, size, size);
+  drawEdgeContinuityBand(g, size, palette);
+
+  const cloudCount = 6 + variant;
+  for (let i = 0; i < cloudCount; i += 1) {
+    const cx = size * (0.12 + rng() * 0.76);
+    const cy = size * (0.16 + rng() * 0.68);
+    const r = size * (0.05 + rng() * 0.05);
+    const color = i % 2 === 0 ? palette.cloudA : palette.cloudB;
+    g.fillStyle = colorToStyle(color, 0.42 + rng() * 0.14);
+    g.beginPath();
+    g.arc(cx - r * 0.45, cy, r * 0.8, 0, Math.PI * 2);
+    g.arc(cx + r * 0.15, cy - r * 0.2, r, 0, Math.PI * 2);
+    g.arc(cx + r * 0.72, cy, r * 0.72, 0, Math.PI * 2);
+    g.fill();
+  }
+}
+
+function drawDesertTexture(g, size, variant, rng) {
+  const palette = {
+    base: { r: 176, g: 152, b: 96 },
+    duneA: { r: 212, g: 188, b: 126 },
+    duneB: { r: 142, g: 120, b: 74 },
+    edgeDark: { r: 126, g: 104, b: 62 },
+    edgeLight: { r: 222, g: 198, b: 136 }
+  };
+
+  g.fillStyle = colorToStyle(palette.base, 1);
+  g.fillRect(0, 0, size, size);
+  drawEdgeContinuityBand(g, size, palette);
+
+  g.lineWidth = Math.max(1, size * 0.018);
+  for (let i = 0; i < 5; i += 1) {
+    const y = size * (0.14 + i * 0.17) + (variant - 2.5) * 0.2;
+    g.strokeStyle = i % 2 === 0 ? colorToStyle(palette.duneA, 0.32) : colorToStyle(palette.duneB, 0.24);
+    g.beginPath();
+    g.moveTo(size * 0.06, y);
+    g.bezierCurveTo(size * 0.24, y - size * 0.05, size * 0.72, y + size * 0.06, size * 0.94, y - size * 0.01);
+    g.stroke();
+  }
+}
+
+function drawLavaTexture(g, size, variant, rng) {
+  const palette = {
+    base: { r: 42, g: 24, b: 18 },
+    flowA: { r: 232, g: 102, b: 24 },
+    flowB: { r: 184, g: 46, b: 14 },
+    glow: { r: 255, g: 168, b: 52 },
+    edgeDark: { r: 30, g: 16, b: 12 },
+    edgeLight: { r: 198, g: 84, b: 24 }
+  };
+
+  g.fillStyle = colorToStyle(palette.base, 1);
+  g.fillRect(0, 0, size, size);
+  drawEdgeContinuityBand(g, size, palette);
+
+  g.lineCap = "round";
+  g.lineWidth = Math.max(1.4, size * 0.026);
+  for (let i = 0; i < 5; i += 1) {
+    const y = size * (0.1 + i * 0.18) + (variant - 2.5) * 0.22;
+    g.strokeStyle = i % 2 === 0 ? colorToStyle(palette.flowA, 0.54) : colorToStyle(palette.flowB, 0.5);
+    g.beginPath();
+    g.moveTo(size * 0.08, y);
+    g.bezierCurveTo(size * 0.3, y - size * 0.08, size * 0.66, y + size * 0.08, size * 0.92, y - size * 0.02);
+    g.stroke();
+  }
+
+  drawInteriorGrain(g, size, rng, palette.glow, 14 + variant, 0.8, 2.1, size * 0.1);
+}
+
+function drawSnowTexture(g, size, variant, rng) {
+  const palette = {
+    base: { r: 224, g: 232, b: 236 },
+    driftA: { r: 248, g: 252, b: 254 },
+    driftB: { r: 188, g: 204, b: 214 },
+    edgeDark: { r: 172, g: 188, b: 198 },
+    edgeLight: { r: 250, g: 254, b: 255 }
+  };
+
+  g.fillStyle = colorToStyle(palette.base, 1);
+  g.fillRect(0, 0, size, size);
+  drawEdgeContinuityBand(g, size, palette);
+
+  g.lineWidth = Math.max(0.9, size * 0.014);
+  g.strokeStyle = colorToStyle(palette.driftB, 0.28);
+  for (let i = 0; i < 4; i += 1) {
+    const y = size * (0.18 + i * 0.2) + (variant - 2.5) * 0.14;
+    g.beginPath();
+    g.moveTo(size * 0.07, y);
+    g.quadraticCurveTo(size * 0.46, y - size * 0.05, size * 0.93, y + size * 0.01);
+    g.stroke();
+  }
+
+  drawInteriorGrain(g, size, rng, palette.driftA, 28 + variant * 2, 0.6, 1.6, size * 0.1);
+}
+
+function roundedRectPath(g, x, y, w, h, r) {
+  const rr = Math.min(r, w * 0.5, h * 0.5);
+  g.beginPath();
+  g.moveTo(x + rr, y);
+  g.lineTo(x + w - rr, y);
+  g.quadraticCurveTo(x + w, y, x + w, y + rr);
+  g.lineTo(x + w, y + h - rr);
+  g.quadraticCurveTo(x + w, y + h, x + w - rr, y + h);
+  g.lineTo(x + rr, y + h);
+  g.quadraticCurveTo(x, y + h, x, y + h - rr);
+  g.lineTo(x, y + rr);
+  g.quadraticCurveTo(x, y, x + rr, y);
+  g.closePath();
+}
+
+function renderProceduralSectorFallback(g, sector, variant, size) {
+  const seed = hashStringFNV1a(`${sector}:${variant}:fallback`);
+  const rng = mulberry32(seed);
+
+  if (sector === "field") return drawFieldTexture(g, size, variant, rng);
+  if (sector === "forest") return drawForestTexture(g, size, variant, rng);
+  if (sector === "hills") return drawHillsTexture(g, size, variant, rng);
+  if (sector === "mountain") return drawMountainTexture(g, size, variant, rng);
+  if (sector === "city") return drawCityTexture(g, size, variant, rng);
+  if (sector === "swamp") return drawSwampTexture(g, size, variant, rng);
+  if (sector === "water_swim") return drawWaterTexture(g, size, variant, rng, true);
+  if (sector === "water_noswim") return drawWaterTexture(g, size, variant, rng, false);
+  if (sector === "air") return drawAirTexture(g, size, variant, rng);
+  if (sector === "desert") return drawDesertTexture(g, size, variant, rng);
+  if (sector === "lava") return drawLavaTexture(g, size, variant, rng);
+  if (sector === "snow") return drawSnowTexture(g, size, variant, rng);
+
+  g.fillStyle = "#1f2f3f";
+  g.fillRect(0, 0, size, size);
+}
+
+function getSectorVariantTone(sector, variant, rng) {
+  const palettes = {
+    city: [
+      "rgba(126, 116, 102, 0.08)",
+      "rgba(94, 100, 108, 0.09)",
+      "rgba(112, 104, 90, 0.08)",
+      "rgba(88, 96, 104, 0.09)",
+      "rgba(130, 118, 106, 0.08)"
+    ],
+    field: [
+      "rgba(204, 178, 88, 0.1)",
+      "rgba(174, 148, 66, 0.09)",
+      "rgba(188, 164, 80, 0.09)",
+      "rgba(166, 142, 62, 0.1)",
+      "rgba(196, 170, 86, 0.08)"
+    ],
+    forest: [
+      "rgba(62, 96, 74, 0.1)",
+      "rgba(48, 80, 60, 0.1)",
+      "rgba(70, 102, 80, 0.09)",
+      "rgba(54, 84, 66, 0.1)",
+      "rgba(74, 110, 86, 0.08)"
+    ],
+    mountain: [
+      "rgba(116, 80, 56, 0.1)",
+      "rgba(96, 66, 44, 0.11)",
+      "rgba(126, 90, 62, 0.09)",
+      "rgba(104, 72, 50, 0.1)",
+      "rgba(134, 96, 66, 0.08)"
+    ],
+    swamp: [
+      "rgba(86, 118, 84, 0.1)",
+      "rgba(66, 96, 66, 0.1)",
+      "rgba(98, 126, 90, 0.09)",
+      "rgba(72, 104, 70, 0.1)",
+      "rgba(102, 130, 96, 0.08)"
+    ],
+    default: [
+      "rgba(170, 170, 170, 0.06)",
+      "rgba(120, 120, 120, 0.07)",
+      "rgba(190, 190, 190, 0.05)",
+      "rgba(128, 128, 128, 0.07)",
+      "rgba(176, 176, 176, 0.05)"
+    ]
+  };
+
+  const tones = palettes[sector] || palettes.default;
+  const idx = (variant + Math.floor(rng() * tones.length)) % tones.length;
+  return tones[idx];
+}
+
+function applySectorVariantTone(g, size, sector, variant, rng) {
+  if (variant <= 0) return;
+
+  const tone = getSectorVariantTone(sector, variant, rng);
+  const offset = (variant % 3) * Math.max(1, Math.floor(size * 0.03));
+
+  g.save();
+  g.globalCompositeOperation = "source-atop";
+  g.fillStyle = tone;
+  g.fillRect(0, 0, size, size);
+
+  g.globalCompositeOperation = "multiply";
+  g.fillStyle = "rgba(0, 0, 0, 0.03)";
+  const stripeStep = Math.max(6, Math.floor(size * 0.16));
+  for (let x = -stripeStep + offset; x < size + stripeStep; x += stripeStep) {
+    g.fillRect(x, 0, Math.max(1, Math.floor(size * 0.02)), size);
+  }
+  g.restore();
+}
+
+function renderSectorVariantTile(g, baseIcon, sector, variant, size) {
+  const seed = hashStringFNV1a(`${sector}:${variant}:tile`);
+  const rng = mulberry32(seed);
+
+  // Keep original mapper visual identity by drawing the original sector art unchanged.
+  g.drawImage(baseIcon, 0, 0, size, size);
+  // Variants are non-destructive tone shifts only, preserving glyph shapes and edges.
+  applySectorVariantTone(g, size, sector, variant, rng);
+}
 
 function connectSessionSocket() {
   if (!state.sessionWsUrl) return;
@@ -897,8 +1735,10 @@ function normalizeMarkers(markers) {
 
 function buildRoomStaticSignature(room) {
   const markers = room && room.markers ? room.markers : {};
+  const sectorVariant = getSectorVariantIndex(room);
   return [
     String(room && room.sector ? room.sector : ""),
+    String(sectorVariant),
     room && room.darkUnknown ? "1" : "0",
     markers.shop ? "1" : "0",
     markers.bank ? "1" : "0",
@@ -1694,7 +2534,7 @@ function getTrailSprite(mask, endpointMode) {
   if (!g) return null;
 
   renderTrailSprite(g, TRAIL_SPRITE_SIZE, mask, endpointMode, key);
-  TRAIL_SPRITE_CACHE.set(key, canvas);
+  setCappedCache(TRAIL_SPRITE_CACHE, key, canvas, MAX_TRAIL_SPRITE_CACHE);
   return canvas;
 }
 
@@ -1761,12 +2601,37 @@ function endpointGradient(g, size, mask, color, endpointMode) {
 function drawTrailRects(g, size, mask, width) {
   const c = size * 0.5;
   const hw = width * 0.5;
+  const hasN = (mask & TRAIL_DIR_BITS.n) !== 0;
+  const hasE = (mask & TRAIL_DIR_BITS.e) !== 0;
+  const hasS = (mask & TRAIL_DIR_BITS.s) !== 0;
+  const hasW = (mask & TRAIL_DIR_BITS.w) !== 0;
+
   g.beginPath();
   g.rect(c - hw, c - hw, width, width);
-  if (mask & TRAIL_DIR_BITS.n) g.rect(c - hw, 0, width, c);
-  if (mask & TRAIL_DIR_BITS.e) g.rect(c, c - hw, c, width);
-  if (mask & TRAIL_DIR_BITS.s) g.rect(c - hw, c, width, c);
-  if (mask & TRAIL_DIR_BITS.w) g.rect(0, c - hw, c, width);
+  if (hasN) g.rect(c - hw, 0, width, c);
+  if (hasE) g.rect(c, c - hw, c, width);
+  if (hasS) g.rect(c - hw, c, width, c);
+  if (hasW) g.rect(0, c - hw, c, width);
+
+  // Smooth L/T/+ intersections without changing the overall trail style.
+  g.moveTo(c + hw, c);
+  g.arc(c, c, hw, 0, Math.PI * 2);
+  if (hasN && hasE) {
+    g.moveTo(c + hw * 2, c - hw);
+    g.arc(c + hw, c - hw, hw, 0, Math.PI * 2);
+  }
+  if (hasE && hasS) {
+    g.moveTo(c + hw * 2, c + hw);
+    g.arc(c + hw, c + hw, hw, 0, Math.PI * 2);
+  }
+  if (hasS && hasW) {
+    g.moveTo(c, c + hw);
+    g.arc(c - hw, c + hw, hw, 0, Math.PI * 2);
+  }
+  if (hasW && hasN) {
+    g.moveTo(c, c - hw);
+    g.arc(c - hw, c - hw, hw, 0, Math.PI * 2);
+  }
 }
 
 function applyTrailClip(g, size, mask, width) {
@@ -2078,7 +2943,7 @@ function getDotSprite(radius, reduceGlow, palette) {
   const sctx = canvas.getContext("2d");
   if (!sctx) {
     const fallback = { canvas, center };
-    MOB_DOT_SPRITE_CACHE.set(cacheKey, fallback);
+    setCappedCache(MOB_DOT_SPRITE_CACHE, cacheKey, fallback, MAX_MOB_DOT_SPRITE_CACHE);
     return fallback;
   }
 
@@ -2100,7 +2965,7 @@ function getDotSprite(radius, reduceGlow, palette) {
   sctx.fill();
 
   const sprite = { canvas, center };
-  MOB_DOT_SPRITE_CACHE.set(cacheKey, sprite);
+  setCappedCache(MOB_DOT_SPRITE_CACHE, cacheKey, sprite, MAX_MOB_DOT_SPRITE_CACHE);
   return sprite;
 }
 
@@ -2336,7 +3201,7 @@ function getRoomStaticSprite(room, zoomBucket, ghost) {
   g.imageSmoothingEnabled = false;
 
   renderRoomStaticSprite(g, room, tilePx, zoomBucket, ghost);
-  ROOM_STATIC_SPRITE_CACHE.set(cacheKey, canvas);
+  setCappedCache(ROOM_STATIC_SPRITE_CACHE, cacheKey, canvas, MAX_ROOM_STATIC_SPRITE_CACHE);
   return canvas;
 }
 
@@ -2362,7 +3227,7 @@ function renderRoomStaticSprite(g, room, tilePx, zoomBucket, ghost) {
 
 function renderRoomTileToContext(g, room, tilePx) {
   const tileBleedY = Math.max(0.22, tilePx * 0.0045);
-  const icon = state.sectorIcons.get(room.sector) || state.sectorIcons.get("inside");
+  const icon = getRoomTileImage(room, tilePx);
 
   if (room.darkUnknown) {
     g.fillStyle = "#353a40";
@@ -2432,26 +3297,9 @@ function getRoomWallSignature(room) {
 }
 
 function renderRoomWallsToContext(g, room, tilePx, zoomBucket) {
-  const opacity = wallOpacityForZoomValue(zoomBucket);
-  if (opacity <= 0) return;
-
-  const lineWidth = Math.max(2.6, 2.6 * zoomBucket) * (tilePx / TILE_SIZE);
-  const edgeInset = Math.max(lineWidth * 0.5 + 0.75, tilePx * 0.035);
-
-  g.save();
-  g.globalAlpha *= opacity;
-  for (const dir of ["n", "e", "s", "w"]) {
-    const variant = getEdgeVariant(room, dir);
-    if (!variant) continue;
-    const segment = getInsetEdgeSegment(tilePx, dir, edgeInset);
-    if (variant === "wall" || variant === "closed" || variant === "locked") {
-      renderLocalWall(g, segment, lineWidth, 1);
-    }
-    if (variant === "open" || variant === "closed" || variant === "locked") {
-      renderLocalDoorMark(g, segment, variant === "open" ? "open" : variant, lineWidth);
-    }
-  }
-  g.restore();
+  const sprite = getRoomWallSprite(room, zoomBucket);
+  if (!sprite) return;
+  g.drawImage(sprite.canvas, -sprite.pad, -sprite.pad, tilePx + sprite.pad * 2, tilePx + sprite.pad * 2);
 }
 
 function drawOneWayExitOverlays(room) {
@@ -2468,6 +3316,66 @@ function getInsetEdgeSegment(size, dir, inset) {
   return { x1: inset, y1: inset, x2: inset, y2: size - inset };
 }
 
+function getRoomWallMask(room) {
+  let mask = 0;
+  if (!room) return mask;
+  if (["wall", "closed", "locked"].includes(getEdgeVariant(room, "n"))) mask |= TRAIL_DIR_BITS.n;
+  if (["wall", "closed", "locked"].includes(getEdgeVariant(room, "e"))) mask |= TRAIL_DIR_BITS.e;
+  if (["wall", "closed", "locked"].includes(getEdgeVariant(room, "s"))) mask |= TRAIL_DIR_BITS.s;
+  if (["wall", "closed", "locked"].includes(getEdgeVariant(room, "w"))) mask |= TRAIL_DIR_BITS.w;
+  return mask;
+}
+
+function getRoomWallSprite(room, zoomBucket) {
+  const mask = getRoomWallMask(room);
+  if (!mask) return null;
+
+  const lineWidth = Math.max(2.6, 2.6 * zoomBucket);
+  const pad = Math.ceil(lineWidth * 0.7) + 2;
+  const cacheKey = `${mask}:${zoomBucket}:${pad}`;
+  const cached = ROOM_WALL_SPRITE_CACHE.get(cacheKey);
+  if (cached) return cached;
+
+  const tilePx = Math.max(4, Math.round(TILE_SIZE * zoomBucket));
+  const canvas = document.createElement("canvas");
+  canvas.width = tilePx + pad * 2;
+  canvas.height = tilePx + pad * 2;
+  const g = canvas.getContext("2d");
+  if (!g) return null;
+
+  renderRoomWallSprite(g, tilePx, pad, mask, zoomBucket);
+  const sprite = { canvas, pad };
+  setCappedCache(ROOM_WALL_SPRITE_CACHE, cacheKey, sprite, MAX_ROOM_WALL_SPRITE_CACHE);
+  return sprite;
+}
+
+function renderRoomWallSprite(g, tilePx, pad, mask, zoomBucket) {
+  const opacity = wallOpacityForZoomValue(zoomBucket);
+  if (opacity <= 0) return;
+
+  const lineWidth = Math.max(2.6, 2.6 * zoomBucket) * (tilePx / TILE_SIZE);
+  const half = lineWidth * 0.5;
+  const x0 = pad;
+  const y0 = pad;
+  const x1 = pad + tilePx;
+  const y1 = pad + tilePx;
+
+  g.save();
+  g.globalAlpha *= opacity;
+  g.fillStyle = WALL_COLOR;
+  if (mask & TRAIL_DIR_BITS.n) g.fillRect(x0, y0 - half, tilePx, lineWidth);
+  if (mask & TRAIL_DIR_BITS.e) g.fillRect(x1 - half, y0, lineWidth, tilePx);
+  if (mask & TRAIL_DIR_BITS.s) g.fillRect(x0, y1 - half, tilePx, lineWidth);
+  if (mask & TRAIL_DIR_BITS.w) g.fillRect(x0 - half, y0, lineWidth, tilePx);
+
+  const sideCount = countBits(mask);
+  if (sideCount >= 3) {
+    g.fillRect(x0 + tilePx * 0.5 - half, y0 + tilePx * 0.5 - half, lineWidth, lineWidth);
+  }
+
+  g.restore();
+}
+
 function drawRoomTile(room, options) {
   const opts = options || {};
   const tilePx = TILE_SIZE * state.zoom;
@@ -2480,7 +3388,7 @@ function drawRoomTile(room, options) {
   ctx.save();
   ctx.globalAlpha = alpha;
 
-  const icon = state.sectorIcons.get(room.sector) || state.sectorIcons.get("inside");
+  const icon = getRoomTileImage(room, tilePx);
   if (room.darkUnknown) {
     ctx.fillStyle = "#353a40";
     ctx.fillRect(screenX, screenY - tileBleedY, tilePx, tilePx + tileBleedY * 2);
@@ -2528,28 +3436,23 @@ function drawRoomWallsAndDoors(room) {
   const x = state.panX + room.x * tilePx;
   const y = state.panY + room.y * tilePx;
   const line = Math.max(2.6, 2.6 * state.zoom);
-
   const dirs = {
     n: { x1: x, y1: y, x2: x + tilePx, y2: y },
     e: { x1: x + tilePx, y1: y, x2: x + tilePx, y2: y + tilePx },
     s: { x1: x, y1: y + tilePx, x2: x + tilePx, y2: y + tilePx },
     w: { x1: x, y1: y, x2: x, y2: y + tilePx }
   };
+  const sprite = getRoomWallSprite(room, getZoomSpriteBucket());
+  if (sprite) {
+    ctx.drawImage(sprite.canvas, x - sprite.pad, y - sprite.pad, tilePx + sprite.pad * 2, tilePx + sprite.pad * 2);
+  }
 
   for (const dir of ["n", "e", "s", "w"]) {
     const variant = getEdgeVariant(room, dir);
     if (!variant || variant === "oneway") continue;
-    const segment = dirs[dir];
-    if (variant === "wall") {
-      drawWall(segment, line, WALL_COLOR);
-      continue;
+    if (variant === "open" || variant === "closed" || variant === "locked") {
+      drawDoorMark(dirs[dir], variant === "open" ? "open" : variant, line);
     }
-    if (variant === "open") {
-      drawDoorMark(segment, "open", line);
-      continue;
-    }
-    drawWall(segment, line, WALL_COLOR);
-    drawDoorMark(segment, variant, line);
   }
 }
 
@@ -2642,22 +3545,37 @@ function wallOpacityForZoom() {
 function drawWall(segment, lineWidth, color) {
   ctx.save();
   ctx.globalAlpha *= wallOpacityForZoom();
-
-  ctx.strokeStyle = WALL_BORDER_COLOR;
-  ctx.lineWidth = lineWidth + Math.max(0.4, state.zoom * 0.4);
-  ctx.beginPath();
-  ctx.moveTo(segment.x1, segment.y1);
-  ctx.lineTo(segment.x2, segment.y2);
-  ctx.stroke();
-
-  ctx.strokeStyle = color;
-  ctx.lineWidth = lineWidth;
-  ctx.beginPath();
-  ctx.moveTo(segment.x1, segment.y1);
-  ctx.lineTo(segment.x2, segment.y2);
-  ctx.stroke();
-
+  drawWallCapsule(ctx, segment, lineWidth, WALL_BORDER_COLOR, color);
   ctx.restore();
+}
+
+function drawWallCapsule(g, segment, lineWidth, outerColor, innerColor) {
+  const horizontal = segment.y1 === segment.y2;
+  const length = horizontal ? Math.abs(segment.x2 - segment.x1) : Math.abs(segment.y2 - segment.y1);
+  const thickness = Math.max(1.8, lineWidth);
+  const outerThickness = thickness + Math.max(0.8, thickness * 0.24);
+  const inset = (outerThickness - thickness) * 0.5;
+
+  g.fillStyle = outerColor;
+  if (horizontal) {
+    const x = Math.min(segment.x1, segment.x2);
+    const y = segment.y1 - outerThickness * 0.5;
+    roundedRectPath(g, x - inset, y, length + inset * 2, outerThickness, outerThickness * 0.5);
+    g.fill();
+    g.fillStyle = innerColor;
+    roundedRectPath(g, x, segment.y1 - thickness * 0.5, length, thickness, thickness * 0.5);
+    g.fill();
+    return;
+  }
+
+  const x = segment.x1 - outerThickness * 0.5;
+  const y = Math.min(segment.y1, segment.y2);
+  g.beginPath();
+  roundedRectPath(g, x, y - inset, outerThickness, length + inset * 2, outerThickness * 0.5);
+  g.fill();
+  g.fillStyle = innerColor;
+  roundedRectPath(g, segment.x1 - thickness * 0.5, y, thickness, length, thickness * 0.5);
+  g.fill();
 }
 
 function drawDoorGap(segment, lineWidth) {
@@ -2850,7 +3768,7 @@ function getPoiMarkerSprite(kind, size, reduceGlow) {
   const g = canvas.getContext("2d");
   if (!g) {
     const fallback = { canvas, center };
-    POI_SPRITE_CACHE.set(cacheKey, fallback);
+    setCappedCache(POI_SPRITE_CACHE, cacheKey, fallback, MAX_POI_SPRITE_CACHE);
     return fallback;
   }
 
@@ -2884,7 +3802,7 @@ function getPoiMarkerSprite(kind, size, reduceGlow) {
   g.restore();
 
   const sprite = { canvas, center };
-  POI_SPRITE_CACHE.set(cacheKey, sprite);
+  setCappedCache(POI_SPRITE_CACHE, cacheKey, sprite, MAX_POI_SPRITE_CACHE);
   return sprite;
 }
 
@@ -2903,7 +3821,7 @@ function getWaterDropSprite(size, reduceGlow) {
   const g = canvas.getContext("2d");
   if (!g) {
     const fallback = { canvas, center };
-    WATER_DROP_SPRITE_CACHE.set(cacheKey, fallback);
+    setCappedCache(WATER_DROP_SPRITE_CACHE, cacheKey, fallback, MAX_WATER_DROP_SPRITE_CACHE);
     return fallback;
   }
 
@@ -2932,7 +3850,7 @@ function getWaterDropSprite(size, reduceGlow) {
   g.restore();
 
   const sprite = { canvas, center };
-  WATER_DROP_SPRITE_CACHE.set(cacheKey, sprite);
+  setCappedCache(WATER_DROP_SPRITE_CACHE, cacheKey, sprite, MAX_WATER_DROP_SPRITE_CACHE);
   return sprite;
 }
 
@@ -2955,7 +3873,7 @@ function getPlayerCenterSprite(outerR, innerR, tickLen, tickGap, reduceGlow) {
   const g = canvas.getContext("2d");
   if (!g) {
     const fallback = { canvas, center };
-    PLAYER_CENTER_SPRITE_CACHE.set(cacheKey, fallback);
+    setCappedCache(PLAYER_CENTER_SPRITE_CACHE, cacheKey, fallback, MAX_PLAYER_CENTER_SPRITE_CACHE);
     return fallback;
   }
 
@@ -2987,7 +3905,7 @@ function getPlayerCenterSprite(outerR, innerR, tickLen, tickGap, reduceGlow) {
   g.restore();
 
   const sprite = { canvas, center };
-  PLAYER_CENTER_SPRITE_CACHE.set(cacheKey, sprite);
+  setCappedCache(PLAYER_CENTER_SPRITE_CACHE, cacheKey, sprite, MAX_PLAYER_CENTER_SPRITE_CACHE);
   return sprite;
 }
 
@@ -3003,7 +3921,7 @@ function getEdgeSprite(dir, variant, zoomBucket) {
   if (!g) return null;
 
   renderEdgeSprite(g, DECOR_SPRITE_SIZE, dir, variant, zoomBucket);
-  EDGE_SPRITE_CACHE.set(cacheKey, canvas);
+  setCappedCache(EDGE_SPRITE_CACHE, cacheKey, canvas, MAX_EDGE_SPRITE_CACHE);
   return canvas;
 }
 
@@ -3164,12 +4082,14 @@ function getExtraExitSprite(room, zoomBucket) {
   const size = DECOR_SPRITE_SIZE;
   const midX = size * 0.5;
   const midY = size * 0.5;
+
   if (diagCount > 0) {
     g.fillStyle = "rgba(194, 225, 255, 0.9)";
     g.beginPath();
     g.arc(midX, midY, Math.max(2, 3 * zoomBucket) * (size / TILE_SIZE), 0, Math.PI * 2);
     g.fill();
   }
+
   if (hasUp) {
     g.fillStyle = "#7ff0b0";
     const ux = size * 0.88;
@@ -3177,12 +4097,13 @@ function getExtraExitSprite(room, zoomBucket) {
     const halfW = size * 0.11;
     const h = size * 0.16;
     g.beginPath();
-    g.moveTo(ux, uy);
+    g.moveTo(ux, uy - h);
     g.lineTo(ux - halfW, uy + h);
     g.lineTo(ux + halfW, uy + h);
     g.closePath();
     g.fill();
   }
+
   if (hasDown) {
     g.fillStyle = "#6fb8ff";
     const dx = size * 0.12;
@@ -3197,7 +4118,7 @@ function getExtraExitSprite(room, zoomBucket) {
     g.fill();
   }
 
-  EXTRA_EXIT_SPRITE_CACHE.set(cacheKey, canvas);
+  setCappedCache(EXTRA_EXIT_SPRITE_CACHE, cacheKey, canvas, MAX_EXTRA_EXIT_SPRITE_CACHE);
   return canvas;
 }
 
