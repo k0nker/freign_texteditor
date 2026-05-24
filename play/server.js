@@ -4,7 +4,7 @@
 const net = require('net');
 const tls = require('tls');
 const zlib = require('zlib');
-const { WebSocketServer } = require('ws');
+const { WebSocketServer, WebSocket } = require('ws');
 
 const PORT = parseInt(process.env.PLAY_WS_PORT || '9001', 10);
 const PATH = process.env.PLAY_WS_PATH || '/ws';
@@ -20,6 +20,9 @@ const HOST_ALLOWLIST = (process.env.PLAY_ALLOW_HOSTS || '')
   .split(',')
   .map((h) => h.trim().toLowerCase())
   .filter(Boolean);
+const FRMAPPER_PUBLIC_PORT = clampInt(process.env.FRMAPPER_PUBLIC_PORT, 1, 65535, 25555);
+const FRMAPPER_TEST_PORT = clampInt(process.env.FRMAPPER_TEST_PORT, 1, 65535, 25556);
+const FRMAPPER_UPSTREAM_HOST = String(process.env.FRMAPPER_UPSTREAM_HOST || FORCED_TARGET_HOST || '192.168.86.99').trim();
 
 const IAC = 255;
 const DONT = 254;
@@ -49,6 +52,9 @@ process.on('unhandledRejection', (reason) => {
 });
 
 const WS_HEARTBEAT_INTERVAL = 25000; // 25 s — server → client WebSocket ping
+const BRIDGE_VERSION = 'frmapper-tunnel-v2';
+
+console.log(`[play-bridge] startup ${BRIDGE_VERSION}`);
 
 const wss = new WebSocketServer({
   port: PORT,
@@ -66,6 +72,15 @@ const wss = new WebSocketServer({
 });
 
 wss.on('connection', (ws, req) => {
+  const reqUrl = parseRequestUrl(req);
+  const frmapperSession = reqUrl.searchParams.get('session');
+  const frmapperRealm = (reqUrl.searchParams.get('realm') || 'public').toLowerCase();
+
+  if (frmapperSession) {
+    startFrmapperTunnel(ws, frmapperSession, frmapperRealm);
+    return;
+  }
+
   const state = {
     socket: null,
     connectedHost: null,
@@ -151,6 +166,128 @@ wss.on('connection', (ws, req) => {
     closeMud(state, ws, null);
   });
 });
+
+function startFrmapperTunnel(ws, sessionToken, realm) {
+  const safeRealm = realm === 'test' ? 'test' : 'public';
+  const targetPort = safeRealm === 'test' ? FRMAPPER_TEST_PORT : FRMAPPER_PUBLIC_PORT;
+  const targetHost = FRMAPPER_UPSTREAM_HOST;
+  const upstreamUrl = `ws://${targetHost}:${targetPort}/frmapper/ws?session=${encodeURIComponent(sessionToken)}&realm=${encodeURIComponent(safeRealm)}`;
+  console.log(`[play-bridge] frmapper tunnel connect realm=${safeRealm} url=${upstreamUrl}`);
+
+  let upstream;
+  try {
+    upstream = new WebSocket(upstreamUrl, {
+      handshakeTimeout: 10000,
+      perMessageDeflate: false,
+      followRedirects: false,
+    });
+  } catch (err) {
+    console.error('[play-bridge] frmapper tunnel init failed:', err);
+    ws.close(1011, 'frmapper tunnel init failed');
+    return;
+  }
+
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
+
+  const heartbeat = setInterval(() => {
+    if (!ws.isAlive) {
+      clearInterval(heartbeat);
+      try { ws.terminate(); } catch {}
+      return;
+    }
+    ws.isAlive = false;
+    try { ws.ping(); } catch {}
+  }, WS_HEARTBEAT_INTERVAL);
+
+  upstream.on('open', () => {
+    console.log(`[play-bridge] frmapper upstream open realm=${safeRealm}`);
+    ws.send(json({ type: 'status', message: `Frmapper tunnel connected (${safeRealm}).` }));
+  });
+
+  upstream.on('unexpected-response', (req, res) => {
+    const chunks = [];
+    res.on('data', (d) => chunks.push(d));
+    res.on('end', () => {
+      const body = Buffer.concat(chunks).toString('utf8');
+      console.error(`[play-bridge] frmapper unexpected upstream response status=${res.statusCode} body=${body}`);
+    });
+  });
+
+  upstream.on('message', (data, isBinary) => {
+    if (ws.readyState === ws.OPEN) {
+      ws.send(data, { binary: isBinary });
+    }
+  });
+
+  upstream.on('close', (code, reason) => {
+    clearInterval(heartbeat);
+    console.log(`[play-bridge] frmapper upstream closed realm=${safeRealm} code=${String(code)} reason=${normalizeWsCloseReason(reason)}`);
+    if (ws.readyState === ws.OPEN || ws.readyState === ws.CONNECTING) {
+      // Never mirror upstream close codes directly; some values are invalid for ws.close().
+      safeWsClose(ws, 1000, '');
+    }
+  });
+
+  upstream.on('error', (err) => {
+    console.error('[play-bridge] frmapper upstream error:', err);
+    ws.send(json({ type: 'status', message: `Frmapper tunnel error: ${socketErrorMessage(err)}` }));
+  });
+
+  ws.on('message', (payload, isBinary) => {
+    // Frmapper mode is server-push; forward any client frames (ping/control extensions) transparently.
+    if (upstream.readyState === upstream.OPEN) {
+      upstream.send(payload, { binary: isBinary });
+    }
+  });
+
+  ws.on('close', () => {
+    clearInterval(heartbeat);
+    if (upstream.readyState === upstream.OPEN || upstream.readyState === upstream.CONNECTING) {
+      safeWsClose(upstream, 1000, 'client closed');
+    }
+  });
+}
+
+function normalizeWsCloseCode(code) {
+  const n = Number(code);
+  if (!Number.isFinite(n)) return 1000;
+  if (n >= 1000 && n <= 4999 && n !== 1005 && n !== 1006 && n !== 1015) {
+    return n;
+  }
+  return 1000;
+}
+
+function normalizeWsCloseReason(reason) {
+  if (reason == null) return '';
+  const text = Buffer.isBuffer(reason) ? reason.toString('utf8') : String(reason);
+  if (!text) return '';
+  // ws reason is limited to 123 bytes in UTF-8
+  return Buffer.from(text, 'utf8').subarray(0, 123).toString('utf8');
+}
+
+function safeWsClose(socket, code, reason) {
+  if (!socket) return;
+  const safeCode = normalizeWsCloseCode(code);
+  const safeReason = normalizeWsCloseReason(reason);
+  if (socket.readyState === socket.CONNECTING) {
+    try { socket.terminate(); } catch {}
+    return;
+  }
+  try {
+    socket.close(safeCode, safeReason);
+  } catch (err) {
+    try { socket.terminate(); } catch {}
+  }
+}
+
+function parseRequestUrl(req) {
+  try {
+    return new URL(req.url || '/', 'ws://play-bridge.local');
+  } catch {
+    return new URL('ws://play-bridge.local/');
+  }
+}
 
 function openMudConnection(ws, state, msg) {
   const target = resolveTarget(msg);

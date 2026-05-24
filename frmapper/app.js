@@ -4,15 +4,46 @@ const TILE_SIZE = 48;
 const WALL_COLOR = "#6a4a2c";
 const WALL_BORDER_COLOR = "rgba(16, 12, 8, 0.96)";
 const STORAGE_KEY = "frmapper.savedMap.v1";
-const TRAIL_DOT_HOLD_MS = 5000;
-const TRAIL_DOT_FADE_MIN_MS = 1400;
-const TRAIL_DOT_FADE_MAX_MS = 2100;
+const TRAIL_DOT_HOLD_MS = 3000;
+const TRAIL_DOT_FADE_MIN_MS = 2000;
+const TRAIL_DOT_FADE_MAX_MS = 2000;
 const FOG_STALE_START_MS = 8 * 60 * 1000;
 const FOG_STALE_FULL_MS = 40 * 60 * 1000;
 const TRAIL_SPRITE_SIZE = 64;
+const DECOR_SPRITE_SIZE = 96;
 const TRAIL_DIR_BITS = { n: 1, e: 2, s: 4, w: 8 };
 const TRAIL_SPRITE_CACHE = new Map();
+const MOB_DOT_SPRITE_CACHE = new Map();
+const POI_SPRITE_CACHE = new Map();
+const WATER_DROP_SPRITE_CACHE = new Map();
+const PLAYER_CENTER_SPRITE_CACHE = new Map();
+const EDGE_SPRITE_CACHE = new Map();
+const EXTRA_EXIT_SPRITE_CACHE = new Map();
+const ROOM_STATIC_SPRITE_CACHE = new Map();
 const DEFAULT_SCAN_DISTANCE = 3;
+const MOB_DOT_PALETTE = {
+  glowInner: "rgba(255, 70, 70, 0.56)",
+  glowOuter: "rgba(255, 20, 20, 0)",
+  coreHighlight: "rgba(255, 125, 125, 0.98)",
+  coreMid: "rgba(220, 40, 40, 0.98)",
+  coreOuter: "rgba(126, 8, 8, 0.98)"
+};
+const PARTY_DOT_PALETTE = {
+  glowInner: "rgba(146, 180, 255, 0.62)",
+  glowOuter: "rgba(114, 140, 255, 0)",
+  coreHighlight: "rgba(216, 228, 255, 0.99)",
+  coreMid: "rgba(134, 120, 255, 0.99)",
+  coreOuter: "rgba(72, 54, 184, 0.99)"
+};
+const TRAIL_DOT_PALETTE = {
+  glowInner: "rgba(250, 231, 155, 0.42)",
+  glowOuter: "rgba(250, 231, 155, 0)",
+  coreHighlight: "rgba(255, 242, 192, 0.92)",
+  coreMid: "rgba(226, 199, 108, 0.9)",
+  coreOuter: "rgba(136, 109, 36, 0.86)"
+};
+const PARTY_NEON_COLOR = "rgba(150, 166, 255, 0.94)";
+const PARTY_NEON_GLOW = "rgba(164, 150, 255, 0.97)";
 const SECTOR_ORDER = [
   "inside",
   "city",
@@ -75,11 +106,23 @@ const DIRECTION_ALIASES = {
   southwest: "sw"
 };
 
+const sessionParams = new URLSearchParams(window.location.search || "");
+const sessionToken = sessionParams.get("session") || "";
+const sessionRealm = sessionParams.get("realm") || "public";
+const sessionMode = sessionToken ? "ws" : "embed";
+const sessionWsUrl = buildSessionWsUrl(sessionToken, sessionRealm);
+
 const state = {
   mapData: { version: "frmapper.v1", meta: {}, rooms: [] },
   roomsById: new Map(),
   roomByCoord: new Map(),
   roomIndexById: new Map(),
+  roomsByGrid: new Map(),
+  roomsByLayer: new Map(),
+  roomCoordSetByLayer: new Map(),
+  roomBoundsByGrid: new Map(),
+  roomBoundsByLayer: new Map(),
+  roomLayerIndexDirty: false,
   selectedRoomId: null,
   hoverRoomId: null,
   activeGridId: "",
@@ -94,6 +137,10 @@ const state = {
   panStartX: 0,
   panStartY: 0,
   isEmbedMode: false,
+  sessionToken,
+  sessionRealm,
+  sessionMode,
+  sessionWsUrl,
   contextRoomId: null,
   resizeObserver: null,
   resizePassTimer: 0,
@@ -113,6 +160,12 @@ const state = {
   playerRoomId: null,
   partyMembers: [],
   roomMobs: [],
+  sessionSocket: null,
+  sessionSocketState: "disconnected",
+  sessionSocketReconnectTimer: 0,
+  sessionReconnectAttempts: 0,
+  sessionReconnectBaseMs: 1500,
+  sessionReconnectMaxMs: 60000,
   movementTrail: [],
   animation: {
     active: false,
@@ -130,6 +183,162 @@ const state = {
     toCoord: null
   }
 };
+
+function connectSessionSocket() {
+  if (!state.sessionWsUrl) return;
+  if (state.sessionSocket && state.sessionSocket.readyState !== WebSocket.CLOSED) return;
+  let socket;
+  try {
+    socket = new WebSocket(state.sessionWsUrl);
+  } catch (error) {
+    console.warn("frmapper websocket connection failed", error);
+    scheduleSessionReconnect();
+    return;
+  }
+
+  state.sessionSocket = socket;
+  state.sessionSocketState = "connecting";
+
+  socket.addEventListener("open", () => {
+    state.sessionSocketState = "connected";
+    state.sessionReconnectAttempts = 0;
+    if (state.sessionSocketReconnectTimer) {
+      window.clearTimeout(state.sessionSocketReconnectTimer);
+      state.sessionSocketReconnectTimer = 0;
+    }
+    console.info("frmapper websocket connected");
+  });
+
+  socket.addEventListener("close", (event) => {
+    state.sessionSocketState = "disconnected";
+    state.sessionSocket = null;
+    console.warn("frmapper websocket closed", {
+      code: event && typeof event.code === "number" ? event.code : 0,
+      reason: event && event.reason ? event.reason : ""
+    });
+    scheduleSessionReconnect();
+  });
+
+  socket.addEventListener("error", (event) => {
+    state.sessionSocketState = "error";
+    console.warn("frmapper websocket error", event);
+  });
+
+  socket.addEventListener("message", (event) => {
+    let msg = null;
+    try {
+      msg = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    handleSessionMessage(msg);
+  });
+}
+
+function scheduleSessionReconnect() {
+  if (state.sessionMode !== "ws") return;
+  if (!state.sessionWsUrl) return;
+  if (state.sessionSocketReconnectTimer) return;
+
+  state.sessionReconnectAttempts += 1;
+  const attempt = state.sessionReconnectAttempts;
+  const baseDelay = Math.min(
+    state.sessionReconnectMaxMs,
+    state.sessionReconnectBaseMs * Math.pow(2, Math.max(0, attempt - 1))
+  );
+  const jitter = Math.floor(Math.random() * 1000);
+  const reconnectDelay = Math.min(state.sessionReconnectMaxMs, baseDelay + jitter);
+  console.info("frmapper websocket reconnect scheduled", { attempt, delayMs: reconnectDelay });
+
+  state.sessionSocketReconnectTimer = window.setTimeout(() => {
+    state.sessionSocketReconnectTimer = 0;
+    if (!state.sessionSocket) {
+      connectSessionSocket();
+    }
+  }, reconnectDelay);
+}
+
+function handleSessionMessage(msg) {
+  if (!msg || typeof msg !== "object") return;
+  if (msg.type === "frmapper.attached") {
+    const payload = msg.payload && typeof msg.payload === "object" ? msg.payload : {};
+    const gmcpNegotiated = !!payload.gmcpNegotiated;
+    const gmcpEnabled = !!payload.gmcpEnabled;
+    console.info("frmapper attached", { gmcpNegotiated, gmcpEnabled });
+    if (!gmcpEnabled) {
+      console.warn("frmapper attached but GMCP feed is disabled; run 'frmapper' again in-game (or 'gmcp force') and reopen this page.");
+    }
+  }
+  if (msg.type === "frmapper.loadSnapshot" && msg.payload) {
+    applyMapObject(msg.payload, "Snapshot loaded via websocket");
+  }
+  if (msg.type === "frmapper.loadRoomInfoSnapshot" && msg.payload) {
+    applyRoomInfoSnapshot(msg.payload);
+  }
+  if (msg.type === "frmapper.upsertRoom" && msg.payload) {
+    upsertRoom(msg.payload);
+    schedulePersistMap();
+    scheduleRender();
+  }
+  if (msg.type === "frmapper.ingestRoomInfo" && msg.payload) {
+    ingestRoomInfo(msg.payload.roomInfo, msg.payload.durationMs);
+  }
+  if (msg.type === "frmapper.setPlayerLocation" && msg.payload) {
+    setPlayerLocationPayload(msg.payload);
+  }
+  if (msg.type === "frmapper.groupInfo" && msg.payload) {
+    updatePartyFromGroupInfo(msg.payload);
+  }
+  if (msg.type === "frmapper.roomMobs" && msg.payload) {
+    updateRoomMobs(msg.payload);
+  }
+  if (msg.type === "frmapper.centerOn" && msg.payload) {
+    centerOnPayload(msg.payload);
+  }
+  if (msg.type === "frmapper.moveTo" && msg.payload) {
+    moveToPayload(msg.payload);
+  }
+  if (msg.type === "frmapper.clearArea" && msg.payload) {
+    const gridId = String(msg.payload.gridId || msg.payload.grid_id || "");
+    if (gridId) clearAreaByGridId(gridId);
+  }
+  if (msg.type === "frmapper.resize") {
+    requestCanvasResizePass();
+  }
+  if (msg.type === "frmapper.controls.toggle") {
+    setEmbedControlsExpanded(undefined);
+  }
+  if (msg.type === "frmapper.controls.set") {
+    const expanded = !!(msg.payload && msg.payload.expanded);
+    setEmbedControlsExpanded(expanded);
+  }
+}
+
+function buildSessionWsUrl(token, realm) {
+  if (!token) return "";
+  const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const routeRealm = realm && realm.toLowerCase() === "test" ? "test" : "public";
+  const url = new URL(`${scheme}//${window.location.host}/frmapper/ws/${routeRealm}`);
+  url.searchParams.set("session", token);
+  if (realm) {
+    url.searchParams.set("realm", realm);
+  }
+  return url.toString();
+}
+
+function startFrmapperSessionMode() {
+  if (state.sessionMode !== "embed") return;
+  try {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({
+        type: "frmapper.ready",
+        payload: { mode: "embed" }
+      }, "*");
+    }
+  } catch (_error) {
+    // Host integration is optional; ignore cross-origin messaging failures.
+  }
+}
 
 const el = {
   embedToggle: document.getElementById("embed-toggle"),
@@ -165,6 +374,9 @@ async function init() {
   requestCanvasResizePass();
   const loadedPersisted = loadPersistedMap();
   if (!loadedPersisted) resetToEmptyMap();
+  if (state.sessionMode === "ws") {
+    connectSessionSocket();
+  }
   // Session view is intentionally not persisted: always start at 100% zoom.
   fitToView({ zoom: 1 });
   render();
@@ -183,9 +395,18 @@ function setupEmbedMode() {
   el.embedToggle.hidden = false;
   applyEmbedToggleState(false);
   el.embedToggle.addEventListener("click", () => {
-    const expanded = document.body.classList.toggle("controls-expanded");
-    applyEmbedToggleState(expanded);
+    setEmbedControlsExpanded(undefined);
   });
+}
+
+function setEmbedControlsExpanded(expanded) {
+  if (!state.isEmbedMode) return;
+  const isExplicit = typeof expanded === "boolean";
+  const nextExpanded = isExplicit
+    ? expanded
+    : !document.body.classList.contains("controls-expanded");
+  document.body.classList.toggle("controls-expanded", nextExpanded);
+  applyEmbedToggleState(nextExpanded);
 }
 
 function applyEmbedToggleState(expanded) {
@@ -408,45 +629,10 @@ function wireEvents() {
     clearMapWithConfirmation();
   });
 
+  startFrmapperSessionMode();
+
   window.addEventListener("message", (event) => {
-    const msg = event.data;
-    if (!msg || typeof msg !== "object") return;
-    if (msg.type === "frmapper.loadSnapshot" && msg.payload) {
-      applyMapObject(msg.payload, "Snapshot loaded via postMessage");
-    }
-    if (msg.type === "frmapper.loadRoomInfoSnapshot" && msg.payload) {
-      applyRoomInfoSnapshot(msg.payload);
-    }
-    if (msg.type === "frmapper.upsertRoom" && msg.payload) {
-      upsertRoom(msg.payload);
-      schedulePersistMap();
-      scheduleRender();
-    }
-    if (msg.type === "frmapper.ingestRoomInfo" && msg.payload) {
-      ingestRoomInfo(msg.payload.roomInfo, msg.payload.durationMs);
-    }
-    if (msg.type === "frmapper.setPlayerLocation" && msg.payload) {
-      setPlayerLocationPayload(msg.payload);
-    }
-    if (msg.type === "frmapper.groupInfo" && msg.payload) {
-      updatePartyFromGroupInfo(msg.payload);
-    }
-    if (msg.type === "frmapper.roomMobs" && msg.payload) {
-      updateRoomMobs(msg.payload);
-    }
-    if (msg.type === "frmapper.centerOn" && msg.payload) {
-      centerOnPayload(msg.payload);
-    }
-    if (msg.type === "frmapper.moveTo" && msg.payload) {
-      moveToPayload(msg.payload);
-    }
-    if (msg.type === "frmapper.clearArea" && msg.payload) {
-      const gridId = String(msg.payload.gridId || msg.payload.grid_id || "");
-      if (gridId) clearAreaByGridId(gridId);
-    }
-    if (msg.type === "frmapper.resize") {
-      requestCanvasResizePass();
-    }
+    handleSessionMessage(event.data);
   });
 }
 
@@ -637,7 +823,7 @@ function normalizeRoom(room) {
   const parsedEphNum = Number.parseInt(room.ephNum, 10);
   const parsedAreaID = Number.parseInt(room.areaID ?? room.areaId, 10);
   const parsedLocalID = Number.parseInt(room.localID ?? room.localId, 10);
-  return {
+  const normalized = {
     id: String(room.id),
     name: room.name ? String(room.name) : "",
     x: Number.parseInt(room.x, 10) || 0,
@@ -660,6 +846,8 @@ function normalizeRoom(room) {
     areaID: Number.isFinite(parsedAreaID) ? parsedAreaID : null,
     localID: Number.isFinite(parsedLocalID) ? parsedLocalID : null
   };
+  normalized.staticSignature = buildRoomStaticSignature(normalized);
+  return normalized;
 }
 
 function normalizeKnownMobs(value) {
@@ -682,6 +870,19 @@ function normalizeMarkers(markers) {
     runegate: !!(markers && markers.runegate),
     waterSource: !!(markers && markers.waterSource)
   };
+}
+
+function buildRoomStaticSignature(room) {
+  const markers = room && room.markers ? room.markers : {};
+  return [
+    String(room && room.sector ? room.sector : ""),
+    room && room.darkUnknown ? "1" : "0",
+    markers.shop ? "1" : "0",
+    markers.bank ? "1" : "0",
+    markers.runegate ? "1" : "0",
+    markers.waterSource ? "1" : "0",
+    JSON.stringify(room && room.exits ? room.exits : {})
+  ].join("|");
 }
 
 function detectWaterSource(objects) {
@@ -776,17 +977,71 @@ function normalizeDirectionToken(dir) {
   return DIRECTION_ALIASES[token] || "";
 }
 
+function deriveFallbackCoord(info, roomId, existingRoom) {
+  if (existingRoom && Number.isFinite(existingRoom.x) && Number.isFinite(existingRoom.y) && Number.isFinite(existingRoom.z)) {
+    return {
+      x: existingRoom.x,
+      y: existingRoom.y,
+      z: existingRoom.z,
+      gridId: normalizeGridId(existingRoom.gridId)
+    };
+  }
+
+  const playerRoomId = state.playerLocation && state.playerLocation.roomId
+    ? String(state.playerLocation.roomId)
+    : "";
+  const previousRoom = playerRoomId ? state.roomsById.get(playerRoomId) : null;
+  if (previousRoom && previousRoom.exits && typeof previousRoom.exits === "object") {
+    const fallbackGrid = normalizeGridId(
+      info && info.coord && info.coord.gridId !== undefined
+        ? info.coord.gridId
+        : previousRoom.gridId
+    );
+    for (const [dir, ex] of Object.entries(previousRoom.exits)) {
+      if (!ex || String(ex.to || "") !== roomId) continue;
+      const vec = DIRECTION_VECTORS[dir];
+      if (!vec) continue;
+      return {
+        x: previousRoom.x + vec.dx,
+        y: previousRoom.y + vec.dy,
+        z: previousRoom.z,
+        gridId: fallbackGrid
+      };
+    }
+    return {
+      x: previousRoom.x,
+      y: previousRoom.y,
+      z: previousRoom.z,
+      gridId: fallbackGrid
+    };
+  }
+
+  return {
+    x: 0,
+    y: 0,
+    z: 0,
+    gridId: normalizeGridId(info && info.coord ? info.coord.gridId : "")
+  };
+}
+
 function roomFromRoomInfo(info, existingRoom) {
   if (!info || typeof info !== "object") return null;
-  if (!info.coord || typeof info.coord !== "object") return null;
-
-  const x = Number.parseInt(info.coord.x, 10);
-  const y = -Number.parseInt(info.coord.y, 10);
-  const z = Number.parseInt(info.coord.z, 10);
-  const gridId = normalizeGridId(info.coord.gridId);
-  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null;
+  const coordInfo = info.coord && typeof info.coord === "object" ? info.coord : null;
 
   let roomId = String(info.id || "").trim();
+  const rawX = coordInfo ? Number.parseInt(coordInfo.x, 10) : Number.NaN;
+  const rawY = coordInfo ? -Number.parseInt(coordInfo.y, 10) : Number.NaN;
+  const rawZ = coordInfo ? Number.parseInt(coordInfo.z, 10) : Number.NaN;
+  const hasCoord = Number.isFinite(rawX) && Number.isFinite(rawY) && Number.isFinite(rawZ);
+
+  const fallback = hasCoord ? null : deriveFallbackCoord(info, roomId, existingRoom || null);
+  const x = hasCoord ? rawX : fallback.x;
+  const y = hasCoord ? rawY : fallback.y;
+  const z = hasCoord ? rawZ : fallback.z;
+  const gridId = hasCoord
+    ? normalizeGridId(coordInfo && coordInfo.gridId)
+    : fallback.gridId;
+
   if (!roomId) roomId = coordKey(x, y, z, gridId);
   const canSeeRoom = info.name !== null && info.name !== undefined;
 
@@ -975,6 +1230,7 @@ function upsertRoom(rawRoom) {
 
   state.roomsById.set(room.id, room);
   state.roomByCoord.set(coordKey(room.x, room.y, room.z, room.gridId), room.id);
+  state.roomLayerIndexDirty = true;
 }
 
 function areRoomsEquivalent(a, b) {
@@ -1050,7 +1306,11 @@ function applyScanMobSightings(scanSightings) {
       markers: {},
       nearbyMobs: {},
       knownMobs: mobs,
-      notes: ""
+      notes: "",
+      discovered: false,
+      darkUnknown: true,
+      visibleNow: false,
+      lastSeenAt: null
     });
   }
 }
@@ -1059,18 +1319,86 @@ function rebuildIndexes() {
   state.roomsById.clear();
   state.roomByCoord.clear();
   state.roomIndexById.clear();
+  state.roomsByGrid.clear();
+  state.roomsByLayer.clear();
+  state.roomCoordSetByLayer.clear();
+  state.roomBoundsByGrid.clear();
+  state.roomBoundsByLayer.clear();
 
   for (let i = 0; i < state.mapData.rooms.length; i++) {
     const room = state.mapData.rooms[i];
+    const gridKey = normalizeGridId(room.gridId);
+    const layerKey = `${gridKey}|${room.z}`;
     state.roomsById.set(room.id, room);
     state.roomByCoord.set(coordKey(room.x, room.y, room.z, room.gridId), room.id);
     state.roomIndexById.set(room.id, i);
+
+    if (!state.roomsByGrid.has(gridKey)) state.roomsByGrid.set(gridKey, []);
+    state.roomsByGrid.get(gridKey).push(room);
+
+    if (!state.roomsByLayer.has(layerKey)) state.roomsByLayer.set(layerKey, []);
+    state.roomsByLayer.get(layerKey).push(room);
+
+    if (!state.roomCoordSetByLayer.has(layerKey)) state.roomCoordSetByLayer.set(layerKey, new Set());
+    state.roomCoordSetByLayer.get(layerKey).add(`${room.x}:${room.y}`);
+
+    updateRoomBounds(state.roomBoundsByGrid, gridKey, room);
+    updateRoomBounds(state.roomBoundsByLayer, layerKey, room);
   }
+
+  state.roomLayerIndexDirty = false;
+}
+
+function updateRoomBounds(boundsMap, key, room) {
+  const existing = boundsMap.get(key);
+  if (!existing) {
+    boundsMap.set(key, { minX: room.x, maxX: room.x, minY: room.y, maxY: room.y });
+    return;
+  }
+  existing.minX = Math.min(existing.minX, room.x);
+  existing.maxX = Math.max(existing.maxX, room.x);
+  existing.minY = Math.min(existing.minY, room.y);
+  existing.maxY = Math.max(existing.maxY, room.y);
+}
+
+function ensureRoomLayerIndexes() {
+  if (!state.roomLayerIndexDirty) return;
+  rebuildIndexes();
+}
+
+function makeRoomLayerKey(gridId, z) {
+  return `${normalizeGridId(gridId)}|${z}`;
+}
+
+function getRoomsForGrid(gridId) {
+  ensureRoomLayerIndexes();
+  return state.roomsByGrid.get(normalizeGridId(gridId)) || [];
+}
+
+function getRoomsForLayer(gridId, z) {
+  ensureRoomLayerIndexes();
+  return state.roomsByLayer.get(makeRoomLayerKey(gridId, z)) || [];
+}
+
+function getRoomCoordSetForLayer(gridId, z) {
+  ensureRoomLayerIndexes();
+  return state.roomCoordSetByLayer.get(makeRoomLayerKey(gridId, z)) || new Set();
+}
+
+function getRoomBoundsForLayer(gridId, z) {
+  ensureRoomLayerIndexes();
+  return state.roomBoundsByLayer.get(makeRoomLayerKey(gridId, z)) || null;
+}
+
+function getRoomBoundsForGrid(gridId) {
+  ensureRoomLayerIndexes();
+  return state.roomBoundsByGrid.get(normalizeGridId(gridId)) || null;
 }
 
 function syncZLevels() {
-  const gridSet = new Set(state.mapData.rooms.map((r) => normalizeGridId(r.gridId)));
-  const gridIds = Array.from(gridSet).sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+  ensureRoomLayerIndexes();
+  const gridIds = Array.from(state.roomsByGrid.keys()).sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+  const gridSet = new Set(gridIds);
 
   let activeGrid = normalizeGridId(state.activeGridId);
   if (!gridSet.has(activeGrid) && gridIds.length > 0) {
@@ -1093,11 +1421,7 @@ function syncZLevels() {
     el.gridId.value = String(activeGrid);
   }
 
-  const zSet = new Set(
-    state.mapData.rooms
-      .filter((r) => normalizeGridId(r.gridId) === activeGrid)
-      .map((r) => r.z)
-  );
+  const zSet = new Set(getRoomsForGrid(activeGrid).map((r) => r.z));
   if (zSet.size === 0) zSet.add(0);
   state.zLevels = Array.from(zSet).sort((a, b) => a - b);
   if (!zSet.has(state.activeZ)) state.activeZ = state.zLevels[0];
@@ -1134,7 +1458,7 @@ function syncZLevels() {
 function fitToView(options) {
   const opts = options || {};
   const activeGrid = normalizeGridId(state.activeGridId);
-  const rooms = state.mapData.rooms.filter((r) => r.z === state.activeZ && normalizeGridId(r.gridId) === activeGrid);
+  const rooms = getRoomsForLayer(activeGrid, state.activeZ);
   if (rooms.length === 0) {
     state.zoom = typeof opts.zoom === "number" ? opts.zoom : 1;
     if (el.zoomRange) el.zoomRange.value = String(state.zoom);
@@ -1144,17 +1468,8 @@ function fitToView(options) {
     return;
   }
 
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minY = Infinity;
-  let maxY = -Infinity;
-
-  for (const room of rooms) {
-    minX = Math.min(minX, room.x);
-    maxX = Math.max(maxX, room.x);
-    minY = Math.min(minY, room.y);
-    maxY = Math.max(maxY, room.y);
-  }
+  const bounds = getRoomBoundsForLayer(activeGrid, state.activeZ);
+  if (!bounds) return;
 
   const rect = el.canvas.getBoundingClientRect();
   const fitZoom = computeFitZoomForRooms(rooms, rect.width, rect.height);
@@ -1167,8 +1482,8 @@ function fitToView(options) {
   if (el.zoomRange) el.zoomRange.value = String(state.zoom);
   if (el.zoomValue) el.zoomValue.textContent = `${Math.round(state.zoom * 100)}%`;
 
-  const centerWorldX = ((minX + maxX + 1) / 2) * TILE_SIZE;
-  const centerWorldY = ((minY + maxY + 1) / 2) * TILE_SIZE;
+  const centerWorldX = ((bounds.minX + bounds.maxX + 1) / 2) * TILE_SIZE;
+  const centerWorldY = ((bounds.minY + bounds.maxY + 1) / 2) * TILE_SIZE;
   state.panX = rect.width / 2 - centerWorldX * state.zoom;
   state.panY = rect.height / 2 - centerWorldY * state.zoom;
 }
@@ -1198,7 +1513,7 @@ function computeFitZoomForRooms(rooms, viewWidth, viewHeight) {
 
 function getMinZoomForActiveGrid() {
   const activeGrid = normalizeGridId(state.activeGridId);
-  const rooms = state.mapData.rooms.filter((r) => normalizeGridId(r.gridId) === activeGrid);
+  const rooms = getRoomsForGrid(activeGrid);
   if (!rooms.length) return 0.05;
   const rect = el.canvas.getBoundingClientRect();
   const fitZoom = computeFitZoomForRooms(rooms, rect.width, rect.height);
@@ -1221,15 +1536,15 @@ function render() {
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
 
   const activeGrid = normalizeGridId(state.activeGridId);
-  const gridRooms = state.mapData.rooms.filter((r) => normalizeGridId(r.gridId) === activeGrid);
-  const rooms = gridRooms.filter((r) => r.z === state.activeZ);
+  const gridRooms = getRoomsForGrid(activeGrid);
+  const rooms = getRoomsForLayer(activeGrid, state.activeZ);
   const lightMode = state.isSafari && (state.dragging || state.animation.active);
   const tilePx = TILE_SIZE * state.zoom;
   const viewW = el.canvas.clientWidth;
   const viewH = el.canvas.clientHeight;
   const visibleRooms = [];
   const visibleFadedRooms = [];
-  const occupiedActive = new Set(rooms.map((r) => `${r.x}:${r.y}`));
+  const occupiedActive = getRoomCoordSetForLayer(activeGrid, state.activeZ);
 
   for (const room of rooms) {
     const sx = state.panX + room.x * tilePx;
@@ -1250,11 +1565,11 @@ function render() {
   }
 
   for (const room of visibleFadedRooms) {
-    drawRoomTile(room, { alpha: 0.22, ghost: true });
+    drawRoomStaticSprite(room, { ghost: true });
   }
 
   for (const room of visibleRooms) {
-    drawRoomTile(room);
+    drawRoomStaticSprite(room);
   }
 
   if (state.showFogOfWar) {
@@ -1276,11 +1591,19 @@ function render() {
 
   for (const room of visibleRooms) {
     drawRoomWallsAndDoors(room);
-    drawExtraExitMarkers(room);
-    if (!lightMode) drawRoomPoiMarkers(room);
+  }
+
+  for (const room of visibleRooms) {
+    drawOneWayExitOverlays(room);
   }
 
   drawActiveMoveLine();
+
+  for (const room of visibleRooms) {
+    if (room.id === state.selectedRoomId) {
+      drawSelectedRoomOutline(room);
+    }
+  }
 }
 
 function detectSafari() {
@@ -1449,103 +1772,42 @@ function drawRoomPoiMarkers(room) {
   if (room.markers.bank) markers.push("bank");
   if (room.markers.runegate) markers.push("runegate");
 
+  const opacity = wallOpacityForZoom();
+  if (opacity <= 0) return;
+
   const tilePx = TILE_SIZE * state.zoom;
   const x = state.panX + room.x * tilePx;
   const y = state.panY + room.y * tilePx;
+  const cornerInset = Math.max(1.5, state.zoom * 5);
 
+  ctx.save();
+  ctx.globalAlpha *= opacity;
   if (markers.length > 0) {
-    const size = Math.max(7, state.zoom * 7.5);
-    const step = size * 2 + 4;
+    const size = Math.max(2.25, state.zoom * 7.5);
+    const step = size * 2 + Math.max(1.5, state.zoom * 3);
     markers.forEach((kind, i) => {
-      const cx = x + 5 + size + i * step;
-      const cy = y + 5 + size;
+      const cx = x + cornerInset + size + i * step;
+      const cy = y + cornerInset + size;
       drawPoiMarker(kind, cx, cy, size);
     });
   }
 
   // Water source icon in bottom-right corner.
   if (room.markers.waterSource) {
-    const wSize = Math.max(5, state.zoom * 6);
-    drawWaterDrop(x + tilePx - wSize - 5, y + tilePx - wSize - 5, wSize);
+    const wSize = Math.max(2, state.zoom * 6);
+    drawWaterDrop(x + tilePx - wSize - cornerInset, y + tilePx - wSize - cornerInset, wSize);
   }
+  ctx.restore();
 }
 
 function drawWaterDrop(cx, cy, size) {
-  const shadowScale = shouldReduceGlowEffects() ? 0.25 : 1;
-  ctx.save();
-  ctx.shadowColor = "rgba(80, 180, 255, 0.95)";
-  ctx.shadowBlur = Math.max(4, Math.round(state.zoom * 8 * shadowScale));
-
-  // Teardrop shape: pointed top, rounded bottom.
-  ctx.beginPath();
-  ctx.moveTo(cx, cy - size * 0.6);                        // top point
-  ctx.bezierCurveTo(
-    cx + size * 0.55, cy - size * 0.05,
-    cx + size * 0.55, cy + size * 0.55,
-    cx, cy + size * 0.65
-  );
-  ctx.bezierCurveTo(
-    cx - size * 0.55, cy + size * 0.55,
-    cx - size * 0.55, cy - size * 0.05,
-    cx, cy - size * 0.6
-  );
-  ctx.closePath();
-  ctx.fillStyle = "rgba(40, 155, 255, 0.9)";
-  ctx.fill();
-
-  // Highlight.
-  ctx.beginPath();
-  ctx.arc(cx - size * 0.18, cy - size * 0.1, size * 0.17, 0, Math.PI * 2);
-  ctx.fillStyle = "rgba(180, 230, 255, 0.65)";
-  ctx.fill();
-
-  ctx.restore();
+  const sprite = getWaterDropSprite(size, shouldReduceGlowEffects());
+  ctx.drawImage(sprite.canvas, cx - sprite.center, cy - sprite.center);
 }
 
 function drawPoiMarker(kind, cx, cy, size) {
-  ctx.save();
-  ctx.shadowColor = "rgba(255, 236, 165, 0.8)";
-  ctx.shadowBlur = Math.max(5, state.zoom * 6);
-
-  ctx.fillStyle = "rgba(22, 28, 35, 0.92)";
-  ctx.beginPath();
-  ctx.arc(cx, cy, size, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.shadowBlur = 0;
-  ctx.lineWidth = Math.max(1.2, state.zoom * 1.2);
-  ctx.strokeStyle = "rgba(250, 224, 120, 0.95)";
-
-  if (kind === "shop") {
-    ctx.beginPath();
-    ctx.arc(cx, cy, size * 0.45, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(cx, cy, size * 0.15, 0, Math.PI * 2);
-    ctx.stroke();
-  } else if (kind === "bank") {
-    // Moneybag icon.
-    ctx.beginPath();
-    ctx.moveTo(cx - size * 0.5, cy + size * 0.35);
-    ctx.quadraticCurveTo(cx - size * 0.55, cy - size * 0.15, cx, cy - size * 0.05);
-    ctx.quadraticCurveTo(cx + size * 0.55, cy - size * 0.15, cx + size * 0.5, cy + size * 0.35);
-    ctx.closePath();
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(cx - size * 0.2, cy - size * 0.18);
-    ctx.lineTo(cx + size * 0.2, cy - size * 0.18);
-    ctx.stroke();
-  } else if (kind === "runegate") {
-    // Archway icon.
-    ctx.beginPath();
-    ctx.moveTo(cx - size * 0.45, cy + size * 0.35);
-    ctx.lineTo(cx - size * 0.45, cy - size * 0.05);
-    ctx.arc(cx, cy - size * 0.05, size * 0.45, Math.PI, 0);
-    ctx.lineTo(cx + size * 0.45, cy + size * 0.35);
-    ctx.stroke();
-  }
-
-  ctx.restore();
+  const sprite = getPoiMarkerSprite(kind, size, shouldReduceGlowEffects());
+  ctx.drawImage(sprite.canvas, cx - sprite.center, cy - sprite.center);
 }
 
 function drawPartyOverlays(visibleRooms) {
@@ -1581,25 +1843,9 @@ function drawPartyDot(room) {
   // Bottom of tile — avoids overlapping mob dots which sit at the top.
   const y = state.panY + room.y * tilePx + tilePx - Math.max(6, state.zoom * 6);
   const r = Math.max(3.5, state.zoom * 3.5);
-  const shadowScale = shouldReduceGlowEffects() ? 0.25 : 1;
+  const sprite = getDotSprite(r, shouldReduceGlowEffects(), PARTY_DOT_PALETTE);
   ctx.save();
-  ctx.shadowColor = "rgba(180, 0, 255, 0.95)";
-  ctx.shadowBlur = Math.max(5, Math.round(Math.max(10, state.zoom * 12) * shadowScale));
-  // Outer ring — bright purple.
-  ctx.fillStyle = "rgba(155, 35, 235, 0.97)";
-  ctx.beginPath();
-  ctx.arc(x, y, r, 0, Math.PI * 2);
-  ctx.fill();
-  // Dark center.
-  ctx.fillStyle = "rgba(35, 0, 70, 0.9)";
-  ctx.beginPath();
-  ctx.arc(x, y, r * 0.48, 0, Math.PI * 2);
-  ctx.fill();
-  // Specular highlight.
-  ctx.fillStyle = "rgba(220, 150, 255, 0.5)";
-  ctx.beginPath();
-  ctx.arc(x - r * 0.28, y - r * 0.28, r * 0.18, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.drawImage(sprite.canvas, x - sprite.center, y - sprite.center);
   ctx.restore();
 }
 
@@ -1622,7 +1868,7 @@ function drawAnchorWaypoint(room, dir) {
   const pad = Math.max(2, state.zoom * 2);
   const cx = x + tilePx * 0.5;
   const cy = y + tilePx * 0.5;
-  const color = "rgba(220, 90, 220, 0.88)";
+  const color = PARTY_NEON_COLOR;
 
   if (dir === "n") drawTriangle(cx, y + pad, 0, color);
   else if (dir === "s") drawTriangle(cx, y + tilePx - pad, Math.PI, color);
@@ -1647,7 +1893,7 @@ function drawOffscreenPartyWaypoint(room) {
   const edgeX = centerX + nx * (Math.min(rect.width, rect.height) * 0.45);
   const edgeY = centerY + ny * (Math.min(rect.width, rect.height) * 0.45);
   const ang = Math.atan2(ny, nx) + Math.PI * 0.5;
-  drawTriangle(edgeX, edgeY, ang, "rgba(220, 90, 220, 0.88)");
+  drawTriangle(edgeX, edgeY, ang, PARTY_NEON_COLOR);
 }
 
 function drawTriangle(x, y, angle, color) {
@@ -1656,7 +1902,7 @@ function drawTriangle(x, y, angle, color) {
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(angle);
-  ctx.shadowColor = "rgba(200, 80, 255, 0.95)";
+  ctx.shadowColor = PARTY_NEON_GLOW;
   ctx.shadowBlur = Math.max(8, Math.round(state.zoom * 16 * shadowScale));
   ctx.strokeStyle = color;
   ctx.lineWidth = Math.max(2, state.zoom * 2.5);
@@ -1760,28 +2006,13 @@ function drawMobDotsOnRoom(room, mobCount) {
   const step = r * 2 + Math.max(2, state.zoom * 2);
   const startX = x + tilePx * 0.5 - ((dots - 1) * step) * 0.5;
   const dotY = y + Math.max(6, state.zoom * 6);
-  const shadowScale = shouldReduceGlowEffects() ? 0.25 : 1;
+  const reduceGlow = shouldReduceGlowEffects();
+  const sprite = getDotSprite(r, reduceGlow, MOB_DOT_PALETTE);
 
   ctx.save();
-  ctx.shadowColor = "rgba(220, 0, 0, 0.98)";
-  ctx.shadowBlur = Math.max(2, Math.round(Math.max(12, state.zoom * 14) * shadowScale));
   for (let i = 0; i < dots; i++) {
     const cx = startX + i * step;
-    // Outer ring — bright red.
-    ctx.fillStyle = "rgba(200, 20, 20, 0.98)";
-    ctx.beginPath();
-    ctx.arc(cx, dotY, r, 0, Math.PI * 2);
-    ctx.fill();
-    // Dark center — gives dark-in-middle, lighter-at-edge feel.
-    ctx.fillStyle = "rgba(60, 0, 0, 0.92)";
-    ctx.beginPath();
-    ctx.arc(cx, dotY, r * 0.48, 0, Math.PI * 2);
-    ctx.fill();
-    // Tiny specular highlight.
-    ctx.fillStyle = "rgba(255, 120, 120, 0.55)";
-    ctx.beginPath();
-    ctx.arc(cx - r * 0.28, dotY - r * 0.28, r * 0.18, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.drawImage(sprite.canvas, cx - sprite.center, dotY - sprite.center);
   }
   ctx.restore();
 
@@ -1791,6 +2022,50 @@ function drawMobDotsOnRoom(room, mobCount) {
     ctx.textBaseline = "middle";
     ctx.fillText(`+${count - dots}`, startX + (dots - 1) * step + r + 2, dotY);
   }
+}
+
+function getDotSprite(radius, reduceGlow, palette) {
+  const roundedRadius = Math.max(1, Math.round(radius * 10) / 10);
+  const paletteKey = [palette.glowInner, palette.glowOuter, palette.coreHighlight, palette.coreMid, palette.coreOuter].join("|");
+  const cacheKey = `${roundedRadius}:${reduceGlow ? 1 : 0}:${paletteKey}`;
+  const cached = MOB_DOT_SPRITE_CACHE.get(cacheKey);
+  if (cached) return cached;
+
+  const glowRadius = roundedRadius * (reduceGlow ? 1.15 : 2.2);
+  const half = Math.ceil(roundedRadius + glowRadius + 2);
+  const size = Math.max(8, half * 2);
+  const center = size * 0.5;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const sctx = canvas.getContext("2d");
+  if (!sctx) {
+    const fallback = { canvas, center };
+    MOB_DOT_SPRITE_CACHE.set(cacheKey, fallback);
+    return fallback;
+  }
+
+  const glowGradient = sctx.createRadialGradient(center, center, roundedRadius * 0.35, center, center, roundedRadius + glowRadius);
+  glowGradient.addColorStop(0, palette.glowInner);
+  glowGradient.addColorStop(1, palette.glowOuter);
+  sctx.fillStyle = glowGradient;
+  sctx.beginPath();
+  sctx.arc(center, center, roundedRadius + glowRadius, 0, Math.PI * 2);
+  sctx.fill();
+
+  const coreGradient = sctx.createRadialGradient(center - roundedRadius * 0.22, center - roundedRadius * 0.22, roundedRadius * 0.25, center, center, roundedRadius);
+  coreGradient.addColorStop(0, palette.coreHighlight);
+  coreGradient.addColorStop(0.45, palette.coreMid);
+  coreGradient.addColorStop(1, palette.coreOuter);
+  sctx.fillStyle = coreGradient;
+  sctx.beginPath();
+  sctx.arc(center, center, roundedRadius, 0, Math.PI * 2);
+  sctx.fill();
+
+  const sprite = { canvas, center };
+  MOB_DOT_SPRITE_CACHE.set(cacheKey, sprite);
+  return sprite;
 }
 
 function centerOnPayload(payload) {
@@ -1828,6 +2103,8 @@ function setPlayerLocationPayload(payload) {
   }
   if (!targetRoom) return;
 
+  touchRoomSeen(targetRoom.id);
+
   const prior = state.playerLocation;
   const next = { x: targetRoom.x, y: targetRoom.y, z: targetRoom.z, gridId: normalizeGridId(targetRoom.gridId) };
   const moved = !!prior && (
@@ -1851,6 +2128,23 @@ function setPlayerLocationPayload(payload) {
     addMovementTrail(prior, next);
   }
   startPanAnimation(targetPan.x, targetPan.y, durationMs, moved ? prior : null, moved ? next : null);
+}
+
+function touchRoomSeen(roomId) {
+  const id = String(roomId || "");
+  if (!id) return;
+  const existing = state.roomsById.get(id);
+  if (!existing) return;
+
+  const now = Date.now();
+  const next = normalizeRoom({
+    ...existing,
+    visibleNow: true,
+    discovered: true,
+    darkUnknown: false,
+    lastSeenAt: now
+  });
+  upsertRoom(next);
 }
 
 function moveToPayload(payload) {
@@ -1945,11 +2239,12 @@ function drawActiveMoveLine() {
       const x = state.panX + (dot.x + 0.5) * tilePx;
       const y = state.panY + (dot.y + 0.5) * tilePx;
       const radius = Math.max(1.4, state.zoom * 1.45);
+      const sprite = getDotSprite(radius, true, TRAIL_DOT_PALETTE);
 
-      ctx.fillStyle = `rgba(250, 231, 155, ${Math.min(0.63, alpha * 0.7)})`;
-      ctx.beginPath();
-      ctx.arc(x, y, radius, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.save();
+      ctx.globalAlpha *= Math.min(0.63, alpha * 0.7);
+      ctx.drawImage(sprite.canvas, x - sprite.center, y - sprite.center);
+      ctx.restore();
     }
   }
 
@@ -1965,43 +2260,176 @@ function drawPlayerCenterIcon(x, y) {
   const innerR = Math.max(1.9, state.zoom * 1.9);
   const tickLen = Math.max(2.8, state.zoom * 2.8);
   const tickGap = Math.max(1.6, state.zoom * 1.6);
-  const shadowScale = shouldReduceGlowEffects() ? 0.25 : 1;
-
-  ctx.save();
-  ctx.shadowColor = "rgba(128, 225, 255, 0.95)";
-  ctx.shadowBlur = Math.max(1, Math.round(Math.max(8, state.zoom * 8.5) * shadowScale));
-
-  // Outer ring.
-  ctx.strokeStyle = "rgba(164, 241, 255, 0.98)";
-  ctx.lineWidth = Math.max(1.4, state.zoom * 1.4);
-  ctx.beginPath();
-  ctx.arc(x, y, outerR, 0, Math.PI * 2);
-  ctx.stroke();
-
-  // Inner center dot.
-  ctx.fillStyle = "rgba(200, 249, 255, 0.98)";
-  ctx.beginPath();
-  ctx.arc(x, y, innerR, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Crosshair ticks (GPS-style center marker).
-  ctx.lineWidth = Math.max(1.2, state.zoom * 1.2);
-  ctx.beginPath();
-  ctx.moveTo(x, y - outerR - tickGap);
-  ctx.lineTo(x, y - outerR - tickGap - tickLen);
-  ctx.moveTo(x, y + outerR + tickGap);
-  ctx.lineTo(x, y + outerR + tickGap + tickLen);
-  ctx.moveTo(x - outerR - tickGap, y);
-  ctx.lineTo(x - outerR - tickGap - tickLen, y);
-  ctx.moveTo(x + outerR + tickGap, y);
-  ctx.lineTo(x + outerR + tickGap + tickLen, y);
-  ctx.stroke();
-
-  ctx.restore();
+  const sprite = getPlayerCenterSprite(outerR, innerR, tickLen, tickGap, shouldReduceGlowEffects());
+  ctx.drawImage(sprite.canvas, x - sprite.center, y - sprite.center);
 }
 
 function shouldReduceGlowEffects() {
   return state.isSafari && (state.dragging || state.animation.active);
+}
+
+function drawRoomStaticSprite(room, options) {
+  const opts = options || {};
+  const ghost = !!opts.ghost;
+  const tilePx = TILE_SIZE * state.zoom;
+  const screenX = state.panX + room.x * tilePx;
+  const screenY = state.panY + room.y * tilePx;
+  const zoomBucket = getZoomSpriteBucket();
+  const sprite = getRoomStaticSprite(room, zoomBucket, ghost);
+  if (!sprite) return;
+
+  ctx.save();
+  if (ghost) {
+    ctx.globalAlpha *= 0.22;
+  }
+  ctx.drawImage(sprite, screenX, screenY, tilePx, tilePx);
+  ctx.restore();
+}
+
+function getRoomStaticSprite(room, zoomBucket, ghost) {
+  const cacheKey = `${room.staticSignature}:${ghost ? 1 : 0}:${zoomBucket}`;
+  const cached = ROOM_STATIC_SPRITE_CACHE.get(cacheKey);
+  if (cached) return cached;
+
+  const tilePx = Math.max(4, Math.round(TILE_SIZE * zoomBucket));
+  const canvas = document.createElement("canvas");
+  canvas.width = tilePx;
+  canvas.height = tilePx;
+  const g = canvas.getContext("2d");
+  if (!g) return null;
+  g.imageSmoothingEnabled = false;
+
+  renderRoomStaticSprite(g, room, tilePx, zoomBucket, ghost);
+  ROOM_STATIC_SPRITE_CACHE.set(cacheKey, canvas);
+  return canvas;
+}
+
+function renderRoomStaticSprite(g, room, tilePx, zoomBucket, ghost) {
+  renderRoomTileToContext(g, room, tilePx);
+
+  if (ghost) {
+    g.save();
+    g.strokeStyle = "rgba(220, 228, 238, 0.35)";
+    g.lineWidth = Math.max(1, zoomBucket * 0.9);
+    g.strokeRect(0.5, 0.5, tilePx - 1, tilePx - 1);
+    g.restore();
+    return;
+  }
+
+  const extraExitSprite = getExtraExitSprite(room, zoomBucket);
+  if (extraExitSprite) {
+    g.drawImage(extraExitSprite, 0, 0, tilePx, tilePx);
+  }
+
+  renderRoomPoiMarkersToContext(g, room, tilePx, zoomBucket);
+}
+
+function renderRoomTileToContext(g, room, tilePx) {
+  const tileBleedY = Math.max(0.22, tilePx * 0.0045);
+  const icon = state.sectorIcons.get(room.sector) || state.sectorIcons.get("inside");
+
+  if (room.darkUnknown) {
+    g.fillStyle = "#353a40";
+    g.fillRect(0, -tileBleedY, tilePx, tilePx + tileBleedY * 2);
+    return;
+  }
+  if (icon) {
+    g.drawImage(icon, 0, -tileBleedY, tilePx, tilePx + tileBleedY * 2);
+    return;
+  }
+  g.fillStyle = "#1f2f3f";
+  g.fillRect(0, -tileBleedY, tilePx, tilePx + tileBleedY * 2);
+}
+
+function renderRoomPoiMarkersToContext(g, room, tilePx, zoomBucket) {
+  if (!room.markers) return;
+  const markers = [];
+  if (room.markers.shop) markers.push("shop");
+  if (room.markers.bank) markers.push("bank");
+  if (room.markers.runegate) markers.push("runegate");
+
+  const opacity = wallOpacityForZoomValue(zoomBucket);
+  if (opacity <= 0) return;
+
+  const cornerInset = Math.max(1.5, zoomBucket * 5);
+  g.save();
+  g.globalAlpha *= opacity;
+
+  if (markers.length > 0) {
+    const size = Math.max(3.4, zoomBucket * 9.5);
+    const step = size * 2 + Math.max(2, zoomBucket * 4);
+    const startY = tilePx * 0.5 - ((markers.length - 1) * step) * 0.5;
+    markers.forEach((kind, i) => {
+      const sprite = getPoiMarkerSprite(kind, size, false);
+      if (!sprite) return;
+      const cx = cornerInset + size;
+      const cy = startY + i * step;
+      g.drawImage(sprite.canvas, cx - sprite.center, cy - sprite.center);
+    });
+  }
+
+  if (room.markers.waterSource) {
+    const wSize = Math.max(2, zoomBucket * 6);
+    const sprite = getWaterDropSprite(wSize, false);
+    if (sprite) {
+      const cx = tilePx - wSize - cornerInset;
+      const cy = tilePx - wSize - cornerInset;
+      g.drawImage(sprite.canvas, cx - sprite.center, cy - sprite.center);
+    }
+  }
+  g.restore();
+}
+
+function drawSelectedRoomOutline(room) {
+  const tilePx = TILE_SIZE * state.zoom;
+  const screenX = state.panX + room.x * tilePx;
+  const screenY = state.panY + room.y * tilePx;
+  ctx.save();
+  ctx.strokeStyle = "rgba(120, 205, 255, 0.9)";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(screenX + 0.5, screenY + 0.5, tilePx - 1, tilePx - 1);
+  ctx.restore();
+}
+
+function getRoomWallSignature(room) {
+  return ["n", "e", "s", "w"].map((dir) => getEdgeVariant(room, dir) || "-").join("|");
+}
+
+function renderRoomWallsToContext(g, room, tilePx, zoomBucket) {
+  const opacity = wallOpacityForZoomValue(zoomBucket);
+  if (opacity <= 0) return;
+
+  const lineWidth = Math.max(2.6, 2.6 * zoomBucket) * (tilePx / TILE_SIZE);
+  const edgeInset = Math.max(lineWidth * 0.5 + 0.75, tilePx * 0.035);
+
+  g.save();
+  g.globalAlpha *= opacity;
+  for (const dir of ["n", "e", "s", "w"]) {
+    const variant = getEdgeVariant(room, dir);
+    if (!variant) continue;
+    const segment = getInsetEdgeSegment(tilePx, dir, edgeInset);
+    if (variant === "wall" || variant === "closed" || variant === "locked") {
+      renderLocalWall(g, segment, lineWidth, 1);
+    }
+    if (variant === "open" || variant === "closed" || variant === "locked") {
+      renderLocalDoorMark(g, segment, variant === "open" ? "open" : variant, lineWidth);
+    }
+  }
+  g.restore();
+}
+
+function drawOneWayExitOverlays(room) {
+  for (const dir of ["n", "e", "s", "w"]) {
+    if (getEdgeVariant(room, dir) !== "oneway") continue;
+    drawOneWayExitArrow(room, dir);
+  }
+}
+
+function getInsetEdgeSegment(size, dir, inset) {
+  if (dir === "n") return { x1: inset, y1: inset, x2: size - inset, y2: inset };
+  if (dir === "e") return { x1: size - inset, y1: inset, x2: size - inset, y2: size - inset };
+  if (dir === "s") return { x1: inset, y1: size - inset, x2: size - inset, y2: size - inset };
+  return { x1: inset, y1: inset, x2: inset, y2: size - inset };
 }
 
 function drawRoomTile(room, options) {
@@ -2018,7 +2446,7 @@ function drawRoomTile(room, options) {
 
   const icon = state.sectorIcons.get(room.sector) || state.sectorIcons.get("inside");
   if (room.darkUnknown) {
-    ctx.fillStyle = "#6f7278";
+    ctx.fillStyle = "#353a40";
     ctx.fillRect(screenX, screenY - tileBleedY, tilePx, tilePx + tileBleedY * 2);
   } else if (icon) {
     ctx.drawImage(icon, screenX, screenY - tileBleedY, tilePx, tilePx + tileBleedY * 2);
@@ -2047,33 +2475,23 @@ function drawFogOfWarHaze(room, nowMs) {
   if (age <= FOG_STALE_START_MS) return;
 
   const intensity = Math.max(0, Math.min(1, (age - FOG_STALE_START_MS) / (FOG_STALE_FULL_MS - FOG_STALE_START_MS)));
-  const alpha = 0.04 + intensity * 0.16;
+  const alpha = 0.12 + intensity * 0.26;
   const tilePx = TILE_SIZE * state.zoom;
   const x = state.panX + room.x * tilePx;
   const y = state.panY + room.y * tilePx;
 
-  const rand = makeSeededRandom(hashString(`fog:${room.id}`));
-  const cloudCount = 4;
-  for (let i = 0; i < cloudCount; i++) {
-    const cx = x + tilePx * (0.2 + rand() * 0.6) + (rand() - 0.5) * tilePx * 0.35;
-    const cy = y + tilePx * (0.2 + rand() * 0.6) + (rand() - 0.5) * tilePx * 0.35;
-    const r = tilePx * (0.35 + rand() * 0.42);
-    const grad = ctx.createRadialGradient(cx, cy, r * 0.2, cx, cy, r);
-    grad.addColorStop(0, `rgba(206, 214, 222, ${alpha})`);
-    grad.addColorStop(0.65, `rgba(186, 196, 206, ${alpha * 0.55})`);
-    grad.addColorStop(1, "rgba(170, 180, 190, 0)");
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  // Lightweight fog overlay: flat tile tint instead of per-room radial cloud gradients.
+  ctx.save();
+  ctx.fillStyle = `rgba(9, 12, 15, ${alpha})`;
+  ctx.fillRect(x, y, tilePx, tilePx);
+  ctx.restore();
 }
 
 function drawRoomWallsAndDoors(room) {
   const tilePx = TILE_SIZE * state.zoom;
-  const line = Math.max(2.4, 2.4 * state.zoom);
   const x = state.panX + room.x * tilePx;
   const y = state.panY + room.y * tilePx;
+  const line = Math.max(2.6, 2.6 * state.zoom);
 
   const dirs = {
     n: { x1: x, y1: y, x2: x + tilePx, y2: y },
@@ -2083,42 +2501,67 @@ function drawRoomWallsAndDoors(room) {
   };
 
   for (const dir of ["n", "e", "s", "w"]) {
-    const exit = room.exits[dir];
-    const wall = dirs[dir];
-    const vec = DIRECTION_VECTORS[dir];
-    const neighborId = state.roomByCoord.get(coordKey(room.x + vec.dx, room.y + vec.dy, room.z, room.gridId));
-    const neighbor = neighborId ? state.roomsById.get(neighborId) : null;
-    const reverseDir = OPPOSITE_DIRECTIONS[dir];
-    const neighborExit = neighbor && reverseDir ? neighbor.exits[reverseDir] : null;
-
-    const hasOpenPassage = isOpenPassageExit(exit, neighborId) || isOpenPassageExit(neighborExit, room.id);
-    const oneWayExit = hasOpenPassage && !isOpenPassageExit(neighborExit, room.id);
-
-    if (hasOpenPassage) {
-      drawWall(wall, line, WALL_COLOR);
-
-      if (oneWayExit) {
-        drawOneWayExitArrow(room, dir, wall);
-      } else {
-        // Only mark if there's an actual door in open state; plain passages get no mark.
-        const openDoor = pickOpenDoorForEdge(exit, neighborExit, neighborId, room.id);
-        if (openDoor) {
-          drawDoorMark(wall, "open", line);
-        }
-      }
+    const variant = getEdgeVariant(room, dir);
+    if (!variant || variant === "oneway") continue;
+    const segment = dirs[dir];
+    if (variant === "wall") {
+      drawWall(segment, line, WALL_COLOR);
       continue;
     }
-
-    const blockedExit = pickBlockedExitForEdge(exit, neighborExit, neighborId, room.id);
-
-    if (!blockedExit) {
-      drawWall(wall, line, WALL_COLOR);
+    if (variant === "open") {
+      drawDoorMark(segment, "open", line);
       continue;
     }
-
-    drawWall(wall, line, WALL_COLOR);
-    drawDoorMark(wall, blockedExit.state, line);
+    drawWall(segment, line, WALL_COLOR);
+    drawDoorMark(segment, variant, line);
   }
+}
+
+function getEdgeVariant(room, dir) {
+  const exit = room.exits[dir];
+  const vec = DIRECTION_VECTORS[dir];
+  const neighborId = state.roomByCoord.get(coordKey(room.x + vec.dx, room.y + vec.dy, room.z, room.gridId));
+  const neighbor = neighborId ? state.roomsById.get(neighborId) : null;
+  const reverseDir = OPPOSITE_DIRECTIONS[dir];
+  const neighborExit = neighbor && reverseDir ? neighbor.exits[reverseDir] : null;
+
+  const hasOpenPassage = isOpenPassageExit(exit, neighborId) || isOpenPassageExit(neighborExit, room.id);
+  const oneWayExit = isConfirmedOneWayExit(room, dir, exit);
+
+  if (hasOpenPassage) {
+    if (oneWayExit) return shouldSkipSharedBoundary(dir, neighbor) ? "" : "oneway";
+    const openDoor = pickOpenDoorForEdge(exit, neighborExit, neighborId, room.id);
+    if (!openDoor) return "";
+    return shouldSkipSharedBoundary(dir, neighbor) ? "" : "open";
+  }
+
+  const blockedExit = pickBlockedExitForEdge(exit, neighborExit, neighborId, room.id);
+  if (!blockedExit) return shouldSkipSharedBoundary(dir, neighbor) ? "" : "wall";
+  if (shouldSkipSharedBoundary(dir, neighbor)) return "";
+  return blockedExit.state === "locked" ? "locked" : "closed";
+}
+
+function shouldSkipSharedBoundary(dir, neighbor) {
+  if (!neighbor) return false;
+  return dir === "n" || dir === "w";
+}
+
+function isConfirmedOneWayExit(room, dir, exit) {
+  if (!exit || exit.state === "closed" || exit.state === "locked") return false;
+  const targetRoomId = String(exit.to || "");
+  if (!targetRoomId) return false;
+
+  const targetRoom = state.roomsById.get(targetRoomId);
+  if (!targetRoom) return false;
+
+  const reverseDir = OPPOSITE_DIRECTIONS[dir];
+  if (!reverseDir) return false;
+  const reverseExit = targetRoom.exits[reverseDir];
+  if (!reverseExit || reverseExit.state === "closed" || reverseExit.state === "locked") return true;
+
+  const reverseTo = String(reverseExit.to || "");
+  if (!reverseTo) return false;
+  return reverseTo !== room.id;
 }
 
 function isOpenPassageExit(exit, expectedToId) {
@@ -2211,29 +2654,30 @@ function drawDoorMark(segment, stateLabel, lineWidth) {
   const isHorizontal = segment.y1 === segment.y2;
   const midX = (segment.x1 + segment.x2) * 0.5;
   const midY = (segment.y1 + segment.y2) * 0.5;
-  const size = Math.max(9, 14 * state.zoom);
+  const along = Math.max(7, 11 * state.zoom);
 
   ctx.strokeStyle = stateLabel === "locked" ? "#e06a62" : stateLabel === "closed" ? "#e08830" : "#f8d56e";
-  ctx.lineWidth = Math.max(1.8, lineWidth * 0.9);
+  ctx.lineWidth = Math.max(2.1, lineWidth + 0.35);
 
   if (isHorizontal) {
     ctx.beginPath();
-    ctx.moveTo(midX - size * 0.62, midY - size * 0.32);
-    ctx.lineTo(midX + size * 0.62, midY - size * 0.32);
+    ctx.moveTo(midX - along * 0.5, midY);
+    ctx.lineTo(midX + along * 0.5, midY);
     ctx.stroke();
   } else {
     ctx.beginPath();
-    ctx.moveTo(midX - size * 0.32, midY - size * 0.62);
-    ctx.lineTo(midX - size * 0.32, midY + size * 0.62);
+    ctx.moveTo(midX, midY - along * 0.5);
+    ctx.lineTo(midX, midY + along * 0.5);
     ctx.stroke();
   }
 
   if (stateLabel === "locked") {
+    const lockArm = Math.max(2.5, along * 0.28);
     ctx.beginPath();
-    ctx.moveTo(midX - size * 0.2, midY - size * 0.2);
-    ctx.lineTo(midX + size * 0.2, midY + size * 0.2);
-    ctx.moveTo(midX + size * 0.2, midY - size * 0.2);
-    ctx.lineTo(midX - size * 0.2, midY + size * 0.2);
+    ctx.moveTo(midX - lockArm, midY - lockArm);
+    ctx.lineTo(midX + lockArm, midY + lockArm);
+    ctx.moveTo(midX + lockArm, midY - lockArm);
+    ctx.lineTo(midX - lockArm, midY + lockArm);
     ctx.stroke();
   }
 }
@@ -2325,49 +2769,384 @@ function drawExtraExitMarkers(room) {
   const tilePx = TILE_SIZE * state.zoom;
   const x = state.panX + room.x * tilePx;
   const y = state.panY + room.y * tilePx;
-  const midX = x + tilePx * 0.5;
-  const midY = y + tilePx * 0.5;
+  const sprite = getExtraExitSprite(room, getZoomSpriteBucket());
+  if (!sprite) return;
+  ctx.drawImage(sprite, x, y, tilePx, tilePx);
+}
 
-  const diagonal = ["ne", "nw", "se", "sw"];
-  let diagCount = 0;
-  for (const dir of diagonal) {
-    if (room.exits[dir]) diagCount += 1;
+function getZoomSpriteBucket() {
+  return Math.max(0.1, Math.round(state.zoom * 20) / 20);
+}
+
+function getSpriteSizeBucket(value, step) {
+  const bucketStep = step || 0.5;
+  return Math.max(bucketStep, Math.round(value / bucketStep) * bucketStep);
+}
+
+function getPoiMarkerSprite(kind, size, reduceGlow) {
+  const sizeBucket = getSpriteSizeBucket(size, 0.5);
+  const cacheKey = `${kind}:${sizeBucket}:${reduceGlow ? 1 : 0}`;
+  const cached = POI_SPRITE_CACHE.get(cacheKey);
+  if (cached) return cached;
+
+  const glow = sizeBucket * (reduceGlow ? 0.55 : 0.9);
+  const center = Math.ceil(sizeBucket + glow + 2);
+  const canvasSize = Math.max(12, center * 2);
+  const canvas = document.createElement("canvas");
+  canvas.width = canvasSize;
+  canvas.height = canvasSize;
+  const g = canvas.getContext("2d");
+  if (!g) {
+    const fallback = { canvas, center };
+    POI_SPRITE_CACHE.set(cacheKey, fallback);
+    return fallback;
   }
 
+  g.save();
+  g.shadowColor = "rgba(255, 236, 165, 0.8)";
+  g.shadowBlur = Math.max(3, sizeBucket * (reduceGlow ? 0.8 : 1.2));
+  g.fillStyle = "rgba(22, 28, 35, 0.92)";
+  g.beginPath();
+  g.arc(center, center, sizeBucket, 0, Math.PI * 2);
+  g.fill();
+  g.shadowBlur = 0;
+  g.lineWidth = Math.max(1.1, sizeBucket * 0.16);
+  g.strokeStyle = "rgba(250, 224, 120, 0.95)";
+
+  if (kind === "shop" || kind === "bank") {
+    // Emoji glyph sprite with golden glow; shop uses money bag, bank uses chest-like icon.
+    const glyph = kind === "shop" ? "💰" : "🧰";
+    const fontPx = Math.max(10, Math.round(sizeBucket * 1.35));
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.font = `${fontPx}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+    g.fillText(glyph, center, center + sizeBucket * 0.02);
+  } else if (kind === "runegate") {
+    g.beginPath();
+    g.moveTo(center - sizeBucket * 0.45, center + sizeBucket * 0.35);
+    g.lineTo(center - sizeBucket * 0.45, center - sizeBucket * 0.05);
+    g.arc(center, center - sizeBucket * 0.05, sizeBucket * 0.45, Math.PI, 0);
+    g.lineTo(center + sizeBucket * 0.45, center + sizeBucket * 0.35);
+    g.stroke();
+  }
+  g.restore();
+
+  const sprite = { canvas, center };
+  POI_SPRITE_CACHE.set(cacheKey, sprite);
+  return sprite;
+}
+
+function getWaterDropSprite(size, reduceGlow) {
+  const sizeBucket = getSpriteSizeBucket(size, 0.5);
+  const cacheKey = `${sizeBucket}:${reduceGlow ? 1 : 0}`;
+  const cached = WATER_DROP_SPRITE_CACHE.get(cacheKey);
+  if (cached) return cached;
+
+  const glow = sizeBucket * (reduceGlow ? 0.65 : 1.05);
+  const center = Math.ceil(sizeBucket + glow + 2);
+  const canvasSize = Math.max(12, center * 2);
+  const canvas = document.createElement("canvas");
+  canvas.width = canvasSize;
+  canvas.height = canvasSize;
+  const g = canvas.getContext("2d");
+  if (!g) {
+    const fallback = { canvas, center };
+    WATER_DROP_SPRITE_CACHE.set(cacheKey, fallback);
+    return fallback;
+  }
+
+  g.save();
+  g.shadowColor = "rgba(80, 180, 255, 0.95)";
+  g.shadowBlur = Math.max(3, sizeBucket * (reduceGlow ? 0.95 : 1.35));
+  g.beginPath();
+  g.moveTo(center, center - sizeBucket * 0.6);
+  g.bezierCurveTo(
+    center + sizeBucket * 0.55, center - sizeBucket * 0.05,
+    center + sizeBucket * 0.55, center + sizeBucket * 0.55,
+    center, center + sizeBucket * 0.65
+  );
+  g.bezierCurveTo(
+    center - sizeBucket * 0.55, center + sizeBucket * 0.55,
+    center - sizeBucket * 0.55, center - sizeBucket * 0.05,
+    center, center - sizeBucket * 0.6
+  );
+  g.closePath();
+  g.fillStyle = "rgba(40, 155, 255, 0.9)";
+  g.fill();
+  g.beginPath();
+  g.arc(center - sizeBucket * 0.18, center - sizeBucket * 0.1, sizeBucket * 0.17, 0, Math.PI * 2);
+  g.fillStyle = "rgba(180, 230, 255, 0.65)";
+  g.fill();
+  g.restore();
+
+  const sprite = { canvas, center };
+  WATER_DROP_SPRITE_CACHE.set(cacheKey, sprite);
+  return sprite;
+}
+
+function getPlayerCenterSprite(outerR, innerR, tickLen, tickGap, reduceGlow) {
+  const outerBucket = getSpriteSizeBucket(outerR, 0.5);
+  const innerBucket = getSpriteSizeBucket(innerR, 0.25);
+  const tickLenBucket = getSpriteSizeBucket(tickLen, 0.25);
+  const tickGapBucket = getSpriteSizeBucket(tickGap, 0.25);
+  const cacheKey = `${outerBucket}:${innerBucket}:${tickLenBucket}:${tickGapBucket}:${reduceGlow ? 1 : 0}`;
+  const cached = PLAYER_CENTER_SPRITE_CACHE.get(cacheKey);
+  if (cached) return cached;
+
+  const glow = Math.max(4, outerBucket * (reduceGlow ? 0.8 : 1.3));
+  const extent = outerBucket + tickGapBucket + tickLenBucket + glow + 2;
+  const center = Math.ceil(extent);
+  const canvasSize = Math.max(18, center * 2);
+  const canvas = document.createElement("canvas");
+  canvas.width = canvasSize;
+  canvas.height = canvasSize;
+  const g = canvas.getContext("2d");
+  if (!g) {
+    const fallback = { canvas, center };
+    PLAYER_CENTER_SPRITE_CACHE.set(cacheKey, fallback);
+    return fallback;
+  }
+
+  g.save();
+  g.shadowColor = "rgba(128, 225, 255, 0.95)";
+  g.shadowBlur = Math.max(1, Math.round(Math.max(8, outerBucket * 1.6) * (reduceGlow ? 0.25 : 1)));
+  g.strokeStyle = "rgba(164, 241, 255, 0.98)";
+  g.lineWidth = Math.max(1.2, outerBucket * 0.26);
+  g.beginPath();
+  g.arc(center, center, outerBucket, 0, Math.PI * 2);
+  g.stroke();
+
+  g.fillStyle = "rgba(200, 249, 255, 0.98)";
+  g.beginPath();
+  g.arc(center, center, innerBucket, 0, Math.PI * 2);
+  g.fill();
+
+  g.lineWidth = Math.max(1, outerBucket * 0.22);
+  g.beginPath();
+  g.moveTo(center, center - outerBucket - tickGapBucket);
+  g.lineTo(center, center - outerBucket - tickGapBucket - tickLenBucket);
+  g.moveTo(center, center + outerBucket + tickGapBucket);
+  g.lineTo(center, center + outerBucket + tickGapBucket + tickLenBucket);
+  g.moveTo(center - outerBucket - tickGapBucket, center);
+  g.lineTo(center - outerBucket - tickGapBucket - tickLenBucket, center);
+  g.moveTo(center + outerBucket + tickGapBucket, center);
+  g.lineTo(center + outerBucket + tickGapBucket + tickLenBucket, center);
+  g.stroke();
+  g.restore();
+
+  const sprite = { canvas, center };
+  PLAYER_CENTER_SPRITE_CACHE.set(cacheKey, sprite);
+  return sprite;
+}
+
+function getEdgeSprite(dir, variant, zoomBucket) {
+  const cacheKey = `${dir}:${variant}:${zoomBucket}`;
+  const cached = EDGE_SPRITE_CACHE.get(cacheKey);
+  if (cached) return cached;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = DECOR_SPRITE_SIZE;
+  canvas.height = DECOR_SPRITE_SIZE;
+  const g = canvas.getContext("2d");
+  if (!g) return null;
+
+  renderEdgeSprite(g, DECOR_SPRITE_SIZE, dir, variant, zoomBucket);
+  EDGE_SPRITE_CACHE.set(cacheKey, canvas);
+  return canvas;
+}
+
+function renderEdgeSprite(g, size, dir, variant, zoomBucket) {
+  const opacity = wallOpacityForZoomValue(zoomBucket);
+  g.save();
+  g.globalAlpha = opacity;
+  const lineWidth = Math.max(2.6, 2.6 * zoomBucket) * (size / TILE_SIZE);
+  const segment = getLocalEdgeSegment(size, dir);
+  if (variant === "wall" || variant === "closed" || variant === "locked") {
+    renderLocalWall(g, segment, lineWidth, 1);
+  }
+  if (variant === "open" || variant === "closed" || variant === "locked") {
+    renderLocalDoorMark(g, segment, variant === "closed" || variant === "locked" ? variant : "open", lineWidth);
+  }
+  if (variant === "oneway") {
+    renderLocalOneWayArrow(g, size, dir, zoomBucket);
+  }
+  g.restore();
+}
+
+function getLocalEdgeSegment(size, dir) {
+  if (dir === "n") return { x1: 0, y1: 0, x2: size, y2: 0 };
+  if (dir === "e") return { x1: size, y1: 0, x2: size, y2: size };
+  if (dir === "s") return { x1: 0, y1: size, x2: size, y2: size };
+  return { x1: 0, y1: 0, x2: 0, y2: size };
+}
+
+function wallOpacityForZoomValue(zoomValue) {
+  const z = Number(zoomValue) || 1;
+  if (z >= 0.5) return 1;
+  if (z <= 0.2) return 0.25;
+  const t = (z - 0.2) / 0.3;
+  return 0.25 + t * 0.75;
+}
+
+function renderLocalWall(g, segment, lineWidth, opacity) {
+  g.save();
+  g.globalAlpha = opacity;
+  g.strokeStyle = WALL_BORDER_COLOR;
+  g.lineWidth = lineWidth + Math.max(0.4, lineWidth * 0.16);
+  g.beginPath();
+  g.moveTo(segment.x1, segment.y1);
+  g.lineTo(segment.x2, segment.y2);
+  g.stroke();
+  g.strokeStyle = WALL_COLOR;
+  g.lineWidth = lineWidth;
+  g.beginPath();
+  g.moveTo(segment.x1, segment.y1);
+  g.lineTo(segment.x2, segment.y2);
+  g.stroke();
+  g.restore();
+}
+
+function renderLocalDoorMark(g, segment, stateLabel, lineWidth) {
+  const isHorizontal = segment.y1 === segment.y2;
+  const midX = (segment.x1 + segment.x2) * 0.5;
+  const midY = (segment.y1 + segment.y2) * 0.5;
+  const size = Math.max(9, 14 * (Math.max(Math.abs(segment.x2 - segment.x1), Math.abs(segment.y2 - segment.y1)) / TILE_SIZE));
+
+  g.strokeStyle = stateLabel === "locked" ? "#e06a62" : stateLabel === "closed" ? "#e08830" : "#f8d56e";
+  g.lineWidth = Math.max(1.8, lineWidth * 0.9);
+
+  if (isHorizontal) {
+    g.beginPath();
+    g.moveTo(midX - size * 0.62, midY - size * 0.32);
+    g.lineTo(midX + size * 0.62, midY - size * 0.32);
+    g.stroke();
+  } else {
+    g.beginPath();
+    g.moveTo(midX - size * 0.32, midY - size * 0.62);
+    g.lineTo(midX - size * 0.32, midY + size * 0.62);
+    g.stroke();
+  }
+
+  if (stateLabel === "locked") {
+    g.beginPath();
+    g.moveTo(midX - size * 0.2, midY - size * 0.2);
+    g.lineTo(midX + size * 0.2, midY + size * 0.2);
+    g.moveTo(midX + size * 0.2, midY - size * 0.2);
+    g.lineTo(midX - size * 0.2, midY + size * 0.2);
+    g.stroke();
+  }
+}
+
+function renderLocalOneWayArrow(g, size, dir, zoomBucket, edgeInset) {
+  const inset = Number.isFinite(edgeInset) ? edgeInset : Math.max(4, size * 0.11);
+  const lineWidth = Math.max(1.2, zoomBucket * 1.5) * (size / TILE_SIZE);
+  const head = Math.max(4.5, size * 0.08);
+  let sx = size * 0.5;
+  let sy = size * 0.5;
+  let ex = sx;
+  let ey = sy;
+
+  if (dir === "n") {
+    sx = size * 0.82;
+    sy = inset;
+    ex = sx;
+    ey = inset * 0.35;
+  } else if (dir === "s") {
+    sx = size * 0.82;
+    sy = size - inset;
+    ex = sx;
+    ey = size - inset * 0.35;
+  } else if (dir === "e") {
+    sx = size - inset;
+    sy = size * 0.82;
+    ex = size - inset * 0.35;
+    ey = sy;
+  } else if (dir === "w") {
+    sx = inset;
+    sy = size * 0.82;
+    ex = inset * 0.35;
+    ey = sy;
+  }
+
+  g.save();
+  g.strokeStyle = "rgba(255, 255, 255, 0.9)";
+  g.fillStyle = "rgba(255, 255, 255, 0.95)";
+  g.lineWidth = lineWidth;
+  g.lineCap = "round";
+  g.lineJoin = "round";
+  g.beginPath();
+  g.moveTo(sx, sy);
+  g.lineTo(ex, ey);
+  g.stroke();
+
+  const angle = Math.atan2(ey - sy, ex - sx);
+  const leftX = ex - Math.cos(angle) * head - Math.sin(angle) * (head * 0.65);
+  const leftY = ey - Math.sin(angle) * head + Math.cos(angle) * (head * 0.65);
+  const rightX = ex - Math.cos(angle) * head + Math.sin(angle) * (head * 0.65);
+  const rightY = ey - Math.sin(angle) * head - Math.cos(angle) * (head * 0.65);
+  g.beginPath();
+  g.moveTo(ex, ey);
+  g.lineTo(leftX, leftY);
+  g.lineTo(rightX, rightY);
+  g.closePath();
+  g.fill();
+  g.restore();
+}
+
+function getExtraExitSprite(room, zoomBucket) {
+  const diagCount = ["ne", "nw", "se", "sw"].reduce((count, dir) => count + (room.exits[dir] ? 1 : 0), 0);
+  const hasUp = !!room.exits.u;
+  const hasDown = !!room.exits.d;
+  if (!diagCount && !hasUp && !hasDown) return null;
+
+  const cacheKey = `${diagCount}:${hasUp ? 1 : 0}:${hasDown ? 1 : 0}:${zoomBucket}`;
+  const cached = EXTRA_EXIT_SPRITE_CACHE.get(cacheKey);
+  if (cached) return cached;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = DECOR_SPRITE_SIZE;
+  canvas.height = DECOR_SPRITE_SIZE;
+  const g = canvas.getContext("2d");
+  if (!g) return null;
+
+  const size = DECOR_SPRITE_SIZE;
+  const midX = size * 0.5;
+  const midY = size * 0.5;
   if (diagCount > 0) {
-    ctx.fillStyle = "rgba(194, 225, 255, 0.9)";
-    ctx.beginPath();
-    ctx.arc(midX, midY, Math.max(2, 3 * state.zoom), 0, Math.PI * 2);
-    ctx.fill();
+    g.fillStyle = "rgba(194, 225, 255, 0.9)";
+    g.beginPath();
+    g.arc(midX, midY, Math.max(2, 3 * zoomBucket) * (size / TILE_SIZE), 0, Math.PI * 2);
+    g.fill();
+  }
+  if (hasUp) {
+    g.fillStyle = "#7ff0b0";
+    const ux = size * 0.88;
+    const uy = size * 0.12;
+    const halfW = size * 0.11;
+    const h = size * 0.16;
+    g.beginPath();
+    g.moveTo(ux, uy);
+    g.lineTo(ux - halfW, uy + h);
+    g.lineTo(ux + halfW, uy + h);
+    g.closePath();
+    g.fill();
+  }
+  if (hasDown) {
+    g.fillStyle = "#6fb8ff";
+    const dx = size * 0.12;
+    const dy = size * 0.88;
+    const halfW = size * 0.11;
+    const h = size * 0.16;
+    g.beginPath();
+    g.moveTo(dx, dy);
+    g.lineTo(dx - halfW, dy - h);
+    g.lineTo(dx + halfW, dy - h);
+    g.closePath();
+    g.fill();
   }
 
-  if (room.exits.u) {
-    ctx.fillStyle = "#7ff0b0";
-    const ux = x + tilePx * 0.88;
-    const uy = y + tilePx * 0.12;
-    const halfW = tilePx * 0.11;
-    const h = tilePx * 0.16;
-    ctx.beginPath();
-    ctx.moveTo(ux, uy);
-    ctx.lineTo(ux - halfW, uy + h);
-    ctx.lineTo(ux + halfW, uy + h);
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  if (room.exits.d) {
-    ctx.fillStyle = "#6fb8ff";
-    const dx = x + tilePx * 0.12;
-    const dy = y + tilePx * 0.88;
-    const halfW = tilePx * 0.11;
-    const h = tilePx * 0.16;
-    ctx.beginPath();
-    ctx.moveTo(dx, dy);
-    ctx.lineTo(dx - halfW, dy - h);
-    ctx.lineTo(dx + halfW, dy - h);
-    ctx.closePath();
-    ctx.fill();
-  }
+  EXTRA_EXIT_SPRITE_CACHE.set(cacheKey, canvas);
+  return canvas;
 }
 
 function drawGridOutline(rooms) {
