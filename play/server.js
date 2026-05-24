@@ -34,6 +34,7 @@ const SE = 240;
 const OPT_NAWS = 31;
 const OPT_MCCP2 = 86;
 const OPT_GMCP = 201;
+const PLAY_GMCP_PROFILE_COMMAND = 'gmcp webclient on';
 const PROXY_V2_SIGNATURE = Buffer.from([
   0x0d, 0x0a, 0x0d, 0x0a,
   0x00, 0x0d, 0x0a, 0x51,
@@ -96,6 +97,8 @@ wss.on('connection', (ws, req) => {
       gmcpOffered: false,
       mccpOffered: false,
     },
+    playGmcpProfileApplied: false,
+    playGmcpProfileArmed: false,
   };
 
   /* ── WebSocket protocol-level heartbeat ────────────────────────────────
@@ -157,6 +160,9 @@ wss.on('connection', (ws, req) => {
       }
       const text = String(msg.data || '').replace(/\r?\n/g, '\r\n');
       state.socket.write(Buffer.from(text, 'utf8'));
+      if (state.playGmcpProfileArmed && !state.playGmcpProfileApplied) {
+        setTimeout(() => applyPlayGmcpProfile(state, ws, 'post-motd enter'), 100);
+      }
       return;
     }
   });
@@ -465,8 +471,31 @@ function processPlainTelnet(ws, state, buf, allowMccpStart) {
 
   telnet.pending = (i < src.length) ? src.subarray(i) : Buffer.alloc(0);
   if (out.length > 0) {
-    ws.send(json({ type: 'data', data: Buffer.from(out).toString('utf8') }));
+    const textOut = Buffer.from(out).toString('utf8');
+    maybeArmPlayGmcpProfile(state, textOut, ws);
+    ws.send(json({ type: 'data', data: textOut }));
   }
+}
+
+function maybeArmPlayGmcpProfile(state, text, ws) {
+  if (!text || state.playGmcpProfileApplied) return;
+  if (text.includes('about to <Enter> Forgotten Reign!')) {
+    state.playGmcpProfileArmed = true;
+    return;
+  }
+  if (text.includes('Reconnecting. Type replay to see missed tells.')) {
+    state.playGmcpProfileArmed = true;
+    setTimeout(() => applyPlayGmcpProfile(state, ws, 'reconnect'), 100);
+  }
+}
+
+function applyPlayGmcpProfile(state, ws, reason) {
+  if (!state || state.playGmcpProfileApplied || !state.socket) return;
+  const payload = `${PLAY_GMCP_PROFILE_COMMAND}\r\n`;
+  state.socket.write(Buffer.from(payload, 'utf8'));
+  state.playGmcpProfileApplied = true;
+  state.playGmcpProfileArmed = false;
+  ws.send(json({ type: 'status', message: 'Applied /play GMCP profile.' }));
 }
 
 function parseSubnegotiation(buf, start) {
@@ -652,6 +681,8 @@ function closeMud(state, ws, status) {
     gmcpOffered: false,
     mccpOffered: false,
   };
+  state.playGmcpProfileApplied = false;
+  state.playGmcpProfileArmed = false;
 
   if (state.socket) {
     try { state.socket.destroy(); } catch {}

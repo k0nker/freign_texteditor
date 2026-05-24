@@ -1885,7 +1885,10 @@
     var normPkg = String(pkg).trim().toLowerCase();
     if (normPkg === 'char.vitals') { updateVitals(data || {}); return; }
     if (normPkg === 'room.info')   { updateRoomInfo(data || {}); return; }
+    if (normPkg === 'room.chars')  { updateRoomChars(data || {}); return; }
     if (normPkg === 'room.mobs')   { updateRoomMobs(data || {}); return; }
+    if (normPkg === 'room.objects' || normPkg === 'room.items') { updateRoomObjects(data || {}); return; }
+    if (normPkg === 'room.scannedmobs' || normPkg === 'room.scanned_mobs' || normPkg === 'room.scan_mobs') { updateRoomScannedMobs(data || {}); return; }
     if (normPkg === 'map.render')  { updateMapRender(data || {}); return; }
     if (normPkg === 'world.time')  { updateWorldTime(data || {}); return; }
     if (normPkg === 'world.weather') { updateWorldWeather(data || {}); return; }
@@ -1893,7 +1896,6 @@
     if (normPkg === 'comm.channel.text') { pushChannelMessage(data || {}); return; }
     if (normPkg === 'group.info')  { updateGroupInfo(data || {}); return; }
     if (normPkg === 'char.info')   { updateCharStatus(data || {}); return; }
-    if (normPkg === 'char.status') { updateCharStatus(data || {}); return; }
     if (normPkg === 'char.stats')  { updateCharStats(data || {}); return; }
     if (normPkg === 'char.worth')  { updateCharWorth(data || {}); return; }
     if (normPkg === 'char.affects'){ updateCharAffects(data || {}); return; }
@@ -2091,7 +2093,15 @@
   function updateRoomInfo(data) {
     state.gmcp.roomInfo = data;
     updateMapV2FromRoomInfo(data || {});
+    if (state.gmcp.roomObjects || state.gmcp.roomScannedMobs) {
+      postStoredRoomSidePackets();
+    }
     renderMapPanel();
+  }
+
+  function updateRoomChars(data) {
+    state.gmcp.roomChars = data;
+    pulsePkgBadge('mapv2', 'Room.Chars');
   }
 
   function updateRoomMobs(data) {
@@ -2101,6 +2111,67 @@
       type: 'frmapper.roomMobs',
       payload: data || {}
     });
+  }
+
+  function updateRoomObjects(data) {
+    state.gmcp.roomObjects = data;
+    pulsePkgBadge('mapv2', 'Room.Objects');
+    postMapV2Message({
+      type: 'frmapper.roomObjects',
+      payload: {
+        roomId: currentRoomId(),
+        objects: Array.isArray(data.objects) ? data.objects : (Array.isArray(data.items) ? data.items : Array.isArray(data.obj_list) ? data.obj_list : []),
+      }
+    });
+  }
+
+  function updateRoomScannedMobs(data) {
+    state.gmcp.roomScannedMobs = data;
+    pulsePkgBadge('mapv2', 'Room.ScannedMobs');
+    postMapV2Message({
+      type: 'frmapper.roomScannedMobs',
+      payload: {
+        roomId: currentRoomId(),
+        scan_mobs: Array.isArray(data.scan_mobs) ? data.scan_mobs : (Array.isArray(data.scanned_mobs) ? data.scanned_mobs : (Array.isArray(data.mobs) ? data.mobs : [])),
+      }
+    });
+  }
+
+  function currentRoomId() {
+    var info = state.gmcp.roomInfo || {};
+    if (info.id) return String(info.id);
+    if (info.coord && typeof info.coord === 'object') {
+      var x = info.coord.x;
+      var y = info.coord.y;
+      var z = info.coord.z;
+      if (typeof x === 'number' && typeof y === 'number' && typeof z === 'number') {
+        return x + ':' + y + ':' + z;
+      }
+    }
+    return '';
+  }
+
+  function postStoredRoomSidePackets() {
+    var roomId = currentRoomId();
+    if (!roomId) return;
+    if (state.gmcp.roomObjects) {
+      postMapV2Message({
+        type: 'frmapper.roomObjects',
+        payload: {
+          roomId: roomId,
+          objects: Array.isArray(state.gmcp.roomObjects.objects) ? state.gmcp.roomObjects.objects : (Array.isArray(state.gmcp.roomObjects.items) ? state.gmcp.roomObjects.items : Array.isArray(state.gmcp.roomObjects.obj_list) ? state.gmcp.roomObjects.obj_list : [])
+        }
+      });
+    }
+    if (state.gmcp.roomScannedMobs) {
+      postMapV2Message({
+        type: 'frmapper.roomScannedMobs',
+        payload: {
+          roomId: roomId,
+          scan_mobs: Array.isArray(state.gmcp.roomScannedMobs.scan_mobs) ? state.gmcp.roomScannedMobs.scan_mobs : (Array.isArray(state.gmcp.roomScannedMobs.scanned_mobs) ? state.gmcp.roomScannedMobs.scanned_mobs : (Array.isArray(state.gmcp.roomScannedMobs.mobs) ? state.gmcp.roomScannedMobs.mobs : []))
+        }
+      });
+    }
   }
 
   function postMapV2Message(message) {
@@ -2784,7 +2855,7 @@
   function updateCharStatus(data) {
     state.gmcp.charStatus = data;
     updateVitalsPosition(data.position != null ? data.position : data.pos);
-    pulsePkgBadge('status', 'Char.Status');
+    pulsePkgBadge('status', 'Char.Info');
     renderLanguageUi();
     renderStatusPanel();
   }

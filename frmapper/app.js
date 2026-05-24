@@ -283,6 +283,12 @@ function handleSessionMessage(msg) {
   if (msg.type === "frmapper.ingestRoomInfo" && msg.payload) {
     ingestRoomInfo(msg.payload.roomInfo, msg.payload.durationMs);
   }
+  if (msg.type === "frmapper.roomObjects" && msg.payload) {
+    ingestRoomObjects(msg.payload);
+  }
+  if (msg.type === "frmapper.roomScannedMobs" && msg.payload) {
+    ingestRoomScannedMobs(msg.payload);
+  }
   if (msg.type === "frmapper.setPlayerLocation" && msg.payload) {
     setPlayerLocationPayload(msg.payload);
   }
@@ -834,6 +840,7 @@ function normalizeRoom(room) {
     area: room.area ? String(room.area) : "",
     exits: normalizeExits(room.exits || {}),
     markers: normalizeMarkers(room.markers || {}),
+    objects: normalizeRoomObjects(room.objects || room.items || room.obj_list || []),
     nearbyMobs: normalizeNearbyMobs(room.nearbyMobs || room.nearby_mobs || {}),
     knownMobs: normalizeKnownMobs(room.knownMobs || room.known_mobs || []),
     scanRange: Number.isFinite(parsedScanRange) && parsedScanRange > 0 ? parsedScanRange : null,
@@ -860,6 +867,22 @@ function normalizeKnownMobs(value) {
       return String(m || "").trim();
     })
     .filter((m) => !!m);
+}
+
+function normalizeRoomObjects(value) {
+  const items = Array.isArray(value) ? value : [];
+  return items
+    .map((item) => {
+      if (!item || typeof item !== "object") {
+        const name = String(item || "").trim();
+        return name ? { name, type: "unknown" } : null;
+      }
+      const name = String(item.name || item.shortName || item.short_name || item.shortDesc || item.short_desc || item.desc || item.description || "").trim();
+      if (!name) return null;
+      const type = String(item.type || item.itemType || item.item_type || "unknown").trim().toLowerCase() || "unknown";
+      return { name, type };
+    })
+    .filter((item) => !!item);
 }
 
 function normalizeMarkers(markers) {
@@ -897,9 +920,11 @@ function detectWaterSource(objects) {
   return false;
 }
 
-function buildMarkersFromInfo(info) {
+function buildMarkersFromInfo(info, existingRoom) {
   const base = info.markers || {};
-  const waterSource = detectWaterSource(info.objects || info.items || info.obj_list || []);
+  const roomObjects = (info && (info.objects || info.items || info.obj_list))
+    || (existingRoom && Array.isArray(existingRoom.objects) ? existingRoom.objects : []);
+  const waterSource = detectWaterSource(roomObjects);
   return Object.assign({}, base, { waterSource: !!(base.waterSource || waterSource) });
 }
 
@@ -1109,7 +1134,8 @@ function roomFromRoomInfo(info, existingRoom) {
     sector: info.terrain,
     area: info.area,
     exits,
-    markers: buildMarkersFromInfo(info),
+    markers: buildMarkersFromInfo(info, existingRoom),
+    objects: existingRoom ? existingRoom.objects : [],
     nearbyMobs: info.nearby_mobs || info.nearbyMobs || {},
     knownMobs: [],
     scanRange: info.scan_range ?? info.scanRange ?? info.scan_dist ?? info.scanDistance,
@@ -1157,25 +1183,7 @@ function ingestRoomInfo(info, durationMs) {
   const room = roomFromRoomInfo(info, existing || null);
   if (!room) return;
 
-  // Preserve a previously-discovered waterSource when this update didn't include an object list.
-  // If objects were provided but none are water sources, clear the flag (it's gone).
-  const hasObjectsList = Array.isArray(info.objects) || Array.isArray(info.items) || Array.isArray(info.obj_list);
-  if (!hasObjectsList) {
-    const existing = state.roomsById.get(room.id);
-    if (existing && existing.markers && existing.markers.waterSource) {
-      room.markers = Object.assign({}, room.markers, { waterSource: true });
-    }
-  }
-
   upsertRoom(room);
-
-  const scanSightings = Array.isArray(info && info.scan_mobs)
-    ? info.scan_mobs
-    : (Array.isArray(info && info.scanMobs) ? info.scanMobs : null);
-  if (scanSightings) {
-    clearKnownMobsForLayer(room.z, room.gridId);
-    applyScanMobSightings(scanSightings);
-  }
 
   schedulePersistMap();
   setPlayerLocationPayload({
@@ -1183,6 +1191,32 @@ function ingestRoomInfo(info, durationMs) {
     to: { x: room.x, y: room.y, z: room.z, gridId: room.gridId },
     durationMs: Math.max(50, Number.parseInt(durationMs, 10) || 250)
   });
+}
+
+function ingestRoomObjects(payload) {
+  const roomId = String(payload && (payload.roomId || payload.room_id || payload.id) || "").trim();
+  const objects = normalizeRoomObjects(payload && (payload.objects || payload.items || payload.obj_list || []));
+  if (!roomId) return;
+  const existing = state.roomsById.get(roomId);
+  if (!existing) return;
+  const markers = Object.assign({}, existing.markers || {}, { waterSource: detectWaterSource(objects) });
+  upsertRoom(Object.assign({}, existing, { objects, markers }));
+  schedulePersistMap();
+  scheduleRender();
+}
+
+function ingestRoomScannedMobs(payload) {
+  const roomId = String(payload && (payload.roomId || payload.room_id || payload.id) || "").trim();
+  const scanSightings = Array.isArray(payload && payload.scan_mobs)
+    ? payload.scan_mobs
+    : (Array.isArray(payload && payload.scanned_mobs) ? payload.scanned_mobs : (Array.isArray(payload && payload.mobs) ? payload.mobs : []));
+  if (!scanSightings.length) return;
+  const existing = roomId ? state.roomsById.get(roomId) : null;
+  const layerZ = existing ? existing.z : (state.playerLocation ? state.playerLocation.z : 0);
+  const gridId = existing ? existing.gridId : (state.playerLocation ? state.playerLocation.gridId : "");
+  clearKnownMobsForLayer(layerZ, gridId);
+  applyScanMobSightings(scanSightings);
+  schedulePersistMap();
 }
 
 function updatePartyFromGroupInfo(payload) {
@@ -1248,6 +1282,7 @@ function areRoomsEquivalent(a, b) {
     String(a.area || "") === String(b.area || "") &&
     String(a.notes || "") === String(b.notes || "") &&
     JSON.stringify(a.exits || {}) === JSON.stringify(b.exits || {}) &&
+    JSON.stringify(a.objects || []) === JSON.stringify(b.objects || []) &&
     JSON.stringify(a.nearbyMobs || {}) === JSON.stringify(b.nearbyMobs || {}) &&
     JSON.stringify(a.knownMobs || []) === JSON.stringify(b.knownMobs || []) &&
     Number(a.ephNum || 0) === Number(b.ephNum || 0) &&
@@ -1258,7 +1293,8 @@ function areRoomsEquivalent(a, b) {
     !!markerA.bank === !!markerB.bank &&
     !!markerA.runegate === !!markerB.runegate &&
     !!markerA.trail === !!markerB.trail &&
-    !!markerA.waterSource === !!markerB.waterSource
+    !!markerA.waterSource === !!markerB.waterSource &&
+    JSON.stringify(a.objects || []) === JSON.stringify(b.objects || [])
   );
 }
 
@@ -2651,11 +2687,16 @@ function drawDoorGap(segment, lineWidth) {
 }
 
 function drawDoorMark(segment, stateLabel, lineWidth) {
+  const opacity = wallOpacityForZoom();
+  if (opacity <= 0) return;
+
   const isHorizontal = segment.y1 === segment.y2;
   const midX = (segment.x1 + segment.x2) * 0.5;
   const midY = (segment.y1 + segment.y2) * 0.5;
   const along = Math.max(7, 11 * state.zoom);
 
+  ctx.save();
+  ctx.globalAlpha *= opacity;
   ctx.strokeStyle = stateLabel === "locked" ? "#e06a62" : stateLabel === "closed" ? "#e08830" : "#f8d56e";
   ctx.lineWidth = Math.max(2.1, lineWidth + 0.35);
 
@@ -2680,9 +2721,13 @@ function drawDoorMark(segment, stateLabel, lineWidth) {
     ctx.lineTo(midX - lockArm, midY + lockArm);
     ctx.stroke();
   }
+  ctx.restore();
 }
 
 function drawOneWayExitArrow(room, dir, segment) {
+  const opacity = wallOpacityForZoom();
+  if (opacity <= 0) return;
+
   const tilePx = TILE_SIZE * state.zoom;
   const x = state.panX + room.x * tilePx;
   const y = state.panY + room.y * tilePx;
@@ -2718,6 +2763,7 @@ function drawOneWayExitArrow(room, dir, segment) {
   }
 
   ctx.save();
+  ctx.globalAlpha *= opacity;
   ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
   ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
   ctx.lineWidth = lineWidth;
@@ -2747,11 +2793,16 @@ function drawOneWayExitArrow(room, dir, segment) {
 }
 
 function drawOpenExitMark(segment, lineWidth) {
+  const opacity = wallOpacityForZoom();
+  if (opacity <= 0) return;
+
   const isHorizontal = segment.y1 === segment.y2;
   const midX = (segment.x1 + segment.x2) * 0.5;
   const midY = (segment.y1 + segment.y2) * 0.5;
   const span = Math.max(5, state.zoom * 6.5);
 
+  ctx.save();
+  ctx.globalAlpha *= opacity;
   ctx.strokeStyle = "rgba(248, 213, 110, 0.96)";
   ctx.lineWidth = Math.max(1.2, lineWidth * 0.55);
   ctx.beginPath();
@@ -2763,6 +2814,7 @@ function drawOpenExitMark(segment, lineWidth) {
     ctx.lineTo(midX, midY + span * 0.5);
   }
   ctx.stroke();
+  ctx.restore();
 }
 
 function drawExtraExitMarkers(room) {
