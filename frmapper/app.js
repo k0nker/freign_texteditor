@@ -3359,18 +3359,34 @@ function renderRoomWallSprite(g, tilePx, pad, mask, zoomBucket) {
   const y0 = pad;
   const x1 = pad + tilePx;
   const y1 = pad + tilePx;
+  const joinBleed = Math.max(1, (tilePx / TILE_SIZE) * 1.15);
+  const hasN = (mask & TRAIL_DIR_BITS.n) !== 0;
+  const hasE = (mask & TRAIL_DIR_BITS.e) !== 0;
+  const hasS = (mask & TRAIL_DIR_BITS.s) !== 0;
+  const hasW = (mask & TRAIL_DIR_BITS.w) !== 0;
 
   g.save();
   g.globalAlpha *= opacity;
   g.fillStyle = WALL_COLOR;
-  if (mask & TRAIL_DIR_BITS.n) g.fillRect(x0, y0 - half, tilePx, lineWidth);
-  if (mask & TRAIL_DIR_BITS.e) g.fillRect(x1 - half, y0, lineWidth, tilePx);
-  if (mask & TRAIL_DIR_BITS.s) g.fillRect(x0, y1 - half, tilePx, lineWidth);
-  if (mask & TRAIL_DIR_BITS.w) g.fillRect(x0 - half, y0, lineWidth, tilePx);
-
-  const sideCount = countBits(mask);
-  if (sideCount >= 3) {
-    g.fillRect(x0 + tilePx * 0.5 - half, y0 + tilePx * 0.5 - half, lineWidth, lineWidth);
+  if (hasN) {
+    const extendLeft = hasW ? joinBleed : 0;
+    const extendRight = hasE ? joinBleed : 0;
+    g.fillRect(x0 - half - extendLeft, y0 - half, tilePx + lineWidth + extendLeft + extendRight, lineWidth);
+  }
+  if (hasE) {
+    const extendUp = hasN ? joinBleed : 0;
+    const extendDown = hasS ? joinBleed : 0;
+    g.fillRect(x1 - half, y0 - half - extendUp, lineWidth, tilePx + lineWidth + extendUp + extendDown);
+  }
+  if (hasS) {
+    const extendLeft = hasW ? joinBleed : 0;
+    const extendRight = hasE ? joinBleed : 0;
+    g.fillRect(x0 - half - extendLeft, y1 - half, tilePx + lineWidth + extendLeft + extendRight, lineWidth);
+  }
+  if (hasW) {
+    const extendUp = hasN ? joinBleed : 0;
+    const extendDown = hasS ? joinBleed : 0;
+    g.fillRect(x0 - half, y0 - half - extendUp, lineWidth, tilePx + lineWidth + extendUp + extendDown);
   }
 
   g.restore();
