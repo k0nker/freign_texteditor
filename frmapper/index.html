@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>frmapper</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div class="app">
+    <button id="embed-toggle" class="embed-toggle" type="button" title="Show mapper controls" aria-label="Show mapper controls" aria-expanded="false" hidden>
+      <span class="embed-toggle-icon" aria-hidden="true">&#9660;</span>
+    </button>
+
+    <header class="topbar">
+      <div class="brand">frmapper</div>
+      <div class="topbar-actions">
+        <button id="btn-load-sample" type="button">Load Sample</button>
+        <label class="file-button" for="file-input">Load JSON</label>
+        <input id="file-input" type="file" accept="application/json" />
+        <button id="btn-clear-map" type="button">Clear Map</button>
+        <button id="btn-export" type="button">Export JSON</button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="sidebar">
+        <section class="panel">
+          <h2>Map Controls</h2>
+          <div class="control-row">
+            <label for="zoom-range">Zoom</label>
+            <input id="zoom-range" type="range" min="0.5" max="3" step="0.1" value="1" />
+            <span id="zoom-value">100%</span>
+          </div>
+          <div class="control-row">
+            <label for="grid-id">Grid</label>
+            <select id="grid-id"></select>
+          </div>
+          <div class="control-row">
+            <label for="z-level">Z Level</label>
+            <select id="z-level"></select>
+          </div>
+          <div class="control-row control-row-check">
+            <label for="toggle-party">Party</label>
+            <input id="toggle-party" type="checkbox" checked />
+            <span>Show</span>
+          </div>
+          <div class="control-row control-row-check">
+            <label for="toggle-mobs">Mobs</label>
+            <input id="toggle-mobs" type="checkbox" checked />
+            <span>Hints</span>
+          </div>
+          <p class="hint">Drag to pan. Scroll to zoom. Click a room to inspect it.</p>
+        </section>
+
+        <section class="panel">
+          <h2>Selected Room</h2>
+          <pre id="room-inspector">No room selected.</pre>
+        </section>
+
+        <section class="panel">
+          <h2>Legend</h2>
+          <div id="legend" class="legend"></div>
+        </section>
+      </aside>
+
+      <main class="canvas-wrap">
+        <canvas id="map-canvas" width="1200" height="800" aria-label="frmapper grid canvas"></canvas>
+        <div id="context-menu" class="context-menu" hidden>
+          <button id="menu-remove-room" type="button">Remove Room</button>
+          <button id="menu-clear-map" type="button">Clear Map</button>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>

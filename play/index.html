@@ -26,8 +26,8 @@
     <!-- LEFT PANEL RAIL -->
     <div id="left-rail">
       <nav id="left-nav" aria-label="Side panels">
-        <button class="panel-nav-btn" data-panel="map"      type="button" title="Map">
-          <span class="pnav-icon" aria-hidden="true">&#8862;</span>
+        <button class="panel-nav-btn" data-panel="mapv2"      type="button" title="Map">
+          <span class="pnav-icon" aria-hidden="true">&#9638;</span>
           <span class="pnav-label">Map</span>
         </button>
         <button class="panel-nav-btn" data-panel="channels" type="button" title="Channels">
@@ -60,17 +60,14 @@
 
       <div id="left-panels">
 
-        <!-- Map panel (placeholder until GMCP Room.Info) -->
-        <div class="panel active" id="panel-map">
+        <div class="panel active" id="panel-mapv2">
           <div class="panel-head">
             <span>Map</span>
-            <span class="pkg-badge" id="pkg-map">&#128230; Room.Info</span>
-            <button class="panel-close" data-panel="map" type="button" title="Close">&#x2715;</button>
+            <span class="pkg-badge" id="pkg-mapv2">&#128230; Room.Info</span>
+            <button class="panel-close" data-panel="mapv2" type="button" title="Close">&#x2715;</button>
           </div>
-          <div class="panel-body map-placeholder" id="map-panel-body">
-            <div class="ph-icon" aria-hidden="true">&#8862;</div>
-            <div class="ph-title">Mapper</div>
-            <div class="ph-sub">Awaiting GMCP<br>room data</div>
+          <div class="panel-body mapv2-panel" id="mapv2-panel-body">
+            <iframe id="mapv2-frame" class="mapv2-frame" src="../frmapper/index.html?embed=1" title="frmapper map v2" loading="lazy"></iframe>
           </div>
         </div>
 

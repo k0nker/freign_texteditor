@@ -1838,6 +1838,33 @@ body:has(#workspace[data-layout="rounded"]) #settings-drawer {
   height: 100%;
 }
 
+.mapv2-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.mapv2-frame {
+  flex: 1;
+  display: block;
+  height: 100%;
+  min-height: 100%;
+  min-height: 0;
+  width: 100%;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--terminal-bg) 85%, black);
+}
+
+#panel-mapv2 > .panel-body {
+  padding: 6px;
+  overflow: hidden;
+}
+
 .map-meta {
   border: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
   border-radius: 6px;

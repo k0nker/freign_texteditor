@@ -8,6 +8,7 @@
   var STORAGE_KEY    = 'freign.play2.settings.v1';
   var SCROLLBACK_KEY = 'freign.play2.scrollback';
   var SITE_THEME_KEY = 'freign.site.theme.v1';
+  var SINGLE_LEFT_PANEL_MODE = true;
   var themeApi = window.FreignThemes || null;
 
   var LOCKED_MUDS = [
@@ -16,7 +17,7 @@
   ];
 
   var BUILTIN_PANELS = [
-    { id: 'map',      name: 'Map',      icon: '\u229e' },
+    { id: 'mapv2',    name: 'Map',      icon: '\u25a6' },
     { id: 'channels', name: 'Channels', icon: '\u22cb' },
     { id: 'party',    name: 'Party',    icon: '\u203f' },
     { id: 'status',   name: 'Status',   icon: '\u25c9' },
@@ -51,12 +52,12 @@
     triggers:       [],
     macros:         [],
     palette16:      {},
-    openPanels:     ['map', 'channels', 'status', 'targets'],
+    openPanels:     ['mapv2', 'status', 'targets'],
     panelSides:     {
-      map: 'left', channels: 'left', party: 'left',
+      mapv2: 'left', channels: 'left', party: 'left',
       status: 'right', targets: 'right', inventory: 'right', equipment: 'right',
     },
-    panelTabGroup:  { map: '', channels: '', party: '', status: '', targets: '', inventory: '', equipment: '' },
+    panelTabGroup:  { mapv2: '', channels: '', party: '', status: '', targets: '', inventory: '', equipment: '' },
     panelTabActive: {},
     panelWidths:    { left: 230, right: 230 },
     keepInput:      true,
@@ -64,7 +65,7 @@
     wrapWidth:      120,
     historyMax:     2500,
     consoleWidth:   1080,
-    panelOrder:     ['map', 'channels', 'party', 'status', 'targets', 'inventory', 'equipment'],
+    panelOrder:     ['mapv2', 'channels', 'party', 'status', 'targets', 'inventory', 'equipment'],
     tsSelectable:   true,
     logTimestamps:  true,
     affectsView:    'details',
@@ -82,15 +83,18 @@
     if (!settings.openPanels || !Array.isArray(settings.openPanels)) {
       settings.openPanels = [];
     }
-    var legacyDefaultPanels = ['map', 'party', 'status', 'targets'];
-    var nextDefaultPanels = ['map', 'channels', 'status', 'targets'];
+    var legacyDefaultPanels = ['party', 'status', 'targets'];
+    var nextDefaultPanels = ['mapv2', 'status', 'targets'];
     var sameAsLegacy = settings.openPanels.length === legacyDefaultPanels.length && legacyDefaultPanels.every(function (panelId) {
       return settings.openPanels.indexOf(panelId) >= 0;
     });
     if (sameAsLegacy || (settings.openPanels.indexOf('channels') < 0 && settings.openPanels.indexOf('party') >= 0)) {
       settings.openPanels = nextDefaultPanels.slice();
     }
-    if (!settings.panelSides.map) settings.panelSides.map = 'left';
+    if (settings.openPanels.indexOf('mapv2') < 0) {
+      settings.openPanels.unshift('mapv2');
+    }
+    if (!settings.panelSides.mapv2) settings.panelSides.mapv2 = 'left';
     if (!settings.panelSides.channels) settings.panelSides.channels = 'left';
     settings.panelSides.party = settings.panelSides.party || 'left';
     if (!settings.panelSides.status) settings.panelSides.status = 'right';
@@ -100,7 +104,41 @@
     if (settings.openPanels.length === 0) {
       settings.openPanels = nextDefaultPanels.slice();
     }
+
+    settings.openPanels = settings.openPanels.filter(function (panelId) {
+      return panelId !== 'map';
+    });
+
+    if (SINGLE_LEFT_PANEL_MODE && settings.openPanels.indexOf('mapv2') >= 0) {
+      settings.openPanels = settings.openPanels.filter(function (panelId) {
+        if (panelId === 'mapv2') return true;
+        return (settings.panelSides[panelId] || 'left') !== 'left';
+      });
+    }
+
+    settings.panelOrder = ensurePanelOrder(settings.panelOrder || []);
     return settings;
+  }
+
+  function ensurePanelOrder(panelOrder) {
+    var order = Array.isArray(panelOrder) ? panelOrder.slice() : [];
+    var required = ['mapv2', 'channels', 'party', 'status', 'targets', 'inventory', 'equipment'];
+
+    required.forEach(function (panelId) {
+      if (order.indexOf(panelId) < 0) order.push(panelId);
+    });
+
+    order = order.filter(function (panelId) { return panelId !== 'map'; });
+    return order;
+  }
+
+  function panelSideForId(panelId) {
+    if (String(panelId || '').indexOf('gmcp-') === 0) {
+      var cid = String(panelId).slice(5);
+      var cp = (state.settings.gmcpPanels || []).find(function (p) { return p.id === cid; });
+      return cp ? (cp.side || 'left') : 'left';
+    }
+    return (state.settings.panelSides[panelId] || 'left');
   }
 
   var state = {
@@ -155,11 +193,14 @@
       mapRenderedMetaHtml: '',
       mapRenderedMarkerKey: '',
       mapCenterSeq: 0,
+      mapV2RoomsById: {},
+      mapV2SnapshotSent: false,
       worldTime: null,
       worldWeather: null,
       worldMoons: null,
       channels: [],
       groupInfo: null,
+      roomMobs: null,
       charStatus: null,
       charStats: null,
       charWorth: null,
@@ -217,7 +258,8 @@
     el.vMvSegs        = document.querySelectorAll('#v-mv-gauge .status-bar-fill');
     el.vWimpy         = document.getElementById('v-wimpy');
 
-    el.mapPanelBody   = document.getElementById('map-panel-body');
+    el.mapV2PanelBody = document.getElementById('mapv2-panel-body');
+    el.mapV2Frame     = document.getElementById('mapv2-frame');
     el.channelsPane   = document.getElementById('channels-pane');
     el.channelsTabs   = document.getElementById('channels-tabs');
     el.channelsLog    = document.getElementById('channels-log');
@@ -227,7 +269,7 @@
     el.inventoryPanelBody = document.getElementById('inventory-panel-body');
     el.equipmentPanelBody = document.getElementById('equipment-panel-body');
 
-    el.pkgMap        = document.getElementById('pkg-map');
+    el.pkgMapV2      = document.getElementById('pkg-mapv2');
     el.pkgChannels   = document.getElementById('pkg-channels');
     el.pkgParty      = document.getElementById('pkg-party');
     el.pkgStatus     = document.getElementById('pkg-status');
@@ -388,6 +430,14 @@
         var btn = e.target.closest('[data-channel-tab]');
         if (!btn) return;
         setChannelTab(btn.dataset.channelTab || 'all');
+      });
+    }
+
+    if (el.mapV2Frame) {
+      el.mapV2Frame.addEventListener('load', function () {
+        state.gmcp.mapV2SnapshotSent = false;
+        syncMapV2Snapshot(true);
+        scheduleMapV2ResizeSync();
       });
     }
 
@@ -621,6 +671,17 @@
 
   function openPanel(id) {
     if (state.settings.openPanels.indexOf(id) < 0) state.settings.openPanels.push(id);
+
+    if (id === 'mapv2') {
+      state.settings.openPanels = state.settings.openPanels.filter(function (panelId) {
+        return panelId === 'mapv2' || panelSideForId(panelId) !== 'left';
+      });
+    } else if (SINGLE_LEFT_PANEL_MODE && panelSideForId(id) === 'left') {
+      state.settings.openPanels = state.settings.openPanels.filter(function (panelId) {
+        return panelId === id || panelSideForId(panelId) !== 'left';
+      });
+    }
+
     applyPanelState();
     saveSettings();
   }
@@ -635,6 +696,13 @@
   function applyPanelState() {
     var open  = state.settings.openPanels;
     var sides = state.settings.panelSides;
+
+    if (SINGLE_LEFT_PANEL_MODE && open.indexOf('mapv2') >= 0) {
+      open = open.filter(function (panelId) {
+        return panelId === 'mapv2' || panelSideForId(panelId) !== 'left';
+      });
+      state.settings.openPanels = open;
+    }
 
     /* ── Built-in panels ─────────────────────────────────── */
     BUILTIN_PANELS.forEach(function (bp) {
@@ -651,6 +719,7 @@
 
       /* Move nav button to correct nav */
       if (btnEl) {
+        btnEl.style.display = '';
         if (side === 'right') {
           if (btnEl.parentNode !== el.rightPanelBtns) el.rightPanelBtns.appendChild(btnEl);
         } else {
@@ -661,7 +730,10 @@
         }
       }
 
-      if (panelEl) panelEl.classList.toggle('active', isOpen);
+      if (panelEl) {
+        panelEl.style.display = '';
+        panelEl.classList.toggle('active', isOpen);
+      }
       if (btnEl)   btnEl.classList.toggle('active', isOpen);
     });
 
@@ -731,6 +803,25 @@
     if (el.rightPanelsRail) {
       el.rightPanelsRail.style.display = el.rightPanelBtns.children.length ? '' : 'none';
     }
+
+    var mapV2IsOpen = open.indexOf('mapv2') >= 0;
+    if (mapV2IsOpen) {
+      scheduleMapV2ResizeSync();
+    }
+  }
+
+  function scheduleMapV2ResizeSync() {
+    if (!el.mapV2Frame || !el.mapV2Frame.contentWindow) return;
+    postMapV2Message({ type: 'frmapper.resize' });
+    window.requestAnimationFrame(function () {
+      postMapV2Message({ type: 'frmapper.resize' });
+    });
+    window.setTimeout(function () {
+      postMapV2Message({ type: 'frmapper.resize' });
+    }, 90);
+    window.setTimeout(function () {
+      postMapV2Message({ type: 'frmapper.resize' });
+    }, 240);
   }
 
   function applyTabbedCollapse(side) {
@@ -1791,6 +1882,7 @@
     var normPkg = String(pkg).trim().toLowerCase();
     if (normPkg === 'char.vitals') { updateVitals(data || {}); return; }
     if (normPkg === 'room.info')   { updateRoomInfo(data || {}); return; }
+    if (normPkg === 'room.mobs')   { updateRoomMobs(data || {}); return; }
     if (normPkg === 'map.render')  { updateMapRender(data || {}); return; }
     if (normPkg === 'world.time')  { updateWorldTime(data || {}); return; }
     if (normPkg === 'world.weather') { updateWorldWeather(data || {}); return; }
@@ -1995,33 +2087,96 @@
 
   function updateRoomInfo(data) {
     state.gmcp.roomInfo = data;
-    pulsePkgBadge('map', 'Room.Info');
+    updateMapV2FromRoomInfo(data || {});
     renderMapPanel();
+  }
+
+  function updateRoomMobs(data) {
+    state.gmcp.roomMobs = data;
+    pulsePkgBadge('mapv2', 'Room.Mobs');
+    postMapV2Message({
+      type: 'frmapper.roomMobs',
+      payload: data || {}
+    });
+  }
+
+  function postMapV2Message(message) {
+    if (!el.mapV2Frame || !el.mapV2Frame.contentWindow) return;
+    try {
+      el.mapV2Frame.contentWindow.postMessage(message, '*');
+    } catch (_) {}
+  }
+
+  function syncMapV2Snapshot(force) {
+    if (!force && state.gmcp.mapV2SnapshotSent) return;
+    var rooms = Object.keys(state.gmcp.mapV2RoomsById).map(function (id) {
+      return state.gmcp.mapV2RoomsById[id];
+    });
+    postMapV2Message({
+      type: 'frmapper.loadRoomInfoSnapshot',
+      payload: {
+        source: 'play.gmcp.room.info',
+        durationMs: 250,
+        rooms: rooms,
+      }
+    });
+    if (state.gmcp.groupInfo) {
+      postMapV2Message({ type: 'frmapper.groupInfo', payload: state.gmcp.groupInfo });
+    }
+    if (state.gmcp.roomMobs) {
+      postMapV2Message({ type: 'frmapper.roomMobs', payload: state.gmcp.roomMobs });
+    }
+    state.gmcp.mapV2SnapshotSent = true;
+  }
+
+  function updateMapV2FromRoomInfo(info) {
+    if (!info || typeof info !== 'object') return;
+    var roomId = String(info.id || '').trim();
+    if (!roomId && info.coord && typeof info.coord === 'object') {
+      var x = info.coord.x;
+      var y = info.coord.y;
+      var z = info.coord.z;
+      if (typeof x === 'number' && typeof y === 'number' && typeof z === 'number') {
+        roomId = x + ':' + y + ':' + z;
+      }
+    }
+    if (roomId) {
+      state.gmcp.mapV2RoomsById[roomId] = info;
+    }
+    pulsePkgBadge('mapv2', 'Room.Info');
+
+    if (!state.gmcp.mapV2SnapshotSent) {
+      syncMapV2Snapshot(true);
+    } else {
+      postMapV2Message({
+        type: 'frmapper.ingestRoomInfo',
+        payload: {
+          roomInfo: info,
+          durationMs: 250,
+        }
+      });
+    }
   }
 
   function updateMapRender(data) {
     state.gmcp.mapRenderMeta = (data && typeof data === 'object') ? data : null;
     state.gmcp.mapRender = mapAnsiFromPayload(data);
     state.gmcp.mapRenderSeq = (state.gmcp.mapRenderSeq | 0) + 1;
-    pulsePkgBadge('map', 'Map.Render');
     renderMapPanel();
   }
 
   function updateWorldTime(data) {
     state.gmcp.worldTime = data;
-    pulsePkgBadge('map', 'World.Time');
     renderMapPanel();
   }
 
   function updateWorldWeather(data) {
     state.gmcp.worldWeather = data;
-    pulsePkgBadge('map', 'World.Weather');
     renderMapPanel();
   }
 
   function updateWorldMoons(data) {
     state.gmcp.worldMoons = data;
-    pulsePkgBadge('map', 'World.Moons');
     renderMapPanel();
   }
 
@@ -2587,6 +2742,11 @@
   function updateGroupInfo(data) {
     state.gmcp.groupInfo = data;
     pulsePkgBadge('party', 'Group.Info');
+    pulsePkgBadge('mapv2', 'Group.Info');
+    postMapV2Message({
+      type: 'frmapper.groupInfo',
+      payload: data || {}
+    });
     renderPartyPanel();
   }
 
@@ -3136,7 +3296,7 @@
   }
 
   function getPkgBadgeEl(panelId) {
-    if (panelId === 'map') return el.pkgMap;
+    if (panelId === 'mapv2') return el.pkgMapV2;
     if (panelId === 'channels') return el.pkgChannels;
     if (panelId === 'party') return el.pkgParty;
     if (panelId === 'status') return el.pkgStatus;

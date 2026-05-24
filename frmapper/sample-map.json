@@ -1,0 +1,219 @@
+{
+  "version": "frmapper.v1",
+  "meta": {
+    "title": "Sample Grid",
+    "author": "frmapper",
+    "notes": "Basic sample with mixed sectors, walls, and door states."
+  },
+  "rooms": [
+    {
+      "id": "r_0_0_0",
+      "name": "Market Cross",
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "sector": "city",
+      "exits": {
+        "n": { "to": "r_0_-1_0", "state": "open" },
+        "e": { "to": "r_1_0_0", "state": "closed" },
+        "s": { "to": "r_0_1_0", "state": "open" },
+        "w": { "to": "r_-1_0_0", "state": "open" }
+      }
+    },
+    {
+      "id": "r_0_-1_0",
+      "name": "North Gate",
+      "x": 0,
+      "y": -1,
+      "z": 0,
+      "sector": "city",
+      "exits": {
+        "s": { "to": "r_0_0_0", "state": "open" },
+        "n": { "to": "r_0_-2_0", "state": "locked" }
+      }
+    },
+    {
+      "id": "r_1_0_0",
+      "name": "Inn Entry",
+      "x": 1,
+      "y": 0,
+      "z": 0,
+      "sector": "inside",
+      "exits": {
+        "w": { "to": "r_0_0_0", "state": "closed" },
+        "e": { "to": "r_2_0_0", "state": "open" }
+      }
+    },
+    {
+      "id": "r_2_0_0",
+      "name": "Taproom",
+      "x": 2,
+      "y": 0,
+      "z": 0,
+      "sector": "inside",
+      "exits": {
+        "w": { "to": "r_1_0_0", "state": "open" },
+        "d": { "to": "r_2_0_-1", "state": "open" }
+      }
+    },
+    {
+      "id": "r_0_1_0",
+      "name": "South Road",
+      "x": 0,
+      "y": 1,
+      "z": 0,
+      "sector": "field",
+      "exits": {
+        "n": { "to": "r_0_0_0", "state": "open" },
+        "e": { "to": "r_1_1_0", "state": "open" },
+        "w": { "to": "r_-1_1_0", "state": "open" },
+        "s": { "to": "r_0_2_0", "state": "open" }
+      }
+    },
+    {
+      "id": "r_1_1_0",
+      "name": "Forest Edge",
+      "x": 1,
+      "y": 1,
+      "z": 0,
+      "sector": "forest",
+      "exits": {
+        "w": { "to": "r_0_1_0", "state": "open" },
+        "e": { "to": "r_2_1_0", "state": "open" },
+        "ne": { "to": "r_2_0_0", "state": "open" }
+      }
+    },
+    {
+      "id": "r_2_1_0",
+      "name": "Hill Path",
+      "x": 2,
+      "y": 1,
+      "z": 0,
+      "sector": "hills",
+      "exits": {
+        "w": { "to": "r_1_1_0", "state": "open" },
+        "s": { "to": "r_2_2_0", "state": "open" }
+      }
+    },
+    {
+      "id": "r_2_2_0",
+      "name": "Stone Rise",
+      "x": 2,
+      "y": 2,
+      "z": 0,
+      "sector": "mountain",
+      "exits": {
+        "n": { "to": "r_2_1_0", "state": "open" },
+        "w": { "to": "r_1_2_0", "state": "open" }
+      }
+    },
+    {
+      "id": "r_1_2_0",
+      "name": "Dune Turn",
+      "x": 1,
+      "y": 2,
+      "z": 0,
+      "sector": "desert",
+      "exits": {
+        "e": { "to": "r_2_2_0", "state": "open" },
+        "w": { "to": "r_0_2_0", "state": "open" }
+      }
+    },
+    {
+      "id": "r_0_2_0",
+      "name": "Bridge Step",
+      "x": 0,
+      "y": 2,
+      "z": 0,
+      "sector": "city",
+      "exits": {
+        "n": { "to": "r_0_1_0", "state": "open" },
+        "e": { "to": "r_1_2_0", "state": "open" },
+        "w": { "to": "r_-1_2_0", "state": "open" }
+      }
+    },
+    {
+      "id": "r_-1_2_0",
+      "name": "Shallow Ford",
+      "x": -1,
+      "y": 2,
+      "z": 0,
+      "sector": "water_swim",
+      "exits": {
+        "e": { "to": "r_0_2_0", "state": "open" },
+        "n": { "to": "r_-1_1_0", "state": "open" }
+      }
+    },
+    {
+      "id": "r_-1_1_0",
+      "name": "Wet Bank",
+      "x": -1,
+      "y": 1,
+      "z": 0,
+      "sector": "water_noswim",
+      "exits": {
+        "e": { "to": "r_0_1_0", "state": "open" },
+        "s": { "to": "r_-1_2_0", "state": "open" },
+        "n": { "to": "r_-1_0_0", "state": "open" }
+      }
+    },
+    {
+      "id": "r_-1_0_0",
+      "name": "Canal Walk",
+      "x": -1,
+      "y": 0,
+      "z": 0,
+      "sector": "city",
+      "exits": {
+        "e": { "to": "r_0_0_0", "state": "open" },
+        "s": { "to": "r_-1_1_0", "state": "open" },
+        "u": { "to": "r_-1_0_1", "state": "open" }
+      }
+    },
+    {
+      "id": "r_-1_0_1",
+      "name": "Sky Perch",
+      "x": -1,
+      "y": 0,
+      "z": 1,
+      "sector": "air",
+      "exits": {
+        "d": { "to": "r_-1_0_0", "state": "open" }
+      }
+    },
+    {
+      "id": "r_2_0_-1",
+      "name": "Cellar Hall",
+      "x": 2,
+      "y": 0,
+      "z": -1,
+      "sector": "dungeon",
+      "exits": {
+        "u": { "to": "r_2_0_0", "state": "open" },
+        "e": { "to": "r_3_0_-1", "state": "open" }
+      }
+    },
+    {
+      "id": "r_3_0_-1",
+      "name": "Sunken Shaft",
+      "x": 3,
+      "y": 0,
+      "z": -1,
+      "sector": "underwater",
+      "exits": {
+        "w": { "to": "r_2_0_-1", "state": "open" }
+      }
+    },
+    {
+      "id": "r_0_-2_0",
+      "name": "Old Forest Gate",
+      "x": 0,
+      "y": -2,
+      "z": 0,
+      "sector": "forest",
+      "exits": {
+        "s": { "to": "r_0_-1_0", "state": "locked" }
+      }
+    }
+  ]
+}
