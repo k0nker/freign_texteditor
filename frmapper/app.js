@@ -4,7 +4,14 @@ const TILE_SIZE = 48;
 const WALL_COLOR = "#6a4a2c";
 const WALL_BORDER_COLOR = "rgba(16, 12, 8, 0.96)";
 const STORAGE_KEY = "frmapper.savedMap.v1";
-const TRAIL_FADE_MS = 650;
+const TRAIL_DOT_HOLD_MS = 5000;
+const TRAIL_DOT_FADE_MIN_MS = 1400;
+const TRAIL_DOT_FADE_MAX_MS = 2100;
+const FOG_STALE_START_MS = 8 * 60 * 1000;
+const FOG_STALE_FULL_MS = 40 * 60 * 1000;
+const TRAIL_SPRITE_SIZE = 64;
+const TRAIL_DIR_BITS = { n: 1, e: 2, s: 4, w: 8 };
+const TRAIL_SPRITE_CACHE = new Map();
 const DEFAULT_SCAN_DISTANCE = 3;
 const SECTOR_ORDER = [
   "inside",
@@ -74,6 +81,7 @@ const state = {
   roomByCoord: new Map(),
   roomIndexById: new Map(),
   selectedRoomId: null,
+  hoverRoomId: null,
   activeGridId: "",
   zLevels: [0],
   activeZ: 0,
@@ -97,6 +105,8 @@ const state = {
   isSafari: false,
   showParty: true,
   showMobHints: true,
+  showTraveledPath: true,
+  showFogOfWar: true,
   scanDistance: DEFAULT_SCAN_DISTANCE,
   sectorIcons: new Map(),
   playerLocation: null,
@@ -130,15 +140,18 @@ const el = {
   zLevel: document.getElementById("z-level"),
   toggleParty: document.getElementById("toggle-party"),
   toggleMobs: document.getElementById("toggle-mobs"),
+  toggleTraveledPath: document.getElementById("toggle-traveled-path"),
+  toggleFog: document.getElementById("toggle-fog"),
   roomInspector: document.getElementById("room-inspector"),
   fileInput: document.getElementById("file-input"),
-  btnLoadSample: document.getElementById("btn-load-sample"),
   btnClearMap: document.getElementById("btn-clear-map"),
   btnExport: document.getElementById("btn-export"),
   contextMenu: document.getElementById("context-menu"),
   menuRemoveRoom: document.getElementById("menu-remove-room"),
+  menuClearArea: document.getElementById("menu-clear-area"),
   menuClearMap: document.getElementById("menu-clear-map"),
-  legend: document.getElementById("legend")
+  legend: document.getElementById("legend"),
+  roomHoverTooltip: document.getElementById("room-hover-tooltip")
 };
 
 const ctx = el.canvas.getContext("2d");
@@ -183,6 +196,13 @@ function applyEmbedToggleState(expanded) {
 }
 
 function wireEvents() {
+  if (el.canvas) {
+    el.canvas.setAttribute("draggable", "false");
+    el.canvas.addEventListener("dragstart", (event) => {
+      event.preventDefault();
+    });
+  }
+
   window.addEventListener("resize", requestCanvasResizePass);
   window.addEventListener("pagehide", () => persistMap());
   window.addEventListener("beforeunload", () => persistMap());
@@ -241,6 +261,20 @@ function wireEvents() {
     });
   }
 
+  if (el.toggleTraveledPath) {
+    el.toggleTraveledPath.addEventListener("change", () => {
+      state.showTraveledPath = !!el.toggleTraveledPath.checked;
+      scheduleRender();
+    });
+  }
+
+  if (el.toggleFog) {
+    el.toggleFog.addEventListener("change", () => {
+      state.showFogOfWar = !!el.toggleFog.checked;
+      scheduleRender();
+    });
+  }
+
   el.fileInput.addEventListener("change", async (event) => {
     const input = event.target;
     if (!input.files || !input.files[0]) return;
@@ -249,11 +283,20 @@ function wireEvents() {
     input.value = "";
   });
 
-  el.btnLoadSample.addEventListener("click", loadSample);
+
   el.btnClearMap.addEventListener("click", clearMapWithConfirmation);
   el.btnExport.addEventListener("click", exportMap);
 
+  function endCanvasDrag() {
+    if (!state.dragging) return;
+    state.dragging = false;
+    el.canvas.classList.remove("dragging");
+    scheduleRender();
+  }
+
   el.canvas.addEventListener("mousedown", (event) => {
+    if (event.button !== 0) return;
+    if (event.ctrlKey || event.metaKey) return;
     state.dragging = true;
     state.dragStartX = event.clientX;
     state.dragStartY = event.clientY;
@@ -271,10 +314,22 @@ function wireEvents() {
     scheduleRender();
   });
 
-  window.addEventListener("mouseup", () => {
-    state.dragging = false;
-    el.canvas.classList.remove("dragging");
-    scheduleRender();
+  el.canvas.addEventListener("mousemove", (event) => {
+    if (state.dragging) return;
+    const room = pickRoomAt(event.clientX, event.clientY);
+    setHoverTooltip(room, event.clientX, event.clientY);
+    state.hoverRoomId = room ? room.id : null;
+  });
+
+  el.canvas.addEventListener("mouseleave", () => {
+    state.hoverRoomId = null;
+    hideHoverTooltip();
+  });
+
+  window.addEventListener("mouseup", endCanvasDrag);
+  window.addEventListener("blur", endCanvasDrag);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) endCanvasDrag();
   });
 
   el.canvas.addEventListener("wheel", (event) => {
@@ -310,6 +365,7 @@ function wireEvents() {
   });
 
   el.canvas.addEventListener("contextmenu", (event) => {
+    endCanvasDrag();
     event.preventDefault();
     const room = pickRoomAt(event.clientX, event.clientY);
     showContextMenu(event.clientX, event.clientY, room ? room.id : null);
@@ -333,6 +389,18 @@ function wireEvents() {
     hideContextMenu();
     if (!roomId) return;
     removeRoomById(roomId);
+  });
+
+  el.menuClearArea.addEventListener("click", () => {
+    const roomId = state.contextRoomId;
+    hideContextMenu();
+    if (!roomId) return;
+    const room = state.roomsById.get(roomId);
+    if (!room) return;
+    const gridId = normalizeGridId(room.gridId);
+    const label = gridId || "default";
+    if (!window.confirm(`Remove all rooms in area "${label}"? This cannot be undone.`)) return;
+    clearAreaByGridId(gridId);
   });
 
   el.menuClearMap.addEventListener("click", () => {
@@ -372,6 +440,10 @@ function wireEvents() {
     if (msg.type === "frmapper.moveTo" && msg.payload) {
       moveToPayload(msg.payload);
     }
+    if (msg.type === "frmapper.clearArea" && msg.payload) {
+      const gridId = String(msg.payload.gridId || msg.payload.grid_id || "");
+      if (gridId) clearAreaByGridId(gridId);
+    }
     if (msg.type === "frmapper.resize") {
       requestCanvasResizePass();
     }
@@ -409,6 +481,7 @@ function showContextMenu(clientX, clientY, roomId) {
 
   state.contextRoomId = roomId || null;
   el.menuRemoveRoom.disabled = !state.contextRoomId;
+  if (el.menuClearArea) el.menuClearArea.disabled = !state.contextRoomId;
   el.contextMenu.style.left = `${left}px`;
   el.contextMenu.style.top = `${top}px`;
 }
@@ -522,17 +595,7 @@ function buildLegend() {
   }
 }
 
-async function loadSample() {
-  try {
-    const response = await fetch("./sample-map.json", { cache: "no-store" });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const text = await response.text();
-    applyMapJson(text, "Loaded sample-map.json");
-  } catch (error) {
-    console.error(error);
-    alert("Could not load sample-map.json");
-  }
-}
+
 
 function applyMapJson(text, _sourceLabel) {
   let data;
@@ -569,6 +632,11 @@ function applyMapObject(data) {
 
 function normalizeRoom(room) {
   const parsedScanRange = Number.parseInt(room.scanRange, 10);
+  const parsedLastSeenAt = Number.parseInt(room.lastSeenAt, 10);
+  const hasName = !!(room.name && String(room.name).trim());
+  const parsedEphNum = Number.parseInt(room.ephNum, 10);
+  const parsedAreaID = Number.parseInt(room.areaID ?? room.areaId, 10);
+  const parsedLocalID = Number.parseInt(room.localID ?? room.localId, 10);
   return {
     id: String(room.id),
     name: room.name ? String(room.name) : "",
@@ -577,12 +645,33 @@ function normalizeRoom(room) {
     z: Number.parseInt(room.z, 10) || 0,
     gridId: normalizeGridId(room.gridId),
     sector: normalizeSector(room.sector),
+    area: room.area ? String(room.area) : "",
     exits: normalizeExits(room.exits || {}),
     markers: normalizeMarkers(room.markers || {}),
     nearbyMobs: normalizeNearbyMobs(room.nearbyMobs || room.nearby_mobs || {}),
+    knownMobs: normalizeKnownMobs(room.knownMobs || room.known_mobs || []),
     scanRange: Number.isFinite(parsedScanRange) && parsedScanRange > 0 ? parsedScanRange : null,
-    notes: room.notes ? String(room.notes) : ""
+    notes: room.notes ? String(room.notes) : "",
+    visibleNow: !!room.visibleNow,
+    discovered: room.discovered === undefined ? hasName : !!room.discovered,
+    darkUnknown: !!room.darkUnknown,
+    lastSeenAt: Number.isFinite(parsedLastSeenAt) && parsedLastSeenAt > 0 ? parsedLastSeenAt : (hasName ? Date.now() : null),
+    ephNum: Number.isFinite(parsedEphNum) ? parsedEphNum : null,
+    areaID: Number.isFinite(parsedAreaID) ? parsedAreaID : null,
+    localID: Number.isFinite(parsedLocalID) ? parsedLocalID : null
   };
+}
+
+function normalizeKnownMobs(value) {
+  const mobs = Array.isArray(value) ? value : [];
+  return mobs
+    .map((m) => {
+      if (m && typeof m === "object") {
+        return String(m.name || m.shortDesc || m.short_desc || "").trim();
+      }
+      return String(m || "").trim();
+    })
+    .filter((m) => !!m);
 }
 
 function normalizeMarkers(markers) {
@@ -590,8 +679,27 @@ function normalizeMarkers(markers) {
     trail: !!(markers && markers.trail),
     shop: !!(markers && markers.shop),
     bank: !!(markers && markers.bank),
-    runegate: !!(markers && markers.runegate)
+    runegate: !!(markers && markers.runegate),
+    waterSource: !!(markers && markers.waterSource)
   };
+}
+
+function detectWaterSource(objects) {
+  if (!Array.isArray(objects) || objects.length === 0) return false;
+  const waterKeywords = ["fountain", "spring", "well", "pool", "brook", "stream", "river"];
+  for (const obj of objects) {
+    const name = String(obj && (obj.name || obj.short_desc || obj.shortDesc || obj.desc || obj.description || "")).toLowerCase();
+    if (waterKeywords.some((kw) => name.includes(kw))) return true;
+    const type = String(obj && (obj.type || obj.item_type || obj.itemType || "")).toLowerCase();
+    if (type === "drink_container" || type === "fountain") return true;
+  }
+  return false;
+}
+
+function buildMarkersFromInfo(info) {
+  const base = info.markers || {};
+  const waterSource = detectWaterSource(info.objects || info.items || info.obj_list || []);
+  return Object.assign({}, base, { waterSource: !!(base.waterSource || waterSource) });
 }
 
 function normalizeNearbyMobs(value) {
@@ -640,7 +748,8 @@ function normalizeExits(exits) {
     }
     out[dir] = {
       to: String(ex.to || ""),
-      state: ex.state ? String(ex.state).toLowerCase() : "open"
+      state: ex.state ? String(ex.state).toLowerCase() : "open",
+      door: !!ex.door
     };
   }
   return out;
@@ -667,7 +776,7 @@ function normalizeDirectionToken(dir) {
   return DIRECTION_ALIASES[token] || "";
 }
 
-function roomFromRoomInfo(info) {
+function roomFromRoomInfo(info, existingRoom) {
   if (!info || typeof info !== "object") return null;
   if (!info.coord || typeof info.coord !== "object") return null;
 
@@ -679,6 +788,48 @@ function roomFromRoomInfo(info) {
 
   let roomId = String(info.id || "").trim();
   if (!roomId) roomId = coordKey(x, y, z, gridId);
+  const canSeeRoom = info.name !== null && info.name !== undefined;
+
+  if (!canSeeRoom) {
+    if (existingRoom) {
+      return normalizeRoom({
+        ...existingRoom,
+        id: roomId,
+        x,
+        y,
+        z,
+        gridId,
+        ephNum: info.ephNum ?? existingRoom.ephNum,
+        areaID: info.areaID ?? info.areaId ?? existingRoom.areaID,
+        localID: info.localID ?? info.localId ?? existingRoom.localID,
+        area: existingRoom.area || String(info.area || ""),
+        visibleNow: false,
+        darkUnknown: !existingRoom.discovered
+      });
+    }
+    return normalizeRoom({
+      id: roomId,
+      name: "",
+      x,
+      y,
+      z,
+      gridId,
+      area: String(info.area || ""),
+      sector: "inside",
+      exits: {},
+      markers: {},
+      nearbyMobs: {},
+      knownMobs: [],
+      notes: "",
+      ephNum: info.ephNum ?? null,
+      areaID: info.areaID ?? info.areaId ?? null,
+      localID: info.localID ?? info.localId ?? null,
+      visibleNow: false,
+      discovered: false,
+      darkUnknown: true,
+      lastSeenAt: null
+    });
+  }
 
   const exits = {};
   if (Array.isArray(info.exits)) {
@@ -687,7 +838,8 @@ function roomFromRoomInfo(info) {
       if (!dir) continue;
       exits[dir] = {
         to: String(entry && entry.to ? entry.to : ""),
-        state: entry && entry.locked ? "locked" : entry && entry.closed ? "closed" : "open"
+        state: entry && entry.locked ? "locked" : entry && entry.closed ? "closed" : "open",
+        door: !!(entry && entry.door)
       };
     }
   }
@@ -700,11 +852,20 @@ function roomFromRoomInfo(info) {
     z,
     gridId,
     sector: info.terrain,
+    area: info.area,
     exits,
-    markers: info.markers || {},
+    markers: buildMarkersFromInfo(info),
     nearbyMobs: info.nearby_mobs || info.nearbyMobs || {},
+    knownMobs: [],
     scanRange: info.scan_range ?? info.scanRange ?? info.scan_dist ?? info.scanDistance,
-    notes: info.area ? `area=${String(info.area)}` : ""
+    ephNum: info.ephNum ?? (existingRoom ? existingRoom.ephNum : null),
+    areaID: info.areaID ?? info.areaId ?? (existingRoom ? existingRoom.areaID : null),
+    localID: info.localID ?? info.localId ?? (existingRoom ? existingRoom.localID : null),
+    notes: info.area ? `area=${String(info.area)}` : "",
+    visibleNow: true,
+    discovered: true,
+    darkUnknown: false,
+    lastSeenAt: Date.now()
   });
 }
 
@@ -712,7 +873,9 @@ function applyRoomInfoSnapshot(payload) {
   const rooms = Array.isArray(payload.rooms) ? payload.rooms : [];
   const durationMs = Math.max(50, Number.parseInt(payload.durationMs, 10) || 250);
   for (const info of rooms) {
-    const parsed = roomFromRoomInfo(info);
+    const infoId = String(info && info.id ? info.id : "").trim();
+    const existing = infoId ? state.roomsById.get(infoId) : null;
+    const parsed = roomFromRoomInfo(info, existing || null);
     if (!parsed) continue;
     upsertRoom(parsed);
   }
@@ -734,9 +897,31 @@ function applyRoomInfoSnapshot(payload) {
 }
 
 function ingestRoomInfo(info, durationMs) {
-  const room = roomFromRoomInfo(info);
+  const infoId = String(info && info.id ? info.id : "").trim();
+  const existing = infoId ? state.roomsById.get(infoId) : null;
+  const room = roomFromRoomInfo(info, existing || null);
   if (!room) return;
+
+  // Preserve a previously-discovered waterSource when this update didn't include an object list.
+  // If objects were provided but none are water sources, clear the flag (it's gone).
+  const hasObjectsList = Array.isArray(info.objects) || Array.isArray(info.items) || Array.isArray(info.obj_list);
+  if (!hasObjectsList) {
+    const existing = state.roomsById.get(room.id);
+    if (existing && existing.markers && existing.markers.waterSource) {
+      room.markers = Object.assign({}, room.markers, { waterSource: true });
+    }
+  }
+
   upsertRoom(room);
+
+  const scanSightings = Array.isArray(info && info.scan_mobs)
+    ? info.scan_mobs
+    : (Array.isArray(info && info.scanMobs) ? info.scanMobs : null);
+  if (scanSightings) {
+    clearKnownMobsForLayer(room.z, room.gridId);
+    applyScanMobSightings(scanSightings);
+  }
+
   schedulePersistMap();
   setPlayerLocationPayload({
     roomId: room.id,
@@ -772,6 +957,9 @@ function upsertRoom(rawRoom) {
   if (index !== undefined) {
     const prev = state.mapData.rooms[index];
     if (prev) {
+      if (areRoomsEquivalent(prev, room)) {
+        return;
+      }
       const prevKey = coordKey(prev.x, prev.y, prev.z, prev.gridId);
       const nextKey = coordKey(room.x, room.y, room.z, room.gridId);
       if (prevKey !== nextKey) {
@@ -787,6 +975,84 @@ function upsertRoom(rawRoom) {
 
   state.roomsById.set(room.id, room);
   state.roomByCoord.set(coordKey(room.x, room.y, room.z, room.gridId), room.id);
+}
+
+function areRoomsEquivalent(a, b) {
+  if (!a || !b) return false;
+  const markerA = a.markers || {};
+  const markerB = b.markers || {};
+  return (
+    String(a.id || "") === String(b.id || "") &&
+    String(a.name || "") === String(b.name || "") &&
+    a.x === b.x &&
+    a.y === b.y &&
+    a.z === b.z &&
+    normalizeGridId(a.gridId) === normalizeGridId(b.gridId) &&
+    String(a.sector || "") === String(b.sector || "") &&
+    String(a.area || "") === String(b.area || "") &&
+    String(a.notes || "") === String(b.notes || "") &&
+    JSON.stringify(a.exits || {}) === JSON.stringify(b.exits || {}) &&
+    JSON.stringify(a.nearbyMobs || {}) === JSON.stringify(b.nearbyMobs || {}) &&
+    JSON.stringify(a.knownMobs || []) === JSON.stringify(b.knownMobs || []) &&
+    Number(a.ephNum || 0) === Number(b.ephNum || 0) &&
+    Number(a.areaID || 0) === Number(b.areaID || 0) &&
+    Number(a.localID || 0) === Number(b.localID || 0) &&
+    Number(a.scanRange || 0) === Number(b.scanRange || 0) &&
+    !!markerA.shop === !!markerB.shop &&
+    !!markerA.bank === !!markerB.bank &&
+    !!markerA.runegate === !!markerB.runegate &&
+    !!markerA.trail === !!markerB.trail &&
+    !!markerA.waterSource === !!markerB.waterSource
+  );
+}
+
+function clearKnownMobsForLayer(z, gridId) {
+  const normGrid = normalizeGridId(gridId);
+  for (const room of state.mapData.rooms) {
+    if (room.z !== z) continue;
+    if (normalizeGridId(room.gridId) !== normGrid) continue;
+    if (!Array.isArray(room.knownMobs) || room.knownMobs.length === 0) continue;
+    room.knownMobs = [];
+  }
+}
+
+function applyScanMobSightings(scanSightings) {
+  for (const entry of scanSightings) {
+    if (!entry || typeof entry !== "object") continue;
+    const coord = normalizeCoord(entry.coord);
+    if (!coord) continue;
+
+    const roomId = String(entry.room_id || entry.roomId || entry.id || "").trim()
+      || coordKey(coord.x, -coord.y, coord.z, normalizeGridId(coord.gridId));
+    const mappedY = -coord.y;
+    const mobs = normalizeKnownMobs(entry.mobs || []);
+
+    const existing = state.roomsById.get(roomId);
+    if (existing) {
+      upsertRoom(Object.assign({}, existing, {
+        knownMobs: mobs,
+        area: existing.area || String(entry.area || ""),
+        name: existing.name || String(entry.room_name || entry.roomName || "")
+      }));
+      continue;
+    }
+
+    upsertRoom({
+      id: roomId,
+      name: String(entry.room_name || entry.roomName || ""),
+      x: coord.x,
+      y: mappedY,
+      z: coord.z,
+      gridId: normalizeGridId(coord.gridId),
+      sector: "inside",
+      area: String(entry.area || ""),
+      exits: {},
+      markers: {},
+      nearbyMobs: {},
+      knownMobs: mobs,
+      notes: ""
+    });
+  }
 }
 
 function rebuildIndexes() {
@@ -991,6 +1257,13 @@ function render() {
     drawRoomTile(room);
   }
 
+  if (state.showFogOfWar) {
+    const now = Date.now();
+    for (const room of visibleRooms) {
+      drawFogOfWarHaze(room, now);
+    }
+  }
+
   if (!lightMode) {
     for (const room of visibleRooms) {
       drawTrailOverlay(room);
@@ -1020,14 +1293,20 @@ function detectSafari() {
 function drawTrailOverlay(room) {
   if (!room.markers || !room.markers.trail) return;
   const tilePx = TILE_SIZE * state.zoom;
-  const cx = state.panX + (room.x + 0.5) * tilePx;
-  const cy = state.panY + (room.y + 0.5) * tilePx;
+  const mask = getTrailMaskForRoom(room);
+  if (!mask) return;
 
-  ctx.strokeStyle = "rgba(184, 149, 90, 0.9)";
-  ctx.lineWidth = Math.max(2, state.zoom * 2.2);
-  ctx.lineCap = "round";
+  const endpointMode = countBits(mask) === 1 ? "fadeIn" : "none";
+  const sprite = getTrailSprite(mask, endpointMode);
+  if (!sprite) return;
 
-  let branchCount = 0;
+  const x = state.panX + room.x * tilePx;
+  const y = state.panY + room.y * tilePx;
+  ctx.drawImage(sprite, x, y, tilePx, tilePx);
+}
+
+function getTrailMaskForRoom(room) {
+  let mask = 0;
   for (const dir of ["n", "e", "s", "w"]) {
     const vec = DIRECTION_VECTORS[dir];
     const neighborId = state.roomByCoord.get(coordKey(room.x + vec.dx, room.y + vec.dy, room.z, room.gridId));
@@ -1039,22 +1318,128 @@ function drawTrailOverlay(room) {
     const reverse = OPPOSITE_DIRECTIONS[dir];
     const nExit = reverse ? neighbor.exits[reverse] : null;
     if (!(isOpenPassageExit(exit, neighbor.id) || isOpenPassageExit(nExit, room.id))) continue;
+    mask |= (TRAIL_DIR_BITS[dir] || 0);
+  }
+  return mask;
+}
 
-    const ex = state.panX + (room.x + 0.5 + vec.dx * 0.5) * tilePx;
-    const ey = state.panY + (room.y + 0.5 + vec.dy * 0.5) * tilePx;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.lineTo(ex, ey);
-    ctx.stroke();
-    branchCount += 1;
+function getTrailSprite(mask, endpointMode) {
+  const key = `${mask}:${endpointMode}`;
+  const cached = TRAIL_SPRITE_CACHE.get(key);
+  if (cached) return cached;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = TRAIL_SPRITE_SIZE;
+  canvas.height = TRAIL_SPRITE_SIZE;
+  const g = canvas.getContext("2d");
+  if (!g) return null;
+
+  renderTrailSprite(g, TRAIL_SPRITE_SIZE, mask, endpointMode, key);
+  TRAIL_SPRITE_CACHE.set(key, canvas);
+  return canvas;
+}
+
+function renderTrailSprite(g, size, mask, endpointMode, seedKey) {
+  const outerW = size * 0.3;
+  const innerW = size * 0.17;
+
+  fillTrailShape(g, size, mask, outerW, "rgba(72, 44, 22, 0.95)", endpointMode);
+  fillTrailShape(g, size, mask, innerW, "rgba(136, 95, 50, 0.72)", endpointMode);
+
+  g.save();
+  applyTrailClip(g, size, mask, outerW);
+  const rand = makeSeededRandom(hashString(seedKey));
+  const count = 24 + countBits(mask) * 8;
+  for (let i = 0; i < count; i++) {
+    const x = rand() * size;
+    const y = rand() * size;
+    const r = 0.45 + rand() * 1.05;
+    g.fillStyle = rand() < 0.7 ? "rgba(214, 176, 118, 0.36)" : "rgba(154, 118, 72, 0.28)";
+    g.beginPath();
+    g.arc(x, y, r, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.restore();
+}
+
+function fillTrailShape(g, size, mask, width, color, endpointMode) {
+  g.save();
+
+  if (countBits(mask) === 1 && endpointMode !== "none") {
+    const grad = endpointGradient(g, size, mask, color, endpointMode);
+    g.fillStyle = grad;
+  } else {
+    g.fillStyle = color;
   }
 
-  if (branchCount === 0) {
-    ctx.fillStyle = "rgba(184, 149, 90, 0.88)";
-    ctx.beginPath();
-    ctx.arc(cx, cy, Math.max(1.8, state.zoom * 1.8), 0, Math.PI * 2);
-    ctx.fill();
+  drawTrailRects(g, size, mask, width);
+  g.fill();
+  g.restore();
+}
+
+function endpointGradient(g, size, mask, color, endpointMode) {
+  const c = size * 0.5;
+  let x2 = c;
+  let y2 = c;
+  if (mask & TRAIL_DIR_BITS.n) y2 = 0;
+  if (mask & TRAIL_DIR_BITS.e) x2 = size;
+  if (mask & TRAIL_DIR_BITS.s) y2 = size;
+  if (mask & TRAIL_DIR_BITS.w) x2 = 0;
+
+  const grad = g.createLinearGradient(c, c, x2, y2);
+  if (endpointMode === "fadeIn") {
+    grad.addColorStop(0, color.replace(/0\.[0-9]+\)/, "0.08)"));
+    grad.addColorStop(0.35, color.replace(/0\.[0-9]+\)/, "0.52)"));
+    grad.addColorStop(1, color);
+  } else {
+    grad.addColorStop(0, color);
+    grad.addColorStop(0.7, color.replace(/0\.[0-9]+\)/, "0.52)"));
+    grad.addColorStop(1, color.replace(/0\.[0-9]+\)/, "0.08)"));
   }
+  return grad;
+}
+
+function drawTrailRects(g, size, mask, width) {
+  const c = size * 0.5;
+  const hw = width * 0.5;
+  g.beginPath();
+  g.rect(c - hw, c - hw, width, width);
+  if (mask & TRAIL_DIR_BITS.n) g.rect(c - hw, 0, width, c);
+  if (mask & TRAIL_DIR_BITS.e) g.rect(c, c - hw, c, width);
+  if (mask & TRAIL_DIR_BITS.s) g.rect(c - hw, c, width, c);
+  if (mask & TRAIL_DIR_BITS.w) g.rect(0, c - hw, c, width);
+}
+
+function applyTrailClip(g, size, mask, width) {
+  drawTrailRects(g, size, mask, width);
+  g.clip();
+}
+
+function hashString(value) {
+  let h = 2166136261;
+  for (let i = 0; i < value.length; i++) {
+    h ^= value.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function makeSeededRandom(seed) {
+  let s = (seed >>> 0) || 1;
+  return () => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
+function countBits(mask) {
+  let m = mask >>> 0;
+  let c = 0;
+  while (m) {
+    c += m & 1;
+    m >>>= 1;
+  }
+  return c;
 }
 
 function drawRoomPoiMarkers(room) {
@@ -1063,18 +1448,58 @@ function drawRoomPoiMarkers(room) {
   if (room.markers.shop) markers.push("shop");
   if (room.markers.bank) markers.push("bank");
   if (room.markers.runegate) markers.push("runegate");
-  if (!markers.length) return;
 
   const tilePx = TILE_SIZE * state.zoom;
   const x = state.panX + room.x * tilePx;
   const y = state.panY + room.y * tilePx;
-  const size = Math.max(5, state.zoom * 4.8);
-  const step = size * 2 + 3;
-  markers.forEach((kind, i) => {
-    const cx = x + 5 + size + i * step;
-    const cy = y + 5 + size;
-    drawPoiMarker(kind, cx, cy, size);
-  });
+
+  if (markers.length > 0) {
+    const size = Math.max(7, state.zoom * 7.5);
+    const step = size * 2 + 4;
+    markers.forEach((kind, i) => {
+      const cx = x + 5 + size + i * step;
+      const cy = y + 5 + size;
+      drawPoiMarker(kind, cx, cy, size);
+    });
+  }
+
+  // Water source icon in bottom-right corner.
+  if (room.markers.waterSource) {
+    const wSize = Math.max(5, state.zoom * 6);
+    drawWaterDrop(x + tilePx - wSize - 5, y + tilePx - wSize - 5, wSize);
+  }
+}
+
+function drawWaterDrop(cx, cy, size) {
+  const shadowScale = shouldReduceGlowEffects() ? 0.25 : 1;
+  ctx.save();
+  ctx.shadowColor = "rgba(80, 180, 255, 0.95)";
+  ctx.shadowBlur = Math.max(4, Math.round(state.zoom * 8 * shadowScale));
+
+  // Teardrop shape: pointed top, rounded bottom.
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - size * 0.6);                        // top point
+  ctx.bezierCurveTo(
+    cx + size * 0.55, cy - size * 0.05,
+    cx + size * 0.55, cy + size * 0.55,
+    cx, cy + size * 0.65
+  );
+  ctx.bezierCurveTo(
+    cx - size * 0.55, cy + size * 0.55,
+    cx - size * 0.55, cy - size * 0.05,
+    cx, cy - size * 0.6
+  );
+  ctx.closePath();
+  ctx.fillStyle = "rgba(40, 155, 255, 0.9)";
+  ctx.fill();
+
+  // Highlight.
+  ctx.beginPath();
+  ctx.arc(cx - size * 0.18, cy - size * 0.1, size * 0.17, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(180, 230, 255, 0.65)";
+  ctx.fill();
+
+  ctx.restore();
 }
 
 function drawPoiMarker(kind, cx, cy, size) {
@@ -1153,13 +1578,27 @@ function drawPartyOverlays(visibleRooms) {
 function drawPartyDot(room) {
   const tilePx = TILE_SIZE * state.zoom;
   const x = state.panX + room.x * tilePx + tilePx * 0.5;
-  const y = state.panY + room.y * tilePx + Math.max(3, state.zoom * 3);
+  // Bottom of tile — avoids overlapping mob dots which sit at the top.
+  const y = state.panY + room.y * tilePx + tilePx - Math.max(6, state.zoom * 6);
+  const r = Math.max(3.5, state.zoom * 3.5);
+  const shadowScale = shouldReduceGlowEffects() ? 0.25 : 1;
   ctx.save();
-  ctx.shadowColor = "rgba(230, 130, 230, 0.9)";
-  ctx.shadowBlur = Math.max(5, state.zoom * 6);
-  ctx.fillStyle = "rgba(220, 90, 220, 0.95)";
+  ctx.shadowColor = "rgba(180, 0, 255, 0.95)";
+  ctx.shadowBlur = Math.max(5, Math.round(Math.max(10, state.zoom * 12) * shadowScale));
+  // Outer ring — bright purple.
+  ctx.fillStyle = "rgba(155, 35, 235, 0.97)";
   ctx.beginPath();
-  ctx.arc(x, y, Math.max(2, state.zoom * 2.2), 0, Math.PI * 2);
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+  // Dark center.
+  ctx.fillStyle = "rgba(35, 0, 70, 0.9)";
+  ctx.beginPath();
+  ctx.arc(x, y, r * 0.48, 0, Math.PI * 2);
+  ctx.fill();
+  // Specular highlight.
+  ctx.fillStyle = "rgba(220, 150, 255, 0.5)";
+  ctx.beginPath();
+  ctx.arc(x - r * 0.28, y - r * 0.28, r * 0.18, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }
@@ -1212,17 +1651,28 @@ function drawOffscreenPartyWaypoint(room) {
 }
 
 function drawTriangle(x, y, angle, color) {
-  const size = Math.max(4, state.zoom * 4);
+  const size = Math.max(11, state.zoom * 13);
+  const shadowScale = shouldReduceGlowEffects() ? 0.3 : 1;
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(angle);
-  ctx.fillStyle = color;
+  ctx.shadowColor = "rgba(200, 80, 255, 0.95)";
+  ctx.shadowBlur = Math.max(8, Math.round(state.zoom * 16 * shadowScale));
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(2, state.zoom * 2.5);
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  // Hollow neon outline arrow.
   ctx.beginPath();
-  ctx.moveTo(0, -size);
-  ctx.lineTo(size * 0.65, size * 0.7);
-  ctx.lineTo(-size * 0.65, size * 0.7);
+  ctx.moveTo(0, -size);                     // tip
+  ctx.lineTo(size * 0.75, size * 0.5);      // right outer
+  ctx.lineTo(size * 0.3, size * 0.15);      // right inner notch
+  ctx.lineTo(size * 0.3, size * 0.72);      // right tail bottom
+  ctx.lineTo(-size * 0.3, size * 0.72);     // left tail bottom
+  ctx.lineTo(-size * 0.3, size * 0.15);     // left inner notch
+  ctx.lineTo(-size * 0.75, size * 0.5);     // left outer
   ctx.closePath();
-  ctx.fill();
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -1242,13 +1692,19 @@ function drawMobHints(visibleRooms) {
     const count = Math.max(1, parsed.count || 1);
     const normDir = normalizeDirectionToken(dir);
     if (!normDir || !DIRECTION_VECTORS[normDir]) continue;
-    const distance = Math.max(1, parsed.distance || resolveScanDistance(currentRoom));
+    const distance = Math.max(1, parsed.distance || 1);
     const targetId = findDirectionalScanRoomId(currentRoom, normDir, distance);
     if (!targetId) continue;
     countsByRoom.set(targetId, (countsByRoom.get(targetId) || 0) + count);
   }
 
   const visibleSet = new Set((visibleRooms || []).map((r) => r.id));
+  for (const room of visibleRooms || []) {
+    const knownCount = Array.isArray(room.knownMobs) ? room.knownMobs.length : 0;
+    if (knownCount <= 0) continue;
+    countsByRoom.set(room.id, Math.max(countsByRoom.get(room.id) || 0, knownCount));
+  }
+
   countsByRoom.forEach((count, roomId) => {
     if (!visibleSet.has(roomId)) return;
     const room = state.roomsById.get(roomId);
@@ -1300,27 +1756,32 @@ function drawMobDotsOnRoom(room, mobCount) {
   const tilePx = TILE_SIZE * state.zoom;
   const x = state.panX + room.x * tilePx;
   const y = state.panY + room.y * tilePx;
-  const r = Math.max(2.2, state.zoom * 2.2);
-  const step = r * 2 + Math.max(1.5, state.zoom * 1.5);
+  const r = Math.max(3.5, state.zoom * 3.5);
+  const step = r * 2 + Math.max(2, state.zoom * 2);
   const startX = x + tilePx * 0.5 - ((dots - 1) * step) * 0.5;
-  const dotY = y + Math.max(4, state.zoom * 4);
+  const dotY = y + Math.max(6, state.zoom * 6);
   const shadowScale = shouldReduceGlowEffects() ? 0.25 : 1;
 
   ctx.save();
-  ctx.shadowColor = "rgba(255, 78, 170, 0.98)";
-  ctx.shadowBlur = Math.max(1, Math.round(Math.max(10, state.zoom * 11) * shadowScale));
-  ctx.fillStyle = "rgba(255, 72, 128, 0.98)";
+  ctx.shadowColor = "rgba(220, 0, 0, 0.98)";
+  ctx.shadowBlur = Math.max(2, Math.round(Math.max(12, state.zoom * 14) * shadowScale));
   for (let i = 0; i < dots; i++) {
     const cx = startX + i * step;
+    // Outer ring — bright red.
+    ctx.fillStyle = "rgba(200, 20, 20, 0.98)";
     ctx.beginPath();
     ctx.arc(cx, dotY, r, 0, Math.PI * 2);
     ctx.fill();
-
+    // Dark center — gives dark-in-middle, lighter-at-edge feel.
+    ctx.fillStyle = "rgba(60, 0, 0, 0.92)";
     ctx.beginPath();
-    ctx.fillStyle = "rgba(255, 184, 220, 0.86)";
-    ctx.arc(cx, dotY, Math.max(1.1, r * 0.44), 0, Math.PI * 2);
+    ctx.arc(cx, dotY, r * 0.48, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = "rgba(255, 72, 128, 0.98)";
+    // Tiny specular highlight.
+    ctx.fillStyle = "rgba(255, 120, 120, 0.55)";
+    ctx.beginPath();
+    ctx.arc(cx - r * 0.28, dotY - r * 0.28, r * 0.18, 0, Math.PI * 2);
+    ctx.fill();
   }
   ctx.restore();
 
@@ -1471,25 +1932,25 @@ function drawActiveMoveLine() {
   const tilePx = TILE_SIZE * state.zoom;
   const now = performance.now();
 
-  for (const segment of state.movementTrail) {
-    if (segment.from.z !== state.activeZ || segment.to.z !== state.activeZ) continue;
-    if (normalizeGridId(segment.from.gridId) !== normalizeGridId(state.activeGridId)) continue;
-    if (normalizeGridId(segment.to.gridId) !== normalizeGridId(state.activeGridId)) continue;
-    const age = now - segment.createdAt;
-    const alpha = Math.max(0, 1 - age / segment.fadeMs);
-    if (alpha <= 0) continue;
+  if (state.showTraveledPath) {
+    for (const dot of state.movementTrail) {
+      if (dot.z !== state.activeZ) continue;
+      if (normalizeGridId(dot.gridId) !== normalizeGridId(state.activeGridId)) continue;
+      const age = now - dot.createdAt;
+      const holdMs = Number.isFinite(dot.holdMs) ? dot.holdMs : TRAIL_DOT_HOLD_MS;
+      const fadeAge = Math.max(0, age - holdMs);
+      const alpha = age <= holdMs ? 1 : Math.max(0, 1 - fadeAge / dot.fadeMs);
+      if (alpha <= 0) continue;
 
-    const x1 = state.panX + (segment.from.x + 0.5) * tilePx;
-    const y1 = state.panY + (segment.from.y + 0.5) * tilePx;
-    const x2 = state.panX + (segment.to.x + 0.5) * tilePx;
-    const y2 = state.panY + (segment.to.y + 0.5) * tilePx;
+      const x = state.panX + (dot.x + 0.5) * tilePx;
+      const y = state.panY + (dot.y + 0.5) * tilePx;
+      const radius = Math.max(1.4, state.zoom * 1.45);
 
-    ctx.strokeStyle = `rgba(250, 231, 155, ${Math.min(0.92, alpha)})`;
-    ctx.lineWidth = Math.max(2, state.zoom * 2);
-    ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y2);
-    ctx.stroke();
+      ctx.fillStyle = `rgba(250, 231, 155, ${Math.min(0.63, alpha * 0.7)})`;
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   if (!state.playerLocation || state.playerLocation.z !== state.activeZ) return;
@@ -1548,6 +2009,7 @@ function drawRoomTile(room, options) {
   const tilePx = TILE_SIZE * state.zoom;
   const screenX = state.panX + room.x * tilePx;
   const screenY = state.panY + room.y * tilePx;
+  const tileBleedY = Math.max(0.22, tilePx * 0.0045);
   const alpha = typeof opts.alpha === "number" ? Math.max(0, Math.min(1, opts.alpha)) : 1;
   const ghost = !!opts.ghost;
 
@@ -1555,11 +2017,14 @@ function drawRoomTile(room, options) {
   ctx.globalAlpha = alpha;
 
   const icon = state.sectorIcons.get(room.sector) || state.sectorIcons.get("inside");
-  if (icon) {
-    ctx.drawImage(icon, screenX, screenY, tilePx, tilePx);
+  if (room.darkUnknown) {
+    ctx.fillStyle = "#6f7278";
+    ctx.fillRect(screenX, screenY - tileBleedY, tilePx, tilePx + tileBleedY * 2);
+  } else if (icon) {
+    ctx.drawImage(icon, screenX, screenY - tileBleedY, tilePx, tilePx + tileBleedY * 2);
   } else {
     ctx.fillStyle = "#1f2f3f";
-    ctx.fillRect(screenX, screenY, tilePx, tilePx);
+    ctx.fillRect(screenX, screenY - tileBleedY, tilePx, tilePx + tileBleedY * 2);
   }
 
   const isSelected = room.id === state.selectedRoomId;
@@ -1573,6 +2038,35 @@ function drawRoomTile(room, options) {
     ctx.strokeRect(screenX + 0.5, screenY + 0.5, tilePx - 1, tilePx - 1);
   }
   ctx.restore();
+}
+
+function drawFogOfWarHaze(room, nowMs) {
+  if (!room || !room.discovered) return;
+  const seenAt = Number.isFinite(room.lastSeenAt) ? room.lastSeenAt : nowMs;
+  const age = nowMs - seenAt;
+  if (age <= FOG_STALE_START_MS) return;
+
+  const intensity = Math.max(0, Math.min(1, (age - FOG_STALE_START_MS) / (FOG_STALE_FULL_MS - FOG_STALE_START_MS)));
+  const alpha = 0.04 + intensity * 0.16;
+  const tilePx = TILE_SIZE * state.zoom;
+  const x = state.panX + room.x * tilePx;
+  const y = state.panY + room.y * tilePx;
+
+  const rand = makeSeededRandom(hashString(`fog:${room.id}`));
+  const cloudCount = 4;
+  for (let i = 0; i < cloudCount; i++) {
+    const cx = x + tilePx * (0.2 + rand() * 0.6) + (rand() - 0.5) * tilePx * 0.35;
+    const cy = y + tilePx * (0.2 + rand() * 0.6) + (rand() - 0.5) * tilePx * 0.35;
+    const r = tilePx * (0.35 + rand() * 0.42);
+    const grad = ctx.createRadialGradient(cx, cy, r * 0.2, cx, cy, r);
+    grad.addColorStop(0, `rgba(206, 214, 222, ${alpha})`);
+    grad.addColorStop(0.65, `rgba(186, 196, 206, ${alpha * 0.55})`);
+    grad.addColorStop(1, "rgba(170, 180, 190, 0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
 
 function drawRoomWallsAndDoors(room) {
@@ -1598,9 +2092,20 @@ function drawRoomWallsAndDoors(room) {
     const neighborExit = neighbor && reverseDir ? neighbor.exits[reverseDir] : null;
 
     const hasOpenPassage = isOpenPassageExit(exit, neighborId) || isOpenPassageExit(neighborExit, room.id);
+    const oneWayExit = hasOpenPassage && !isOpenPassageExit(neighborExit, room.id);
 
     if (hasOpenPassage) {
-      drawOpenExitMark(wall, line);
+      drawWall(wall, line, WALL_COLOR);
+
+      if (oneWayExit) {
+        drawOneWayExitArrow(room, dir, wall);
+      } else {
+        // Only mark if there's an actual door in open state; plain passages get no mark.
+        const openDoor = pickOpenDoorForEdge(exit, neighborExit, neighborId, room.id);
+        if (openDoor) {
+          drawDoorMark(wall, "open", line);
+        }
+      }
       continue;
     }
 
@@ -1623,6 +2128,18 @@ function isOpenPassageExit(exit, expectedToId) {
   return !expectedToId || to === expectedToId;
 }
 
+function pickOpenDoorForEdge(exit, neighborExit, expectedToId, thisRoomId) {
+  if (exit && exit.state === "open" && exit.door) {
+    const to = String(exit.to || "");
+    if (!to || !expectedToId || to === expectedToId) return exit;
+  }
+  if (neighborExit && neighborExit.state === "open" && neighborExit.door) {
+    const to = String(neighborExit.to || "");
+    if (!to || !thisRoomId || to === thisRoomId) return neighborExit;
+  }
+  return null;
+}
+
 function pickBlockedExitForEdge(exit, neighborExit, expectedToId, thisRoomId) {
   if (exit && (exit.state === "closed" || exit.state === "locked")) {
     const to = String(exit.to || "");
@@ -1635,7 +2152,18 @@ function pickBlockedExitForEdge(exit, neighborExit, expectedToId, thisRoomId) {
   return null;
 }
 
+function wallOpacityForZoom() {
+  const z = Number(state.zoom) || 1;
+  if (z >= 0.5) return 1;
+  if (z <= 0.2) return 0.25;
+  const t = (z - 0.2) / 0.3;
+  return 0.25 + t * 0.75;
+}
+
 function drawWall(segment, lineWidth, color) {
+  ctx.save();
+  ctx.globalAlpha *= wallOpacityForZoom();
+
   ctx.strokeStyle = WALL_BORDER_COLOR;
   ctx.lineWidth = lineWidth + Math.max(0.4, state.zoom * 0.4);
   ctx.beginPath();
@@ -1649,6 +2177,8 @@ function drawWall(segment, lineWidth, color) {
   ctx.moveTo(segment.x1, segment.y1);
   ctx.lineTo(segment.x2, segment.y2);
   ctx.stroke();
+
+  ctx.restore();
 }
 
 function drawDoorGap(segment, lineWidth) {
@@ -1681,20 +2211,20 @@ function drawDoorMark(segment, stateLabel, lineWidth) {
   const isHorizontal = segment.y1 === segment.y2;
   const midX = (segment.x1 + segment.x2) * 0.5;
   const midY = (segment.y1 + segment.y2) * 0.5;
-  const size = Math.max(6, 10 * state.zoom);
+  const size = Math.max(9, 14 * state.zoom);
 
-  ctx.strokeStyle = stateLabel === "locked" ? "#e06a62" : "#5d3d25";
-  ctx.lineWidth = Math.max(1, lineWidth - 1);
+  ctx.strokeStyle = stateLabel === "locked" ? "#e06a62" : stateLabel === "closed" ? "#e08830" : "#f8d56e";
+  ctx.lineWidth = Math.max(1.8, lineWidth * 0.9);
 
   if (isHorizontal) {
     ctx.beginPath();
-    ctx.moveTo(midX - size * 0.5, midY - size * 0.3);
-    ctx.lineTo(midX + size * 0.5, midY - size * 0.3);
+    ctx.moveTo(midX - size * 0.62, midY - size * 0.32);
+    ctx.lineTo(midX + size * 0.62, midY - size * 0.32);
     ctx.stroke();
   } else {
     ctx.beginPath();
-    ctx.moveTo(midX - size * 0.3, midY - size * 0.5);
-    ctx.lineTo(midX - size * 0.3, midY + size * 0.5);
+    ctx.moveTo(midX - size * 0.32, midY - size * 0.62);
+    ctx.lineTo(midX - size * 0.32, midY + size * 0.62);
     ctx.stroke();
   }
 
@@ -1706,6 +2236,70 @@ function drawDoorMark(segment, stateLabel, lineWidth) {
     ctx.lineTo(midX - size * 0.2, midY + size * 0.2);
     ctx.stroke();
   }
+}
+
+function drawOneWayExitArrow(room, dir, segment) {
+  const tilePx = TILE_SIZE * state.zoom;
+  const x = state.panX + room.x * tilePx;
+  const y = state.panY + room.y * tilePx;
+  const inset = Math.max(4, tilePx * 0.11);
+  const lineWidth = Math.max(1.2, state.zoom * 1.5);
+  const head = Math.max(4.5, tilePx * 0.08);
+
+  let sx = x + tilePx * 0.5;
+  let sy = y + tilePx * 0.5;
+  let ex = sx;
+  let ey = sy;
+
+  if (dir === "n") {
+    sx = x + tilePx * 0.82;
+    sy = y + inset;
+    ex = sx;
+    ey = y - inset * 0.7;
+  } else if (dir === "s") {
+    sx = x + tilePx * 0.82;
+    sy = y + tilePx - inset;
+    ex = sx;
+    ey = y + tilePx + inset * 0.7;
+  } else if (dir === "e") {
+    sx = x + tilePx - inset;
+    sy = y + tilePx * 0.82;
+    ex = x + tilePx + inset * 0.7;
+    ey = sy;
+  } else if (dir === "w") {
+    sx = x + inset;
+    sy = y + tilePx * 0.82;
+    ex = x - inset * 0.7;
+    ey = sy;
+  }
+
+  ctx.save();
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+  ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+  ctx.lineWidth = lineWidth;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  ctx.beginPath();
+  ctx.moveTo(sx, sy);
+  ctx.lineTo(ex, ey);
+  ctx.stroke();
+
+  const angle = Math.atan2(ey - sy, ex - sx);
+  const hx = ex;
+  const hy = ey;
+  const leftX = hx - Math.cos(angle) * head - Math.sin(angle) * (head * 0.65);
+  const leftY = hy - Math.sin(angle) * head + Math.cos(angle) * (head * 0.65);
+  const rightX = hx - Math.cos(angle) * head + Math.sin(angle) * (head * 0.65);
+  const rightY = hy - Math.sin(angle) * head - Math.cos(angle) * (head * 0.65);
+
+  ctx.beginPath();
+  ctx.moveTo(hx, hy);
+  ctx.lineTo(leftX, leftY);
+  ctx.lineTo(rightX, rightY);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
 }
 
 function drawOpenExitMark(segment, lineWidth) {
@@ -1749,20 +2343,28 @@ function drawExtraExitMarkers(room) {
 
   if (room.exits.u) {
     ctx.fillStyle = "#7ff0b0";
+    const ux = x + tilePx * 0.88;
+    const uy = y + tilePx * 0.12;
+    const halfW = tilePx * 0.11;
+    const h = tilePx * 0.16;
     ctx.beginPath();
-    ctx.moveTo(midX, y + 6 * state.zoom);
-    ctx.lineTo(midX - 5 * state.zoom, y + 14 * state.zoom);
-    ctx.lineTo(midX + 5 * state.zoom, y + 14 * state.zoom);
+    ctx.moveTo(ux, uy);
+    ctx.lineTo(ux - halfW, uy + h);
+    ctx.lineTo(ux + halfW, uy + h);
     ctx.closePath();
     ctx.fill();
   }
 
   if (room.exits.d) {
     ctx.fillStyle = "#6fb8ff";
+    const dx = x + tilePx * 0.12;
+    const dy = y + tilePx * 0.88;
+    const halfW = tilePx * 0.11;
+    const h = tilePx * 0.16;
     ctx.beginPath();
-    ctx.moveTo(midX, y + tilePx - 6 * state.zoom);
-    ctx.lineTo(midX - 5 * state.zoom, y + tilePx - 14 * state.zoom);
-    ctx.lineTo(midX + 5 * state.zoom, y + tilePx - 14 * state.zoom);
+    ctx.moveTo(dx, dy);
+    ctx.lineTo(dx - halfW, dy - h);
+    ctx.lineTo(dx + halfW, dy - h);
     ctx.closePath();
     ctx.fill();
   }
@@ -1810,12 +2412,13 @@ function pickRoomAt(clientX, clientY) {
 }
 
 function updateInspector() {
-  if (!state.selectedRoomId) {
+  const inspectRoomId = state.selectedRoomId;
+  if (!inspectRoomId) {
     el.roomInspector.textContent = "No room selected.";
     return;
   }
 
-  const room = state.roomsById.get(state.selectedRoomId);
+  const room = state.roomsById.get(inspectRoomId);
   if (!room) {
     el.roomInspector.textContent = "No room selected.";
     return;
@@ -1824,16 +2427,79 @@ function updateInspector() {
   const payload = {
     id: room.id,
     name: room.name,
+    area: room.area || "",
+    ephNum: room.ephNum != null ? room.ephNum : "",
+    areaID: room.areaID != null ? room.areaID : "",
+    localID: room.localID != null ? room.localID : "",
     x: room.x,
     y: room.y,
     z: room.z,
     gridId: normalizeGridId(room.gridId),
     sector: room.sector,
+    mobs: room.knownMobs || [],
     exits: room.exits,
     notes: room.notes || ""
   };
 
   el.roomInspector.textContent = JSON.stringify(payload, null, 2);
+}
+
+function formatRoomHoverTooltip(room) {
+  const mobs = Array.isArray(room.knownMobs) ? room.knownMobs : [];
+  const exits = room.exits && typeof room.exits === "object" ? room.exits : {};
+  const exitParts = [];
+
+  for (const dir of ["n", "e", "s", "w", "u", "d", "ne", "nw", "se", "sw"]) {
+    const ex = exits[dir];
+    if (!ex) continue;
+    const stateLabel = ex.state ? String(ex.state) : "open";
+    exitParts.push(`${dir}:${stateLabel}`);
+  }
+
+  const mobText = mobs.length ? mobs.join("\n- ") : "Unknown";
+  const exitsText = exitParts.length ? exitParts.join(", ") : "None";
+  const nsidText = room.areaID != null && room.localID != null ? `${room.areaID}:${room.localID}` : "";
+  const ephText = room.ephNum != null ? String(room.ephNum) : "";
+
+  return [
+    `Area: ${room.area || "Unknown"}`,
+    `Room: ${room.name || "Unknown"}`,
+    nsidText ? `NSID: ${nsidText}` : null,
+    ephText ? `ephNum: ${ephText}` : null,
+    `XYZ: ${room.x}, ${room.y}, ${room.z}`,
+    `Sector: ${room.sector || "unknown"}`,
+    `Mobs: ${mobs.length ? `\n- ${mobText}` : mobText}`,
+    `Exits: ${exitsText}`
+  ].filter(Boolean).join("\n");
+}
+
+function setHoverTooltip(room, clientX, clientY) {
+  if (!el.roomHoverTooltip) return;
+  if (!room) {
+    hideHoverTooltip();
+    return;
+  }
+
+  const wrap = el.canvas.parentElement;
+  if (!wrap) return;
+  const wrapRect = wrap.getBoundingClientRect();
+  const tooltip = el.roomHoverTooltip;
+  tooltip.textContent = formatRoomHoverTooltip(room);
+  tooltip.hidden = false;
+
+  const offset = 14;
+  const maxX = Math.max(0, wrap.clientWidth - tooltip.offsetWidth - 8);
+  const maxY = Math.max(0, wrap.clientHeight - tooltip.offsetHeight - 8);
+  const left = Math.max(8, Math.min(maxX, clientX - wrapRect.left + offset));
+  const top = Math.max(8, Math.min(maxY, clientY - wrapRect.top + offset));
+
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${top}px`;
+}
+
+function hideHoverTooltip() {
+  if (!el.roomHoverTooltip) return;
+  el.roomHoverTooltip.hidden = true;
 }
 
 function exportMap() {
@@ -1906,14 +2572,29 @@ function loadPersistedMap() {
 }
 
 function addMovementTrail(from, to) {
-  state.movementTrail.push({
-    from: { x: from.x, y: from.y, z: from.z, gridId: normalizeGridId(from.gridId) },
-    to: { x: to.x, y: to.y, z: to.z, gridId: normalizeGridId(to.gridId) },
-    createdAt: performance.now(),
-    fadeMs: TRAIL_FADE_MS
-  });
-  if (state.movementTrail.length > 128) {
-    state.movementTrail.splice(0, state.movementTrail.length - 128);
+  if (!from || !to) return;
+  const now = performance.now();
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const steps = Math.max(3, Math.ceil(Math.hypot(dx, dy) * 6));
+
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const dotGridId = t < 0.5 ? normalizeGridId(from.gridId) : normalizeGridId(to.gridId);
+    const dotZ = t < 0.5 ? from.z : to.z;
+    state.movementTrail.push({
+      x: from.x + dx * t,
+      y: from.y + dy * t,
+      z: dotZ,
+      gridId: dotGridId,
+      createdAt: now,
+      holdMs: TRAIL_DOT_HOLD_MS,
+      fadeMs: TRAIL_DOT_FADE_MIN_MS + Math.random() * (TRAIL_DOT_FADE_MAX_MS - TRAIL_DOT_FADE_MIN_MS)
+    });
+  }
+
+  if (state.movementTrail.length > 640) {
+    state.movementTrail.splice(0, state.movementTrail.length - 640);
   }
   ensureEffectsLoop();
 }
@@ -1934,7 +2615,10 @@ function updatePanAnimation(now) {
 }
 
 function pruneMovementTrail(now) {
-  state.movementTrail = state.movementTrail.filter((segment) => (now - segment.createdAt) < segment.fadeMs);
+  state.movementTrail = state.movementTrail.filter((segment) => {
+    const holdMs = Number.isFinite(segment.holdMs) ? segment.holdMs : TRAIL_DOT_HOLD_MS;
+    return (now - segment.createdAt) < (holdMs + segment.fadeMs);
+  });
 }
 
 function ensureEffectsLoop() {
@@ -1962,6 +2646,22 @@ function ensureEffectsLoop() {
   };
 
   anim.effectRafId = requestAnimationFrame(tick);
+}
+
+function clearAreaByGridId(gridId) {
+  const key = normalizeGridId(gridId);
+  const kept = state.mapData.rooms.filter((r) => normalizeGridId(r.gridId) !== key);
+  if (kept.length === state.mapData.rooms.length) return;
+  state.mapData.rooms = kept;
+  if (state.selectedRoomId) {
+    const still = state.roomsById.get(state.selectedRoomId);
+    if (!still || normalizeGridId(still.gridId) === key) state.selectedRoomId = null;
+  }
+  rebuildIndexes();
+  syncZLevels();
+  updateInspector();
+  persistMap();
+  render();
 }
 
 function isVisible(x, y, width, height) {

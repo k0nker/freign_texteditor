@@ -1872,6 +1872,53 @@ body:has(#workspace[data-layout="rounded"]) #settings-drawer {
   padding: 8px;
 }
 
+.map-room-card {
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--panel-border));
+  border-radius: 6px;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--panel) 68%, var(--terminal-bg)) 0%,
+    color-mix(in srgb, var(--panel) 50%, var(--input-bg)) 100%
+  );
+  padding: 8px 9px;
+  margin-bottom: 8px;
+}
+
+.map-room-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.map-room-card-title {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.map-room-card-nsid,
+.map-room-card-eph {
+  color: color-mix(in srgb, var(--muted) 72%, white 10%);
+  opacity: 0.65;
+  font-weight: 600;
+}
+
+.map-room-card-area {
+  margin-top: 5px;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--text) 92%, white 4%);
+}
+
+.map-room-card-name {
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
 .map-room-name {
   font-size: 11px;
   font-weight: 700;

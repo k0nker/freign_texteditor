@@ -231,6 +231,27 @@ button:hover,
   cursor: default;
 }
 
+.room-hover-tooltip {
+  position: absolute;
+  z-index: 45;
+  min-width: 240px;
+  max-width: 360px;
+  pointer-events: none;
+  border: 1px solid #3f5569;
+  border-radius: 8px;
+  background: rgba(13, 20, 27, 0.94);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.42);
+  padding: 8px 10px;
+  color: #dbe7f4;
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+}
+
+.room-hover-tooltip[hidden] {
+  display: none;
+}
+
 #map-canvas {
   width: 100%;
   height: 100%;

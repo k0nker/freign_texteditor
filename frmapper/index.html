@@ -15,11 +15,10 @@
     <header class="topbar">
       <div class="brand">frmapper</div>
       <div class="topbar-actions">
-        <button id="btn-load-sample" type="button">Load Sample</button>
         <label class="file-button" for="file-input">Load JSON</label>
         <input id="file-input" type="file" accept="application/json" />
-        <button id="btn-clear-map" type="button">Clear Map</button>
         <button id="btn-export" type="button">Export JSON</button>
+        <button id="btn-clear-map" type="button">Clear Map</button>
       </div>
     </header>
 
@@ -50,24 +49,36 @@
             <input id="toggle-mobs" type="checkbox" checked />
             <span>Hints</span>
           </div>
+          <div class="control-row control-row-check">
+            <label for="toggle-traveled-path">Traveled Path</label>
+            <input id="toggle-traveled-path" type="checkbox" checked />
+            <span>Show</span>
+          </div>
+          <div class="control-row control-row-check">
+            <label for="toggle-fog">Fog of War</label>
+            <input id="toggle-fog" type="checkbox" checked />
+            <span>Show</span>
+          </div>
           <p class="hint">Drag to pan. Scroll to zoom. Click a room to inspect it.</p>
-        </section>
-
-        <section class="panel">
-          <h2>Selected Room</h2>
-          <pre id="room-inspector">No room selected.</pre>
         </section>
 
         <section class="panel">
           <h2>Legend</h2>
           <div id="legend" class="legend"></div>
         </section>
+
+        <section class="panel">
+          <h2>Selected Room</h2>
+          <pre id="room-inspector">No room selected.</pre>
+        </section>
       </aside>
 
       <main class="canvas-wrap">
         <canvas id="map-canvas" width="1200" height="800" aria-label="frmapper grid canvas"></canvas>
+        <div id="room-hover-tooltip" class="room-hover-tooltip" hidden></div>
         <div id="context-menu" class="context-menu" hidden>
           <button id="menu-remove-room" type="button">Remove Room</button>
+          <button id="menu-clear-area" type="button">Clear This Area</button>
           <button id="menu-clear-map" type="button">Clear Map</button>
         </div>
       </main>

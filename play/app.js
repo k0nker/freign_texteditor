@@ -8,7 +8,7 @@
   var STORAGE_KEY    = 'freign.play2.settings.v1';
   var SCROLLBACK_KEY = 'freign.play2.scrollback';
   var SITE_THEME_KEY = 'freign.site.theme.v1';
-  var SINGLE_LEFT_PANEL_MODE = true;
+  var SINGLE_LEFT_PANEL_MODE = false;
   var themeApi = window.FreignThemes || null;
 
   var LOCKED_MUDS = [
@@ -191,6 +191,7 @@
       mapCenteredSeq: 0,
       mapRenderedAnsi: '',
       mapRenderedMetaHtml: '',
+      mapRenderedRoomCardHtml: '',
       mapRenderedMarkerKey: '',
       mapCenterSeq: 0,
       mapV2RoomsById: {},
@@ -482,6 +483,8 @@
 
     document.addEventListener('click', function (e) {
       if (!state.activeDrawer) return;
+      var path = (typeof e.composedPath === 'function') ? e.composedPath() : null;
+      if (path && path.indexOf(el.settingsDrawer) >= 0) return;
       if (el.settingsDrawer.contains(e.target)) return;
       if (e.target.closest('.rnav-btn')) return;
       closeDrawer();
@@ -672,11 +675,7 @@
   function openPanel(id) {
     if (state.settings.openPanels.indexOf(id) < 0) state.settings.openPanels.push(id);
 
-    if (id === 'mapv2') {
-      state.settings.openPanels = state.settings.openPanels.filter(function (panelId) {
-        return panelId === 'mapv2' || panelSideForId(panelId) !== 'left';
-      });
-    } else if (SINGLE_LEFT_PANEL_MODE && panelSideForId(id) === 'left') {
+    if (SINGLE_LEFT_PANEL_MODE && panelSideForId(id) === 'left') {
       state.settings.openPanels = state.settings.openPanels.filter(function (panelId) {
         return panelId === id || panelSideForId(panelId) !== 'left';
       });
@@ -1436,7 +1435,8 @@
       upBtn.type = 'button'; upBtn.className = 'order-btn'; upBtn.title = 'Move up';
       upBtn.textContent = '\u2191'; upBtn.disabled = orderIdx === 0;
       (function (idx) {
-        upBtn.addEventListener('click', function () {
+        upBtn.addEventListener('click', function (e) {
+          e.stopPropagation();
           var tmp = state.settings.panelOrder[idx - 1];
           state.settings.panelOrder[idx - 1] = state.settings.panelOrder[idx];
           state.settings.panelOrder[idx] = tmp;
@@ -1448,7 +1448,8 @@
       downBtn.type = 'button'; downBtn.className = 'order-btn'; downBtn.title = 'Move down';
       downBtn.textContent = '\u2193'; downBtn.disabled = orderIdx === order.length - 1;
       (function (idx) {
-        downBtn.addEventListener('click', function () {
+        downBtn.addEventListener('click', function (e) {
+          e.stopPropagation();
           var tmp = state.settings.panelOrder[idx + 1];
           state.settings.panelOrder[idx + 1] = state.settings.panelOrder[idx];
           state.settings.panelOrder[idx] = tmp;
@@ -1518,7 +1519,8 @@
         upBtn.type = 'button'; upBtn.className = 'order-btn'; upBtn.title = 'Move up';
         upBtn.textContent = '\u2191'; upBtn.disabled = idx === 0;
         (function (i) {
-          upBtn.addEventListener('click', function () {
+          upBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
             var tmp = state.settings.gmcpPanels[i - 1];
             state.settings.gmcpPanels[i - 1] = state.settings.gmcpPanels[i];
             state.settings.gmcpPanels[i] = tmp;
@@ -1529,7 +1531,8 @@
         downBtn.type = 'button'; downBtn.className = 'order-btn'; downBtn.title = 'Move down';
         downBtn.textContent = '\u2193'; downBtn.disabled = idx === state.settings.gmcpPanels.length - 1;
         (function (i) {
-          downBtn.addEventListener('click', function () {
+          downBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
             var tmp = state.settings.gmcpPanels[i + 1];
             state.settings.gmcpPanels[i + 1] = state.settings.gmcpPanels[i];
             state.settings.gmcpPanels[i] = tmp;
@@ -2194,16 +2197,17 @@
     el.mapPanelBody.className = 'panel-body map-panel';
     Array.prototype.forEach.call(el.mapPanelBody.children, function (child) {
       if (!child || !child.classList) return;
+      if (child.classList.contains('map-room-card')) return;
       if (child.classList.contains('map-meta')) return;
       if (child.classList.contains('map-ansi')) return;
       child.remove();
     });
 
-    var meta = el.mapPanelBody.querySelector('.map-meta');
-    if (!meta) {
-      meta = document.createElement('div');
-      meta.className = 'map-meta';
-      el.mapPanelBody.appendChild(meta);
+    var roomCard = el.mapPanelBody.querySelector('.map-room-card');
+    if (!roomCard) {
+      roomCard = document.createElement('div');
+      roomCard.className = 'map-room-card';
+      el.mapPanelBody.insertBefore(roomCard, el.mapPanelBody.firstChild);
     }
 
     var roomName = info && info.name ? info.name : 'Unknown Room';
@@ -2212,6 +2216,33 @@
     var hourText = '--';
     if (wt.hour != null && wt.hour !== '') {
       hourText = String(wt.hour);
+    }
+
+    var nsidText = '';
+    if (info && info.areaID != null && info.localID != null) {
+      nsidText = String(info.areaID) + ':' + String(info.localID);
+    }
+
+    var ephText = info && info.ephNum != null && info.ephNum !== '' ? String(info.ephNum) : '';
+
+    var roomCardHtml =
+      '<div class="map-room-card-head">' +
+      '<div class="map-room-card-title">ROOM INFO' + (nsidText ? ' <span class="map-room-card-nsid">' + escHtml(nsidText) + '</span>' : '') + '</div>' +
+      '<div class="map-room-card-eph">' + (ephText ? 'eph ' + escHtml(ephText) : '') + '</div>' +
+      '</div>' +
+      '<div class="map-room-card-area">' + escHtml(area) + '</div>' +
+      '<div class="map-room-card-name">' + escHtml(roomName) + '</div>';
+
+    if (roomCardHtml !== state.gmcp.mapRenderedRoomCardHtml) {
+      roomCard.innerHTML = roomCardHtml;
+      state.gmcp.mapRenderedRoomCardHtml = roomCardHtml;
+    }
+
+    var meta = el.mapPanelBody.querySelector('.map-meta');
+    if (!meta) {
+      meta = document.createElement('div');
+      meta.className = 'map-meta';
+      el.mapPanelBody.appendChild(meta);
     }
 
     var metaHtml =
