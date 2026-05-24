@@ -9,6 +9,8 @@
   var SCROLLBACK_KEY = 'freign.play2.scrollback';
   var SITE_THEME_KEY = 'freign.site.theme.v1';
   var SINGLE_LEFT_PANEL_MODE = false;
+  var MAP_PANEL_ID = 'map';
+  var LEGACY_MAP_PANEL_ID = 'mapv2';
   var themeApi = window.FreignThemes || null;
 
   var LOCKED_MUDS = [
@@ -17,7 +19,7 @@
   ];
 
   var BUILTIN_PANELS = [
-    { id: 'mapv2',    name: 'Map',      icon: '\u25a6' },
+    { id: 'map',      name: 'Map',      icon: '\u25a6' },
     { id: 'channels', name: 'Channels', icon: '\u22cb' },
     { id: 'party',    name: 'Party',    icon: '\u203f' },
     { id: 'status',   name: 'Status',   icon: '\u25c9' },
@@ -39,6 +41,31 @@
     'Dk.Gray', 'Br.Red', 'Br.Green', 'Br.Yellow', 'Br.Blue', 'Br.Magenta', 'Br.Cyan', 'White',
   ];
 
+  // Canonical GMCP package mapping mirrors java/game/.../GmcpPackage.java.
+  var GMCP_PACKAGE_CANONICALS = {
+    'comm.channel.text': ['comm.channel.text', 'comm.channel', 'comm'],
+    'room.info': ['room.info'],
+    'room.chars': ['room.chars'],
+    'room.mobs': ['room.mobs'],
+    'room.objects': ['room.objects', 'room.items'],
+    'room.scannedmobs': ['room.scannedmobs', 'room.scanned.mobs', 'room.scan.mobs'],
+    'char.info': ['char.info', 'char.status'],
+    'char.vitals': ['char.vitals'],
+    'char.affects': ['char.affects'],
+    'char.stats': ['char.stats'],
+    'char.worth': ['char.worth'],
+    'char.combat': ['char.combat'],
+    'group.info': ['group.info'],
+    'char.inventory': ['char.inventory'],
+    'char.equipment': ['char.equipment'],
+    'map.render': ['map.render'],
+    'world.time': ['world.time'],
+    'world.weather': ['world.weather'],
+    'world.moons': ['world.moons'],
+  };
+
+  var GMCP_ALIAS_TO_CANONICAL = buildGmcpAliasLookup();
+
   var DEFAULT_SETTINGS = {
     theme:          'amethyst',
     font:           'JetBrains Mono',
@@ -52,12 +79,12 @@
     triggers:       [],
     macros:         [],
     palette16:      {},
-    openPanels:     ['mapv2', 'status', 'targets'],
+    openPanels:     ['map', 'status', 'targets'],
     panelSides:     {
-      mapv2: 'left', channels: 'left', party: 'left',
+      map: 'left', channels: 'left', party: 'left',
       status: 'right', targets: 'right', inventory: 'right', equipment: 'right',
     },
-    panelTabGroup:  { mapv2: '', channels: '', party: '', status: '', targets: '', inventory: '', equipment: '' },
+    panelTabGroup:  { map: '', channels: '', party: '', status: '', targets: '', inventory: '', equipment: '' },
     panelTabActive: {},
     panelWidths:    { left: 230, right: 230 },
     keepInput:      true,
@@ -65,7 +92,7 @@
     wrapWidth:      120,
     historyMax:     2500,
     consoleWidth:   1080,
-    panelOrder:     ['mapv2', 'channels', 'party', 'status', 'targets', 'inventory', 'equipment'],
+    panelOrder:     ['map', 'channels', 'party', 'status', 'targets', 'inventory', 'equipment'],
     tsSelectable:   true,
     logTimestamps:  true,
     affectsView:    'details',
@@ -73,6 +100,31 @@
 
   function cloneDefaultSettings() {
     return JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+  }
+
+  function buildGmcpAliasLookup() {
+    var out = Object.create(null);
+    Object.keys(GMCP_PACKAGE_CANONICALS).forEach(function (canonical) {
+      var aliases = GMCP_PACKAGE_CANONICALS[canonical] || [];
+      out[canonical] = canonical;
+      aliases.forEach(function (alias) {
+        out[normalizeGmcpPackageName(alias)] = canonical;
+      });
+    });
+    return out;
+  }
+
+  function normalizeGmcpPackageName(value) {
+    return String(value || '').trim().toLowerCase().replace(/[\s_]+/g, '.');
+  }
+
+  function canonicalGmcpPackageName(value) {
+    var normalized = normalizeGmcpPackageName(value);
+    return GMCP_ALIAS_TO_CANONICAL[normalized] || normalized;
+  }
+
+  function normalizePanelId(id) {
+    return id === LEGACY_MAP_PANEL_ID ? MAP_PANEL_ID : id;
   }
 
   function ensureDefaultPanelLayout(settings) {
@@ -84,17 +136,22 @@
       settings.openPanels = [];
     }
     var legacyDefaultPanels = ['party', 'status', 'targets'];
-    var nextDefaultPanels = ['mapv2', 'status', 'targets'];
+    var nextDefaultPanels = [MAP_PANEL_ID, 'status', 'targets'];
+    settings.openPanels = settings.openPanels.map(normalizePanelId);
     var sameAsLegacy = settings.openPanels.length === legacyDefaultPanels.length && legacyDefaultPanels.every(function (panelId) {
       return settings.openPanels.indexOf(panelId) >= 0;
     });
     if (sameAsLegacy || (settings.openPanels.indexOf('channels') < 0 && settings.openPanels.indexOf('party') >= 0)) {
       settings.openPanels = nextDefaultPanels.slice();
     }
-    if (settings.openPanels.indexOf('mapv2') < 0) {
-      settings.openPanels.unshift('mapv2');
+    if (settings.openPanels.indexOf(MAP_PANEL_ID) < 0) {
+      settings.openPanels.unshift(MAP_PANEL_ID);
     }
-    if (!settings.panelSides.mapv2) settings.panelSides.mapv2 = 'left';
+    if (settings.panelSides[LEGACY_MAP_PANEL_ID] && !settings.panelSides[MAP_PANEL_ID]) {
+      settings.panelSides[MAP_PANEL_ID] = settings.panelSides[LEGACY_MAP_PANEL_ID];
+    }
+    delete settings.panelSides[LEGACY_MAP_PANEL_ID];
+    if (!settings.panelSides[MAP_PANEL_ID]) settings.panelSides[MAP_PANEL_ID] = 'left';
     if (!settings.panelSides.channels) settings.panelSides.channels = 'left';
     settings.panelSides.party = settings.panelSides.party || 'left';
     if (!settings.panelSides.status) settings.panelSides.status = 'right';
@@ -105,13 +162,13 @@
       settings.openPanels = nextDefaultPanels.slice();
     }
 
-    settings.openPanels = settings.openPanels.filter(function (panelId) {
-      return panelId !== 'map';
+    settings.openPanels = settings.openPanels.filter(function (panelId, idx, arr) {
+      return panelId !== LEGACY_MAP_PANEL_ID && arr.indexOf(panelId) === idx;
     });
 
-    if (SINGLE_LEFT_PANEL_MODE && settings.openPanels.indexOf('mapv2') >= 0) {
+    if (SINGLE_LEFT_PANEL_MODE && settings.openPanels.indexOf(MAP_PANEL_ID) >= 0) {
       settings.openPanels = settings.openPanels.filter(function (panelId) {
-        if (panelId === 'mapv2') return true;
+        if (panelId === MAP_PANEL_ID) return true;
         return (settings.panelSides[panelId] || 'left') !== 'left';
       });
     }
@@ -122,13 +179,14 @@
 
   function ensurePanelOrder(panelOrder) {
     var order = Array.isArray(panelOrder) ? panelOrder.slice() : [];
-    var required = ['mapv2', 'channels', 'party', 'status', 'targets', 'inventory', 'equipment'];
+    order = order.map(normalizePanelId);
+    var required = ['map', 'channels', 'party', 'status', 'targets', 'inventory', 'equipment'];
 
     required.forEach(function (panelId) {
       if (order.indexOf(panelId) < 0) order.push(panelId);
     });
 
-    order = order.filter(function (panelId) { return panelId !== 'map'; });
+    order = order.filter(function (panelId, idx, arr) { return panelId !== LEGACY_MAP_PANEL_ID && arr.indexOf(panelId) === idx; });
     return order;
   }
 
@@ -211,6 +269,10 @@
       equipment: [],
       channelTab: 'all',
     },
+    mapV2Resize: {
+      lastSig: '',
+      debounceTimer: null,
+    },
   };
 
   var el = {};
@@ -259,8 +321,8 @@
     el.vMvSegs        = document.querySelectorAll('#v-mv-gauge .status-bar-fill');
     el.vWimpy         = document.getElementById('v-wimpy');
 
-    el.mapV2PanelBody = document.getElementById('mapv2-panel-body');
-    el.mapV2Frame     = document.getElementById('mapv2-frame');
+    el.mapV2PanelBody = document.getElementById('map-panel-body');
+    el.mapV2Frame     = document.getElementById('map-frame');
     el.channelsPane   = document.getElementById('channels-pane');
     el.channelsTabs   = document.getElementById('channels-tabs');
     el.channelsLog    = document.getElementById('channels-log');
@@ -270,7 +332,7 @@
     el.inventoryPanelBody = document.getElementById('inventory-panel-body');
     el.equipmentPanelBody = document.getElementById('equipment-panel-body');
 
-    el.pkgMapV2      = document.getElementById('pkg-mapv2');
+    el.pkgMapV2      = document.getElementById('pkg-map');
     el.pkgChannels   = document.getElementById('pkg-channels');
     el.pkgParty      = document.getElementById('pkg-party');
     el.pkgStatus     = document.getElementById('pkg-status');
@@ -438,7 +500,7 @@
       el.mapV2Frame.addEventListener('load', function () {
         state.gmcp.mapV2SnapshotSent = false;
         syncMapV2Snapshot(true);
-        scheduleMapV2ResizeSync();
+        scheduleMapV2ResizeSync(true);
       });
     }
 
@@ -673,6 +735,7 @@
   }
 
   function openPanel(id) {
+    id = normalizePanelId(id);
     if (state.settings.openPanels.indexOf(id) < 0) state.settings.openPanels.push(id);
 
     if (SINGLE_LEFT_PANEL_MODE && panelSideForId(id) === 'left') {
@@ -686,6 +749,7 @@
   }
 
   function closePanel(id) {
+    id = normalizePanelId(id);
     state.settings.openPanels = state.settings.openPanels.filter(function (p) { return p !== id; });
     applyPanelState();
     saveSettings();
@@ -693,22 +757,30 @@
 
   /* applyPanelState — moves panel elements AND nav buttons to the correct rail */
   function applyPanelState() {
-    var open  = state.settings.openPanels;
+    var open  = state.settings.openPanels.map(normalizePanelId);
+    state.settings.openPanels = open;
     var sides = state.settings.panelSides;
 
-    if (SINGLE_LEFT_PANEL_MODE && open.indexOf('mapv2') >= 0) {
+    if (SINGLE_LEFT_PANEL_MODE && open.indexOf(MAP_PANEL_ID) >= 0) {
       open = open.filter(function (panelId) {
-        return panelId === 'mapv2' || panelSideForId(panelId) !== 'left';
+        return panelId === MAP_PANEL_ID || panelSideForId(panelId) !== 'left';
       });
       state.settings.openPanels = open;
     }
 
     /* ── Built-in panels ─────────────────────────────────── */
+    var panelOrder = state.settings.panelOrder || BUILTIN_PANELS.map(function (bp) { return bp.id; });
+    var panelOrderIndex = Object.create(null);
+    panelOrder.forEach(function (pid, idx) {
+      panelOrderIndex[pid] = idx;
+    });
+
     BUILTIN_PANELS.forEach(function (bp) {
       var panelEl = document.getElementById('panel-' + bp.id);
       var btnEl   = document.querySelector('.panel-nav-btn[data-panel="' + bp.id + '"]');
       var side    = sides[bp.id] || 'left';
       var isOpen  = open.indexOf(bp.id) >= 0;
+      var orderIdx = panelOrderIndex[bp.id] != null ? panelOrderIndex[bp.id] : 999;
 
       /* Move panel element to correct container */
       var targetContainer = (side === 'right') ? el.rightPanels : el.leftPanels;
@@ -731,23 +803,12 @@
 
       if (panelEl) {
         panelEl.style.display = '';
+        panelEl.style.order = String(orderIdx);
         panelEl.classList.toggle('active', isOpen);
       }
-      if (btnEl)   btnEl.classList.toggle('active', isOpen);
-    });
-
-    /* ── Reorder builtin panels and nav buttons by panelOrder ──────────────── */
-    var panelOrder = state.settings.panelOrder || BUILTIN_PANELS.map(function (bp) { return bp.id; });
-    panelOrder.forEach(function (pid) {
-      var pEl  = document.getElementById('panel-' + pid);
-      var bEl  = document.querySelector('.panel-nav-btn[data-panel="' + pid + '"]');
-      if (pEl && pEl.parentNode)  pEl.parentNode.appendChild(pEl);
-      if (bEl && bEl.parentNode) {
-        if (bEl.parentNode === el.leftNav) {
-          el.leftNav.insertBefore(bEl, el.leftPanelBtns);
-        } else {
-          bEl.parentNode.appendChild(bEl);
-        }
+      if (btnEl) {
+        btnEl.style.order = String(orderIdx);
+        btnEl.classList.toggle('active', isOpen);
       }
     });
     /* Keep GMCP panel containers after builtin panels */
@@ -803,24 +864,32 @@
       el.rightPanelsRail.style.display = el.rightPanelBtns.children.length ? '' : 'none';
     }
 
-    var mapV2IsOpen = open.indexOf('mapv2') >= 0;
-    if (mapV2IsOpen) {
+    var mapPanel = document.getElementById('panel-map');
+    var mapV2IsVisible = !!(mapPanel && mapPanel.classList.contains('active'));
+    if (mapV2IsVisible) {
       scheduleMapV2ResizeSync();
     }
   }
 
-  function scheduleMapV2ResizeSync() {
+  function scheduleMapV2ResizeSync(force) {
     if (!el.mapV2Frame || !el.mapV2Frame.contentWindow) return;
+    var mapBody = el.mapV2PanelBody;
+    var sig = mapBody
+      ? String(mapBody.clientWidth) + 'x' + String(mapBody.clientHeight)
+      : 'unknown';
+    if (!force && sig === state.mapV2Resize.lastSig) return;
+    state.mapV2Resize.lastSig = sig;
+
+    if (state.mapV2Resize.debounceTimer) {
+      clearTimeout(state.mapV2Resize.debounceTimer);
+      state.mapV2Resize.debounceTimer = null;
+    }
+
     postMapV2Message({ type: 'frmapper.resize' });
-    window.requestAnimationFrame(function () {
+    state.mapV2Resize.debounceTimer = window.setTimeout(function () {
       postMapV2Message({ type: 'frmapper.resize' });
-    });
-    window.setTimeout(function () {
-      postMapV2Message({ type: 'frmapper.resize' });
-    }, 90);
-    window.setTimeout(function () {
-      postMapV2Message({ type: 'frmapper.resize' });
-    }, 240);
+      state.mapV2Resize.debounceTimer = null;
+    }, 120);
   }
 
   function applyTabbedCollapse(side) {
@@ -1882,29 +1951,31 @@
 
   function handleGmcp(pkg, data) {
     if (!pkg) return;
-    var normPkg = String(pkg).trim().toLowerCase();
-    if (normPkg === 'char.vitals') { updateVitals(data || {}); return; }
-    if (normPkg === 'room.info')   { updateRoomInfo(data || {}); return; }
-    if (normPkg === 'room.chars')  { updateRoomChars(data || {}); return; }
-    if (normPkg === 'room.mobs')   { updateRoomMobs(data || {}); return; }
-    if (normPkg === 'room.objects' || normPkg === 'room.items') { updateRoomObjects(data || {}); return; }
-    if (normPkg === 'room.scannedmobs' || normPkg === 'room.scanned_mobs' || normPkg === 'room.scan_mobs') { updateRoomScannedMobs(data || {}); return; }
-    if (normPkg === 'map.render')  { updateMapRender(data || {}); return; }
-    if (normPkg === 'world.time')  { updateWorldTime(data || {}); return; }
-    if (normPkg === 'world.weather') { updateWorldWeather(data || {}); return; }
-    if (normPkg === 'world.moons') { updateWorldMoons(data || {}); return; }
-    if (normPkg === 'comm.channel.text') { pushChannelMessage(data || {}); return; }
-    if (normPkg === 'group.info')  { updateGroupInfo(data || {}); return; }
-    if (normPkg === 'char.info')   { updateCharStatus(data || {}); return; }
-    if (normPkg === 'char.stats')  { updateCharStats(data || {}); return; }
-    if (normPkg === 'char.worth')  { updateCharWorth(data || {}); return; }
-    if (normPkg === 'char.affects'){ updateCharAffects(data || {}); return; }
-    if (normPkg === 'char.combat') { updateCharCombat(data || {}); return; }
-    if (normPkg === 'char.inventory') { updateInventory(data || {}); return; }
-    if (normPkg === 'char.equipment') { updateEquipment(data || {}); return; }
+    var canonicalPkg = canonicalGmcpPackageName(pkg);
+    if (canonicalPkg === 'char.vitals') { updateVitals(data || {}); return; }
+    if (canonicalPkg === 'room.info')   { updateRoomInfo(data || {}); return; }
+    if (canonicalPkg === 'room.chars')  { updateRoomChars(data || {}); return; }
+    if (canonicalPkg === 'room.mobs')   { updateRoomMobs(data || {}); return; }
+    if (canonicalPkg === 'room.objects') { updateRoomObjects(data || {}); return; }
+    if (canonicalPkg === 'room.scannedmobs') { updateRoomScannedMobs(data || {}); return; }
+    if (canonicalPkg === 'map.render')  { updateMapRender(data || {}); return; }
+    if (canonicalPkg === 'world.time')  { updateWorldTime(data || {}); return; }
+    if (canonicalPkg === 'world.weather') { updateWorldWeather(data || {}); return; }
+    if (canonicalPkg === 'world.moons') { updateWorldMoons(data || {}); return; }
+    if (canonicalPkg === 'comm.channel.text') { pushChannelMessage(data || {}); return; }
+    if (canonicalPkg === 'group.info')  { updateGroupInfo(data || {}); return; }
+    if (canonicalPkg === 'char.info') { updateCharStatus(data || {}); return; }
+    if (canonicalPkg === 'char.stats')  { updateCharStats(data || {}); return; }
+    if (canonicalPkg === 'char.worth')  { updateCharWorth(data || {}); return; }
+    if (canonicalPkg === 'char.affects'){ updateCharAffects(data || {}); return; }
+    if (canonicalPkg === 'char.combat') { updateCharCombat(data || {}); return; }
+    if (canonicalPkg === 'char.inventory') { updateInventory(data || {}); return; }
+    if (canonicalPkg === 'char.equipment') { updateEquipment(data || {}); return; }
 
     state.settings.gmcpPanels.forEach(function (panel) {
-      if (!panel.enabled || panel.gmcpPath !== pkg) return;
+      var expectedPath = canonicalGmcpPackageName(panel.gmcpPath || '');
+      if (!panel.enabled || !expectedPath) return;
+      if (expectedPath !== canonicalPkg) return;
       var body = document.querySelector('[data-gmcp-panel-id="' + panel.id + '"]');
       if (!body) return;
       body.className = 'panel-body';
@@ -2101,12 +2172,10 @@
 
   function updateRoomChars(data) {
     state.gmcp.roomChars = data;
-    pulsePkgBadge('mapv2', 'Room.Chars');
   }
 
   function updateRoomMobs(data) {
     state.gmcp.roomMobs = data;
-    pulsePkgBadge('mapv2', 'Room.Mobs');
     postMapV2Message({
       type: 'frmapper.roomMobs',
       payload: data || {}
@@ -2115,7 +2184,6 @@
 
   function updateRoomObjects(data) {
     state.gmcp.roomObjects = data;
-    pulsePkgBadge('mapv2', 'Room.Objects');
     postMapV2Message({
       type: 'frmapper.roomObjects',
       payload: {
@@ -2127,7 +2195,6 @@
 
   function updateRoomScannedMobs(data) {
     state.gmcp.roomScannedMobs = data;
-    pulsePkgBadge('mapv2', 'Room.ScannedMobs');
     postMapV2Message({
       type: 'frmapper.roomScannedMobs',
       payload: {
@@ -2174,6 +2241,28 @@
     }
   }
 
+  function buildFrmapperIdentityPayload() {
+    var s = state.gmcp.charStatus || {};
+    var characterName = String(
+      s.name != null ? s.name
+      : (s.char_name != null ? s.char_name
+      : (s.characterName != null ? s.characterName : ''))
+    ).trim();
+    var realm = String(state.selectedMudId || 'public').trim().toLowerCase();
+    if (realm !== 'test') realm = 'public';
+    return {
+      characterName: characterName,
+      realm: realm,
+    };
+  }
+
+  function pushFrmapperIdentity() {
+    postMapV2Message({
+      type: 'frmapper.identity',
+      payload: buildFrmapperIdentityPayload(),
+    });
+  }
+
   function postMapV2Message(message) {
     if (!el.mapV2Frame || !el.mapV2Frame.contentWindow) return;
     try {
@@ -2186,6 +2275,7 @@
     var rooms = Object.keys(state.gmcp.mapV2RoomsById).map(function (id) {
       return state.gmcp.mapV2RoomsById[id];
     });
+    pushFrmapperIdentity();
     postMapV2Message({
       type: 'frmapper.loadRoomInfoSnapshot',
       payload: {
@@ -2217,7 +2307,7 @@
     if (roomId) {
       state.gmcp.mapV2RoomsById[roomId] = info;
     }
-    pulsePkgBadge('mapv2', 'Room.Info');
+    pulsePkgBadge('map', 'Room.Info');
 
     if (!state.gmcp.mapV2SnapshotSent) {
       syncMapV2Snapshot(true);
@@ -2844,7 +2934,6 @@
   function updateGroupInfo(data) {
     state.gmcp.groupInfo = data;
     pulsePkgBadge('party', 'Group.Info');
-    pulsePkgBadge('mapv2', 'Group.Info');
     postMapV2Message({
       type: 'frmapper.groupInfo',
       payload: data || {}
@@ -2854,6 +2943,7 @@
 
   function updateCharStatus(data) {
     state.gmcp.charStatus = data;
+    pushFrmapperIdentity();
     updateVitalsPosition(data.position != null ? data.position : data.pos);
     pulsePkgBadge('status', 'Char.Info');
     renderLanguageUi();
@@ -3398,7 +3488,7 @@
   }
 
   function getPkgBadgeEl(panelId) {
-    if (panelId === 'mapv2') return el.pkgMapV2;
+    if (panelId === 'map') return el.pkgMapV2;
     if (panelId === 'channels') return el.pkgChannels;
     if (panelId === 'party') return el.pkgParty;
     if (panelId === 'status') return el.pkgStatus;
@@ -3956,7 +4046,9 @@
     out.wrapLines      = typeof incoming.wrapLines   === 'boolean' ? incoming.wrapLines  : base.wrapLines;
     out.stackSeparator = sanitizeStackSep(incoming.stackSeparator);
     out.bridgeUrl      = typeof incoming.bridgeUrl   === 'string'  ? incoming.bridgeUrl  : base.bridgeUrl;
-    out.openPanels     = Array.isArray(incoming.openPanels) ? incoming.openPanels.filter(function(v) { return typeof v === 'string'; }) : clone(base.openPanels);
+    out.openPanels     = Array.isArray(incoming.openPanels)
+      ? incoming.openPanels.filter(function(v) { return typeof v === 'string'; }).map(normalizePanelId)
+      : clone(base.openPanels);
 
     out.keepInput     = typeof incoming.keepInput === 'boolean' ? incoming.keepInput : base.keepInput;
     out.wrapWidth     = (typeof incoming.wrapWidth === 'number' && incoming.wrapWidth >= 0)
@@ -3968,7 +4060,7 @@
     out.panelOrder = (function () {
       var valid = BUILTIN_PANELS.map(function (bp) { return bp.id; });
       if (!Array.isArray(incoming.panelOrder)) return valid.slice();
-      var result = incoming.panelOrder.filter(function (id) { return valid.indexOf(id) >= 0; });
+      var result = incoming.panelOrder.map(normalizePanelId).filter(function (id) { return valid.indexOf(id) >= 0; });
       valid.forEach(function (id) { if (result.indexOf(id) < 0) result.push(id); });
       return result;
     })();
@@ -3983,6 +4075,9 @@
 
     out.panelSides = {};
     var src = incoming.panelSides || {};
+    if (src[LEGACY_MAP_PANEL_ID] != null && src[MAP_PANEL_ID] == null) {
+      src[MAP_PANEL_ID] = src[LEGACY_MAP_PANEL_ID];
+    }
     BUILTIN_PANELS.forEach(function (bp) {
       out.panelSides[bp.id] = oneOf(src[bp.id], ['left', 'right'], 'left');
     });

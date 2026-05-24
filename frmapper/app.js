@@ -1,9 +1,10 @@
 "use strict";
 
 const TILE_SIZE = 48;
-const WALL_COLOR = "#6a4a2c";
+const WALL_COLOR = "#5f4126";
 const WALL_BORDER_COLOR = "rgba(16, 12, 8, 0.96)";
-const STORAGE_KEY = "frmapper.savedMap.v1";
+const LEGACY_STORAGE_KEY = "frmapper.savedMap.v1";
+const STORAGE_KEY_PREFIX = "frmapper.savedMap.v2";
 const TRAIL_DOT_HOLD_MS = 3000;
 const TRAIL_DOT_FADE_MIN_MS = 2000;
 const TRAIL_DOT_FADE_MAX_MS = 2000;
@@ -21,6 +22,9 @@ const EDGE_SPRITE_CACHE = new Map();
 const EXTRA_EXIT_SPRITE_CACHE = new Map();
 const ROOM_STATIC_SPRITE_CACHE = new Map();
 const ROOM_WALL_SPRITE_CACHE = new Map();
+const TRAIL_SPRITE_CACHE_REV = 4;
+const ROOM_WALL_SPRITE_CACHE_REV = 3;
+const ROOM_STATIC_SPRITE_CACHE_REV = 2;
 const SECTOR_TILE_VARIANT_CACHE = new Map();
 const MAX_TRAIL_SPRITE_CACHE = 256;
 const MAX_EDGE_SPRITE_CACHE = 512;
@@ -171,6 +175,11 @@ const state = {
   sessionRealm,
   sessionMode,
   sessionWsUrl,
+  storageCharacterName: "",
+  storageRealm: sessionRealm || "public",
+  storageNamespace: "",
+  storageKey: "",
+  storageLoadedKey: "",
   contextRoomId: null,
   resizeObserver: null,
   resizePassTimer: 0,
@@ -1098,10 +1107,17 @@ function scheduleSessionReconnect() {
 
 function handleSessionMessage(msg) {
   if (!msg || typeof msg !== "object") return;
+  if (msg.type === "frmapper.identity" && msg.payload && typeof msg.payload === "object") {
+    updateStorageIdentity(msg.payload);
+  }
   if (msg.type === "frmapper.attached") {
     const payload = msg.payload && typeof msg.payload === "object" ? msg.payload : {};
     const gmcpNegotiated = !!payload.gmcpNegotiated;
     const gmcpEnabled = !!payload.gmcpEnabled;
+    updateStorageIdentity({
+      characterName: payload.characterName,
+      realm: payload.testRealm ? "test" : (state.sessionRealm || "public")
+    });
     console.info("frmapper attached", { gmcpNegotiated, gmcpEnabled });
     if (!gmcpEnabled) {
       console.warn("frmapper attached but GMCP feed is disabled; run 'frmapper' again in-game (or 'gmcp force') and reopen this page.");
@@ -1182,6 +1198,111 @@ function startFrmapperSessionMode() {
   } catch (_error) {
     // Host integration is optional; ignore cross-origin messaging failures.
   }
+}
+
+function sanitizeStorageToken(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function resolveStorageRealm() {
+  const realm = sanitizeStorageToken(state.storageRealm || state.sessionRealm || "public");
+  return realm || "public";
+}
+
+function buildStorageNamespace(opts) {
+  const options = opts || {};
+  const mode = options.mode ? String(options.mode) : state.sessionMode;
+  const realm = sanitizeStorageToken(options.realm || resolveStorageRealm()) || "public";
+  const characterName = sanitizeStorageToken(options.characterName || state.storageCharacterName);
+  const token = sanitizeStorageToken(options.sessionToken || state.sessionToken);
+
+  if (characterName) return `${realm}:char:${characterName}`;
+  if (mode === "ws" && token) return `${realm}:session:${token}`;
+  return "";
+}
+
+function storageKeyForNamespace(namespace) {
+  if (!namespace) return LEGACY_STORAGE_KEY;
+  return `${STORAGE_KEY_PREFIX}:${namespace}`;
+}
+
+function activeStorageKey() {
+  state.storageNamespace = buildStorageNamespace();
+  state.storageKey = storageKeyForNamespace(state.storageNamespace);
+  return state.storageKey;
+}
+
+function loadPersistedMapFromKey(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.rooms)) return false;
+    applyMapObject(parsed);
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function storageLoadCandidates() {
+  const out = [];
+  const seen = new Set();
+  const push = (key) => {
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    out.push(key);
+  };
+
+  push(storageKeyForNamespace(buildStorageNamespace()));
+  push(storageKeyForNamespace(buildStorageNamespace({
+    realm: resolveStorageRealm(),
+    characterName: state.storageCharacterName,
+    sessionToken: "",
+    mode: state.sessionMode
+  })));
+  push(storageKeyForNamespace(buildStorageNamespace({
+    realm: resolveStorageRealm(),
+    characterName: "",
+    sessionToken: state.sessionToken,
+    mode: "ws"
+  })));
+  push(LEGACY_STORAGE_KEY);
+
+  return out;
+}
+
+function updateStorageIdentity(identity) {
+  const nextName = sanitizeStorageToken(identity && identity.characterName);
+  const nextRealm = sanitizeStorageToken(identity && identity.realm) || resolveStorageRealm();
+  let changed = false;
+
+  if (nextName && nextName !== state.storageCharacterName) {
+    state.storageCharacterName = nextName;
+    changed = true;
+  }
+  if (nextRealm && nextRealm !== state.storageRealm) {
+    state.storageRealm = nextRealm;
+    changed = true;
+  }
+
+  if (!changed) return;
+
+  const nextKey = activeStorageKey();
+  if (nextKey === state.storageLoadedKey) return;
+
+  if (loadPersistedMapFromKey(nextKey)) {
+    fitToView({ zoom: 1 });
+    render();
+    return;
+  }
+
+  state.storageLoadedKey = nextKey;
+  persistMap();
 }
 
 const el = {
@@ -2111,6 +2232,8 @@ function areRoomsEquivalent(a, b) {
   if (!a || !b) return false;
   const markerA = a.markers || {};
   const markerB = b.markers || {};
+  const aSeen = Number.isFinite(a.lastSeenAt) ? Number(a.lastSeenAt) : 0;
+  const bSeen = Number.isFinite(b.lastSeenAt) ? Number(b.lastSeenAt) : 0;
   return (
     String(a.id || "") === String(b.id || "") &&
     String(a.name || "") === String(b.name || "") &&
@@ -2134,6 +2257,10 @@ function areRoomsEquivalent(a, b) {
     !!markerA.runegate === !!markerB.runegate &&
     !!markerA.trail === !!markerB.trail &&
     !!markerA.waterSource === !!markerB.waterSource &&
+    !!a.visibleNow === !!b.visibleNow &&
+    !!a.discovered === !!b.discovered &&
+    !!a.darkUnknown === !!b.darkUnknown &&
+    aSeen === bSeen &&
     JSON.stringify(a.objects || []) === JSON.stringify(b.objects || [])
   );
 }
@@ -2455,6 +2582,14 @@ function render() {
     }
   }
 
+  for (const room of visibleRooms) {
+    drawRoomWallsAndDoors(room);
+  }
+
+  for (const room of visibleRooms) {
+    drawExtraExitMarkers(room);
+  }
+
   if (!lightMode) {
     for (const room of visibleRooms) {
       drawTrailOverlay(room);
@@ -2463,10 +2598,6 @@ function render() {
     drawPartyOverlays(visibleRooms);
     drawMobHints(visibleRooms);
     drawGridOutline(rooms);
-  }
-
-  for (const room of visibleRooms) {
-    drawRoomWallsAndDoors(room);
   }
 
   for (const room of visibleRooms) {
@@ -2523,7 +2654,7 @@ function getTrailMaskForRoom(room) {
 }
 
 function getTrailSprite(mask, endpointMode) {
-  const key = `${mask}:${endpointMode}`;
+  const key = `${TRAIL_SPRITE_CACHE_REV}:${mask}:${endpointMode}`;
   const cached = TRAIL_SPRITE_CACHE.get(key);
   if (cached) return cached;
 
@@ -2559,6 +2690,9 @@ function renderTrailSprite(g, size, mask, endpointMode, seedKey) {
     g.fill();
   }
   g.restore();
+
+  softenTrailOuterCorner(g, size, mask, outerW);
+  softenTrailOuterCorner(g, size, mask, innerW);
 }
 
 function fillTrailShape(g, size, mask, width, color, endpointMode) {
@@ -2637,6 +2771,64 @@ function drawTrailRects(g, size, mask, width) {
 function applyTrailClip(g, size, mask, width) {
   drawTrailRects(g, size, mask, width);
   g.clip();
+}
+
+function softenTrailOuterCorner(g, size, mask, width) {
+  const hasN = (mask & TRAIL_DIR_BITS.n) !== 0;
+  const hasE = (mask & TRAIL_DIR_BITS.e) !== 0;
+  const hasS = (mask & TRAIL_DIR_BITS.s) !== 0;
+  const hasW = (mask & TRAIL_DIR_BITS.w) !== 0;
+  const sideCount = countBits(mask);
+  const isCorner = sideCount === 2 && !((hasN && hasS) || (hasE && hasW));
+  if (!isCorner) return;
+
+  const c = size * 0.5;
+  const hw = width * 0.5;
+  const cut = Math.max(1.2, hw * 0.48);
+  let px = c;
+  let py = c;
+  let ix = 0;
+  let iy = 0;
+
+  // Carve the convex outer elbow only.
+  if (hasN && hasE) {
+    px = c - hw;
+    py = c + hw;
+    ix = 1;
+    iy = -1;
+  } else if (hasE && hasS) {
+    px = c - hw;
+    py = c - hw;
+    ix = 1;
+    iy = 1;
+  } else if (hasS && hasW) {
+    px = c + hw;
+    py = c - hw;
+    ix = -1;
+    iy = 1;
+  } else if (hasW && hasN) {
+    px = c + hw;
+    py = c + hw;
+    ix = -1;
+    iy = -1;
+  } else {
+    return;
+  }
+
+  const ax = px + ix * cut;
+  const ay = py;
+  const bx = px;
+  const by = py + iy * cut;
+
+  g.save();
+  g.globalCompositeOperation = "destination-out";
+  g.beginPath();
+  g.moveTo(px, py);
+  g.lineTo(ax, ay);
+  g.quadraticCurveTo(px, py, bx, by);
+  g.closePath();
+  g.fill();
+  g.restore();
 }
 
 function hashString(value) {
@@ -3064,6 +3256,8 @@ function moveToPayload(payload) {
   }
   if (!targetRoom) return;
 
+  touchRoomSeen(targetRoom.id);
+
   setActiveLayerFromRoom(targetRoom);
   const targetPan = panForRoom(targetRoom);
   startPanAnimation(targetPan.x, targetPan.y, durationMs, from, to);
@@ -3188,7 +3382,7 @@ function drawRoomStaticSprite(room, options) {
 }
 
 function getRoomStaticSprite(room, zoomBucket, ghost) {
-  const cacheKey = `${room.staticSignature}:${ghost ? 1 : 0}:${zoomBucket}`;
+  const cacheKey = `${ROOM_STATIC_SPRITE_CACHE_REV}:${room.staticSignature}:${ghost ? 1 : 0}:${zoomBucket}`;
   const cached = ROOM_STATIC_SPRITE_CACHE.get(cacheKey);
   if (cached) return cached;
 
@@ -3215,11 +3409,6 @@ function renderRoomStaticSprite(g, room, tilePx, zoomBucket, ghost) {
     g.strokeRect(0.5, 0.5, tilePx - 1, tilePx - 1);
     g.restore();
     return;
-  }
-
-  const extraExitSprite = getExtraExitSprite(room, zoomBucket);
-  if (extraExitSprite) {
-    g.drawImage(extraExitSprite, 0, 0, tilePx, tilePx);
   }
 
   renderRoomPoiMarkersToContext(g, room, tilePx, zoomBucket);
@@ -3299,7 +3488,9 @@ function getRoomWallSignature(room) {
 function renderRoomWallsToContext(g, room, tilePx, zoomBucket) {
   const sprite = getRoomWallSprite(room, zoomBucket);
   if (!sprite) return;
-  g.drawImage(sprite.canvas, -sprite.pad, -sprite.pad, tilePx + sprite.pad * 2, tilePx + sprite.pad * 2);
+  const scale = sprite.tilePx > 0 ? tilePx / sprite.tilePx : 1;
+  const drawPad = sprite.pad * scale;
+  g.drawImage(sprite.canvas, -drawPad, -drawPad, tilePx + drawPad * 2, tilePx + drawPad * 2);
 }
 
 function drawOneWayExitOverlays(room) {
@@ -3332,7 +3523,7 @@ function getRoomWallSprite(room, zoomBucket) {
 
   const lineWidth = Math.max(2.6, 2.6 * zoomBucket);
   const pad = Math.ceil(lineWidth * 0.7) + 2;
-  const cacheKey = `${mask}:${zoomBucket}:${pad}`;
+  const cacheKey = `${ROOM_WALL_SPRITE_CACHE_REV}:${mask}:${zoomBucket}:${pad}`;
   const cached = ROOM_WALL_SPRITE_CACHE.get(cacheKey);
   if (cached) return cached;
 
@@ -3344,7 +3535,7 @@ function getRoomWallSprite(room, zoomBucket) {
   if (!g) return null;
 
   renderRoomWallSprite(g, tilePx, pad, mask, zoomBucket);
-  const sprite = { canvas, pad };
+  const sprite = { canvas, pad, tilePx };
   setCappedCache(ROOM_WALL_SPRITE_CACHE, cacheKey, sprite, MAX_ROOM_WALL_SPRITE_CACHE);
   return sprite;
 }
@@ -3359,7 +3550,7 @@ function renderRoomWallSprite(g, tilePx, pad, mask, zoomBucket) {
   const y0 = pad;
   const x1 = pad + tilePx;
   const y1 = pad + tilePx;
-  const joinBleed = Math.max(1, (tilePx / TILE_SIZE) * 1.15);
+  const joinBleed = Math.min(0.7, Math.max(0.08, lineWidth * 0.18));
   const hasN = (mask & TRAIL_DIR_BITS.n) !== 0;
   const hasE = (mask & TRAIL_DIR_BITS.e) !== 0;
   const hasS = (mask & TRAIL_DIR_BITS.s) !== 0;
@@ -3463,9 +3654,16 @@ function drawRoomWallsAndDoors(room) {
     ctx.drawImage(sprite.canvas, x - sprite.pad, y - sprite.pad, tilePx + sprite.pad * 2, tilePx + sprite.pad * 2);
   }
 
+  const isPlayerRoom = room.id && state.playerRoomId && String(room.id) === String(state.playerRoomId);
+
   for (const dir of ["n", "e", "s", "w"]) {
     const variant = getEdgeVariant(room, dir);
     if (!variant || variant === "oneway") continue;
+    if ((variant === "openpassage" || variant === "open") && !isPlayerRoom) continue;
+    if (variant === "openpassage") {
+      drawOpenExitMark(dirs[dir], line);
+      continue;
+    }
     if (variant === "open" || variant === "closed" || variant === "locked") {
       drawDoorMark(dirs[dir], variant === "open" ? "open" : variant, line);
     }
@@ -3486,8 +3684,8 @@ function getEdgeVariant(room, dir) {
   if (hasOpenPassage) {
     if (oneWayExit) return shouldSkipSharedBoundary(dir, neighbor) ? "" : "oneway";
     const openDoor = pickOpenDoorForEdge(exit, neighborExit, neighborId, room.id);
-    if (!openDoor) return "";
-    return shouldSkipSharedBoundary(dir, neighbor) ? "" : "open";
+    if (!openDoor) return "openpassage";
+    return "open";
   }
 
   const blockedExit = pickBlockedExitForEdge(exit, neighborExit, neighborId, room.id);
@@ -3632,9 +3830,16 @@ function drawDoorMark(segment, stateLabel, lineWidth) {
   ctx.save();
   ctx.globalAlpha *= opacity;
   ctx.strokeStyle = stateLabel === "locked" ? "#e06a62" : stateLabel === "closed" ? "#e08830" : "#f8d56e";
-  ctx.lineWidth = Math.max(2.1, lineWidth + 0.35);
+  ctx.lineWidth = Math.max(1.4, lineWidth * 0.55);
 
-  if (isHorizontal) {
+  if (stateLabel === "open") {
+    ctx.lineWidth = Math.max(0.7, lineWidth * 0.22);
+    ctx.lineCap = "butt";
+    ctx.beginPath();
+    ctx.moveTo(segment.x1, segment.y1);
+    ctx.lineTo(segment.x2, segment.y2);
+    ctx.stroke();
+  } else if (isHorizontal) {
     ctx.beginPath();
     ctx.moveTo(midX - along * 0.5, midY);
     ctx.lineTo(midX + along * 0.5, midY);
@@ -3730,23 +3935,14 @@ function drawOpenExitMark(segment, lineWidth) {
   const opacity = wallOpacityForZoom();
   if (opacity <= 0) return;
 
-  const isHorizontal = segment.y1 === segment.y2;
-  const midX = (segment.x1 + segment.x2) * 0.5;
-  const midY = (segment.y1 + segment.y2) * 0.5;
-  const span = Math.max(5, state.zoom * 6.5);
-
   ctx.save();
   ctx.globalAlpha *= opacity;
   ctx.strokeStyle = "rgba(248, 213, 110, 0.96)";
-  ctx.lineWidth = Math.max(1.2, lineWidth * 0.55);
+  ctx.lineWidth = Math.max(0.7, lineWidth * 0.22);
+  ctx.lineCap = "butt";
   ctx.beginPath();
-  if (isHorizontal) {
-    ctx.moveTo(midX - span * 0.5, midY);
-    ctx.lineTo(midX + span * 0.5, midY);
-  } else {
-    ctx.moveTo(midX, midY - span * 0.5);
-    ctx.lineTo(midX, midY + span * 0.5);
-  }
+  ctx.moveTo(segment.x1, segment.y1);
+  ctx.lineTo(segment.x2, segment.y2);
   ctx.stroke();
   ctx.restore();
 }
@@ -4295,7 +4491,8 @@ function persistMap() {
     state.persistIdleId = 0;
   }
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state.mapData));
+    localStorage.setItem(activeStorageKey(), JSON.stringify(state.mapData));
+    state.storageLoadedKey = state.storageKey;
   } catch (_error) {
     // Ignore storage failures (private mode/quota).
   }
@@ -4327,16 +4524,15 @@ function scheduleRender() {
 }
 
 function loadPersistedMap() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return false;
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.rooms)) return false;
-    applyMapObject(parsed);
-    return true;
-  } catch (_error) {
-    return false;
+  const candidates = storageLoadCandidates();
+  for (const key of candidates) {
+    if (loadPersistedMapFromKey(key)) {
+      activeStorageKey();
+      return true;
+    }
   }
+  activeStorageKey();
+  return false;
 }
 
 function addMovementTrail(from, to) {
