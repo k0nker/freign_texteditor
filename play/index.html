@@ -67,6 +67,17 @@
             <button class="panel-close" data-panel="map" type="button" title="Close">&#x2715;</button>
           </div>
           <div class="panel-body mapv2-panel" id="map-panel-body">
+            <div class="mapv2-info-card" id="mapv2-info-card" aria-live="polite">
+              <div class="mapv2-info-row mapv2-info-row-top">
+                <span id="mapv2-area-name" class="mapv2-info-area">Unknown Area</span>
+                <span id="mapv2-time" class="mapv2-info-time">--</span>
+              </div>
+              <div class="mapv2-info-row">
+                <span id="mapv2-room-name" class="mapv2-info-room">Unknown Room</span>
+                <span id="mapv2-light" class="mapv2-info-light">--</span>
+              </div>
+              <div id="mapv2-weather" class="mapv2-info-weather">&nbsp;</div>
+            </div>
             <iframe id="map-frame" class="mapv2-frame" src="../frmapper/index.html?embed=1" title="frmapper map" loading="lazy"></iframe>
           </div>
         </div>

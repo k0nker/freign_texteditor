@@ -527,6 +527,8 @@
 
   function bindEls() {
     el.workspace      = document.getElementById('workspace');
+    el.shellbarMount  = document.getElementById('fr-shellbar-mount');
+    el.topbar         = document.getElementById('topbar');
     el.terminal       = document.getElementById('terminal');
     el.btnTerminalBottom = document.getElementById('btn-terminal-bottom');
     el.connStatus     = document.getElementById('conn-status');
@@ -559,6 +561,12 @@
 
     el.mapV2PanelBody = document.getElementById('map-panel-body');
     el.mapV2Frame     = document.getElementById('map-frame');
+    el.mapV2InfoCard  = document.getElementById('mapv2-info-card');
+    el.mapV2AreaName  = document.getElementById('mapv2-area-name');
+    el.mapV2Time      = document.getElementById('mapv2-time');
+    el.mapV2RoomName  = document.getElementById('mapv2-room-name');
+    el.mapV2Light     = document.getElementById('mapv2-light');
+    el.mapV2Weather   = document.getElementById('mapv2-weather');
     el.channelsPane   = document.getElementById('channels-pane');
     el.channelsTabs   = document.getElementById('channels-tabs');
     el.channelsLog    = document.getElementById('channels-log');
@@ -585,6 +593,7 @@
     el.rightPanelBtns = document.getElementById('right-panel-btns');
     el.rightGmcpPanels= document.getElementById('right-gmcp-panels');
     el.rightPanelsRail= document.getElementById('right-panels-rail');
+    el.rightSettingsRail = document.getElementById('right-settings-rail');
 
     el.settingsDrawer = document.getElementById('settings-drawer');
     el.drawerTitle    = document.getElementById('drawer-title');
@@ -674,17 +683,15 @@
       }, true);
     }
 
-    if (el.leftPanels) {
-      el.leftPanels.addEventListener('pointerdown', maybeQueueCommandInputFocus, true);
-    }
-    if (el.rightPanels) {
-      el.rightPanels.addEventListener('pointerdown', maybeQueueCommandInputFocus, true);
-    }
+    document.addEventListener('pointerup', maybeQueueCommandInputFocus, true);
+
     if (el.mapV2Frame) {
       el.mapV2Frame.addEventListener('pointerdown', function () {
-        queueCommandInputFocus();
+        // Do not steal focus on pointerdown inside the map iframe; frmapper
+        // posts explicit interaction events and we refocus on interaction end.
       }, true);
     }
+    window.addEventListener('message', handleFrmapperFrameMessage);
 
     window.addEventListener('resize', updateTerminalBottomButton);
 
@@ -716,14 +723,12 @@
     if (el.btnConnectPublic) el.btnConnectPublic.addEventListener('click', function () { connectMud('public'); });
     if (el.btnConnectTest) el.btnConnectTest.addEventListener('click', function () { connectMud('test'); });
 
-    /* Right settings-rail: icon buttons for drawers (only those with data-drawer) */
     document.querySelectorAll('.rnav-btn[data-drawer]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         toggleDrawer(btn.dataset.drawer, btn);
       });
     });
 
-    /* Save Log button — opens popup, not a drawer */
     el.btnSaveLog.addEventListener('click', function (e) {
       e.stopPropagation();
       var open = !el.logSavePopup.hidden;
@@ -2682,131 +2687,75 @@
     renderMapPanel();
   }
 
-  function renderMapPanel() {
-    if (!el.mapPanelBody) return;
+  function preferredValue(obj, keys) {
+    if (!obj || typeof obj !== 'object' || !Array.isArray(keys)) return '';
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i];
+      if (obj[key] == null) continue;
+      var text = String(obj[key]).trim();
+      if (text) return text;
+    }
+    return '';
+  }
 
-    var info = state.gmcp.roomInfo;
-    var ansi = normalizeMapAnsiForRender(state.gmcp.mapRender);
-    var mapMeta = state.gmcp.mapRenderMeta || {};
+  function formatHourForMapCard(worldTime) {
+    var wt = worldTime && typeof worldTime === 'object' ? worldTime : {};
+    var explicit = preferredValue(wt, ['time', 'time12', 'display', 'label', 'clock', 'clock12']);
+    if (explicit) return explicit.toUpperCase();
+
+    var hourRaw = wt.hour;
+    var hour = Number.parseInt(hourRaw, 10);
+    if (!Number.isFinite(hour)) {
+      hour = Number.parseInt(preferredValue(wt, ['hours', 'hr']), 10);
+    }
+    if (!Number.isFinite(hour)) return '--';
+
+    var normalized = ((hour % 24) + 24) % 24;
+    var period = normalized >= 12 ? 'PM' : 'AM';
+    var hour12 = normalized % 12;
+    if (hour12 === 0) hour12 = 12;
+    return String(hour12) + period;
+  }
+
+  function formatLightLevelForMapCard(info, worldTime) {
+    var roomInfo = info && typeof info === 'object' ? info : {};
+    var wt = worldTime && typeof worldTime === 'object' ? worldTime : {};
+    var roomLight = preferredValue(roomInfo, ['lightLevel', 'light_level', 'sunlight', 'light']);
+    if (roomLight) return roomLight;
+    var worldLight = preferredValue(wt, ['sunlight', 'light', 'lightLevel', 'sun_state', 'sunState']);
+    return worldLight || '--';
+  }
+
+  function formatWeatherForMapCard(worldWeather) {
+    var ww = worldWeather && typeof worldWeather === 'object' ? worldWeather : {};
+    var visibleRaw = ww.visible;
+    if (visibleRaw === false || String(visibleRaw).toLowerCase() === 'false' || String(visibleRaw) === '0') {
+      return '';
+    }
+    var weather = preferredValue(ww, ['weather', 'description', 'desc', 'summary', 'condition', 'sky']);
+    return weather;
+  }
+
+  function renderMapPanel() {
+    if (!el.mapV2PanelBody || !el.mapV2InfoCard) return;
+
+    var info = state.gmcp.roomInfo || {};
     var wt = state.gmcp.worldTime || {};
     var ww = state.gmcp.worldWeather || {};
-    var wm = state.gmcp.worldMoons || {};
-    if (!info && !ansi && !Object.keys(wt).length && !Object.keys(ww).length && !Object.keys(wm).length) return;
 
-    el.mapPanelBody.className = 'panel-body map-panel';
-    Array.prototype.forEach.call(el.mapPanelBody.children, function (child) {
-      if (!child || !child.classList) return;
-      if (child.classList.contains('map-room-card')) return;
-      if (child.classList.contains('map-meta')) return;
-      if (child.classList.contains('map-ansi')) return;
-      child.remove();
-    });
+    var area = preferredValue(info, ['area', 'areaName']) || 'Unknown Area';
+    var roomName = preferredValue(info, ['name', 'roomName']) || 'Unknown Room';
+    var timeText = formatHourForMapCard(wt);
+    var lightText = formatLightLevelForMapCard(info, wt);
+    var weatherText = formatWeatherForMapCard(ww);
 
-    var roomCard = el.mapPanelBody.querySelector('.map-room-card');
-    if (!roomCard) {
-      roomCard = document.createElement('div');
-      roomCard.className = 'map-room-card';
-      el.mapPanelBody.insertBefore(roomCard, el.mapPanelBody.firstChild);
-    }
-
-    var roomName = info && info.name ? info.name : 'Unknown Room';
-    var area = info && info.area ? info.area : 'Unknown Area';
-    var terrain = info && info.terrain ? String(info.terrain) : 'unknown';
-    var hourText = '--';
-    if (wt.hour != null && wt.hour !== '') {
-      hourText = String(wt.hour);
-    }
-
-    var nsidText = '';
-    if (info && info.areaID != null && info.localID != null) {
-      nsidText = String(info.areaID) + ':' + String(info.localID);
-    }
-
-    var ephText = info && info.ephNum != null && info.ephNum !== '' ? String(info.ephNum) : '';
-
-    var roomCardHtml =
-      '<div class="map-room-card-head">' +
-      '<div class="map-room-card-title">ROOM INFO' + (nsidText ? ' <span class="map-room-card-nsid">' + escHtml(nsidText) + '</span>' : '') + '</div>' +
-      '<div class="map-room-card-eph">' + (ephText ? 'eph ' + escHtml(ephText) : '') + '</div>' +
-      '</div>' +
-      '<div class="map-room-card-area">' + escHtml(area) + '</div>' +
-      '<div class="map-room-card-name">' + escHtml(roomName) + '</div>';
-
-    if (roomCardHtml !== state.gmcp.mapRenderedRoomCardHtml) {
-      roomCard.innerHTML = roomCardHtml;
-      state.gmcp.mapRenderedRoomCardHtml = roomCardHtml;
-    }
-
-    var meta = el.mapPanelBody.querySelector('.map-meta');
-    if (!meta) {
-      meta = document.createElement('div');
-      meta.className = 'map-meta';
-      el.mapPanelBody.appendChild(meta);
-    }
-
-    var metaHtml =
-      '<div class="map-room-head">' +
-      '<div class="map-room-name">' + escHtml(roomName) + '</div>' +
-      '<div class="map-room-hour">Hour ' + escHtml(hourText) + '</div>' +
-      '</div>' +
-      '<div class="map-room-meta">' + escHtml(area) + ' · ' + escHtml(terrain) + '</div>';
-
-    if (metaHtml !== state.gmcp.mapRenderedMetaHtml) {
-      meta.innerHTML = metaHtml;
-      state.gmcp.mapRenderedMetaHtml = metaHtml;
-    }
-
-    var mapAnsi = el.mapPanelBody.querySelector('.map-ansi');
-    if (!mapAnsi) {
-      mapAnsi = document.createElement('div');
-      mapAnsi.className = 'map-ansi';
-      el.mapPanelBody.appendChild(mapAnsi);
-    }
-
-    var markerHint = extractMapMarkerHint(mapMeta);
-    var markerKey = markerHint ? (markerHint.row + ':' + markerHint.col) : '';
-
-    if (!ansi) {
-      if (state.gmcp.mapRenderedAnsi !== '') {
-        mapAnsi.innerHTML = '<div class="ph-sub" style="opacity:.65">Awaiting GMCP<br>map render</div>';
-        state.gmcp.mapRenderedAnsi = '';
-        state.gmcp.mapRenderedMarkerKey = '';
-        state.gmcp.mapCenteredSeq = 0;
-      }
-    } else {
-      var hasNewMapFrame = (state.gmcp.mapRenderSeq | 0) !== (state.gmcp.mapCenteredSeq | 0);
-      if (ansi === state.gmcp.mapRenderedAnsi) {
-        if (hasNewMapFrame || (markerKey && markerKey !== state.gmcp.mapRenderedMarkerKey)) {
-          var existingContent = mapAnsi.querySelector('.map-ansi-content');
-          if (existingContent) {
-            state.gmcp.mapCenterSeq += 1;
-            centerMapViewportOnPlayer(mapAnsi, existingContent, null, null, state.gmcp.mapCenterSeq);
-            state.gmcp.mapRenderedMarkerKey = markerKey;
-            state.gmcp.mapCenteredSeq = state.gmcp.mapRenderSeq | 0;
-          }
-        }
-        return;
-      }
-
-      var mapContent = document.createElement('div');
-      mapContent.className = 'map-ansi-content';
-      var rawLines = [];
-
-      String(ansi).split(/\r?\n/).forEach(function (line) {
-        if (line === '') return;
-        rawLines.push(line);
-        var row = document.createElement('div');
-        row.className = 'map-ansi-line';
-        row.appendChild(window.AnsiRenderer.renderAnsiLine(line, state.ansiPalette));
-        mapContent.appendChild(row);
-      });
-
-      mapAnsi.replaceChildren(mapContent);
-      state.gmcp.mapRenderedAnsi = ansi;
-      state.gmcp.mapRenderedMarkerKey = markerKey;
-      state.gmcp.mapCenteredSeq = state.gmcp.mapRenderSeq | 0;
-      state.gmcp.mapCenterSeq += 1;
-      centerMapViewportOnPlayer(mapAnsi, mapContent, null, null, state.gmcp.mapCenterSeq);
+    if (el.mapV2AreaName) el.mapV2AreaName.textContent = area;
+    if (el.mapV2RoomName) el.mapV2RoomName.textContent = roomName;
+    if (el.mapV2Time) el.mapV2Time.textContent = timeText;
+    if (el.mapV2Light) el.mapV2Light.textContent = lightText;
+    if (el.mapV2Weather) {
+      el.mapV2Weather.textContent = weatherText || '\u00a0';
+      el.mapV2Weather.title = weatherText || '';
     }
   }
 
@@ -4031,7 +3980,29 @@
   function maybeQueueCommandInputFocus(e) {
     if (!e || !e.target) return;
     if (state.startupProfileSelectionRequired && el.startupProfilePicker && !el.startupProfilePicker.hidden) return;
-    if (isEditableUiTarget(e.target)) return;
+    if (isCommandInputFocusExemptTarget(e.target)) return;
+    queueCommandInputFocus();
+  }
+
+  function isCommandInputFocusExemptTarget(target) {
+    var node = target && target.nodeType === 1 ? target : null;
+    if (!node) return false;
+    if (el.cmdForm && el.cmdForm.contains(node)) return true;
+    if (el.terminal && el.terminal.contains(node)) return true;
+    if (el.topbar && el.topbar.contains(node)) return true;
+    if (el.shellbarMount && el.shellbarMount.contains(node)) return true;
+    if (el.rightSettingsRail && el.rightSettingsRail.contains(node)) return true;
+    return false;
+  }
+
+  function handleFrmapperFrameMessage(event) {
+    if (!event || !el.mapV2Frame || !el.mapV2Frame.contentWindow) return;
+    if (event.source !== el.mapV2Frame.contentWindow) return;
+    var msg = event.data && typeof event.data === 'object' ? event.data : null;
+    if (!msg) return;
+    if (msg.type !== 'frmapper.interaction') return;
+    var kind = msg.payload && typeof msg.payload === 'object' ? String(msg.payload.kind || '') : '';
+    if (kind === 'pan-start') return;
     queueCommandInputFocus();
   }
 

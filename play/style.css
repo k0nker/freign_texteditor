@@ -2012,12 +2012,71 @@ body:has(#workspace[data-layout="rounded"]) #settings-drawer {
 .mapv2-panel {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 8px;
   height: 100%;
   min-height: 0;
   padding: 0;
   overflow: hidden;
   background: transparent;
+}
+
+.mapv2-info-card {
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--panel-border));
+  border-radius: 6px;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--panel) 66%, var(--terminal-bg)) 0%,
+    color-mix(in srgb, var(--panel) 52%, var(--input-bg)) 100%
+  );
+  padding: 7px 9px;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.mapv2-info-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.mapv2-info-row-top {
+  color: color-mix(in srgb, var(--text) 94%, white 6%);
+}
+
+.mapv2-info-area,
+.mapv2-info-room,
+.mapv2-info-weather {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mapv2-info-area,
+.mapv2-info-room {
+  max-width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.mapv2-info-time,
+.mapv2-info-light {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--muted) 84%, white 12%);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.mapv2-info-room {
+  margin-top: 2px;
+  color: color-mix(in srgb, var(--text) 97%, white 8%);
+  font-weight: 700;
+}
+
+.mapv2-info-weather {
+  margin-top: 3px;
+  color: color-mix(in srgb, var(--muted) 82%, white 16%);
 }
 
 .mapv2-frame {

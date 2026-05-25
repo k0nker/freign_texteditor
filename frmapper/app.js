@@ -40,6 +40,7 @@ const MAX_MOB_DOT_SPRITE_CACHE = 512;
 const MAX_POI_SPRITE_CACHE = 512;
 const MAX_WATER_DROP_SPRITE_CACHE = 256;
 const MAX_PLAYER_CENTER_SPRITE_CACHE = 256;
+const STATIC_CHUNK_ROOM_SIZE = 12;
 const DEFAULT_SCAN_DISTANCE = 3;
 const QUALITY_MEDIUM_ROOM_COUNT = 1400;
 const QUALITY_LOW_ROOM_COUNT = 2600;
@@ -270,9 +271,11 @@ const state = {
   showMobHints: true,
   showTraveledPath: true,
   showFogOfWar: true,
+  showGridOutline: false,
   showPerfStats: false,
   showLocalIds: false,
   followPlayer: true,
+  themeHighlightColor: "#d9b05f",
   scanDistance: DEFAULT_SCAN_DISTANCE,
   sectorIcons: new Map(),
   playerLocation: null,
@@ -311,10 +314,9 @@ const state = {
     toCoord: null
   },
   staticLayer: {
-    canvas: null,
-    ctx: null,
-    key: "",
-    version: 0
+    version: 0,
+    chunks: new Map(),
+    zoomKey: ""
   },
   perf: {
     frameMs: 0,
@@ -323,6 +325,9 @@ const state = {
     qualityTier: "full",
     staticRebuilt: false,
     staticVersion: 0,
+    staticChunksDrawn: 0,
+    staticChunksRebuilt: 0,
+    staticChunkCacheSize: 0,
     lastDrawTs: 0,
     fpsEstimate: 0,
     panelTs: 0
@@ -382,9 +387,11 @@ function applyFrmapperTheme(themeId) {
   root.style.setProperty("--fm-title", vars.title || "#e0c87a");
   root.style.setProperty("--fm-input-bg", vars["input-bg"] || "#1a1a24");
   root.style.setProperty("--fm-input-border", vars["input-border"] || "#3a3a50");
-  root.style.setProperty("--fm-accent", vars.accent || "#d9b05f");
+  const accent = vars.accent || vars.title || "#d9b05f";
+  root.style.setProperty("--fm-accent", accent);
   root.style.setProperty("--fm-terminal-bg", vars["terminal-bg"] || "#0c0c13");
   root.style.setProperty("--fm-terminal-border", vars["terminal-border"] || "#323246");
+  state.themeHighlightColor = accent;
 
   scheduleRender();
 }
@@ -1687,6 +1694,20 @@ function startFrmapperSessionMode() {
   }
 }
 
+function notifyHostInteraction(kind) {
+  if (state.sessionMode !== "embed") return;
+  try {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({
+        type: "frmapper.interaction",
+        payload: { kind: String(kind || "generic") }
+      }, "*");
+    }
+  } catch (_error) {
+    // Host integration is optional; ignore cross-origin messaging failures.
+  }
+}
+
 function sanitizeStorageToken(value) {
   return String(value || "")
     .trim()
@@ -1803,6 +1824,7 @@ const el = {
   toggleMobs: document.getElementById("toggle-mobs"),
   toggleTraveledPath: document.getElementById("toggle-traveled-path"),
   toggleFog: document.getElementById("toggle-fog"),
+  toggleGridOutline: document.getElementById("toggle-grid-outline"),
   togglePerfStats: document.getElementById("toggle-perf-stats"),
   perfStats: document.getElementById("perf-stats"),
   roomInspector: document.getElementById("room-inspector"),
@@ -1937,15 +1959,21 @@ function updateEmbedQuickControls() {
 
 function showEmbedQuickTooltip(sourceEl, message) {
   if (!el.embedQuickTooltip || !sourceEl || !message) return;
-  const hostRect = el.canvas.getBoundingClientRect();
+  const wrap = el.canvas.parentElement;
+  if (!wrap) return;
+  const wrapRect = wrap.getBoundingClientRect();
   const sourceRect = sourceEl.getBoundingClientRect();
-  const left = sourceRect.left - hostRect.left + (sourceRect.width / 2);
-  const top = sourceRect.bottom - hostRect.top + 6;
+
   el.embedQuickTooltip.textContent = message;
-  el.embedQuickTooltip.style.left = `${Math.round(left)}px`;
-  el.embedQuickTooltip.style.top = `${Math.round(top)}px`;
-  el.embedQuickTooltip.style.transform = "translateX(-50%)";
   el.embedQuickTooltip.hidden = false;
+
+  const preferredLeft = sourceRect.left - wrapRect.left + (sourceRect.width / 2) - (el.embedQuickTooltip.offsetWidth / 2);
+  const preferredTop = sourceRect.bottom - wrapRect.top + 6;
+  const pos = clampTooltipPositionInWrap(wrap, el.embedQuickTooltip, preferredLeft, preferredTop);
+
+  el.embedQuickTooltip.style.left = `${Math.round(pos.left)}px`;
+  el.embedQuickTooltip.style.top = `${Math.round(pos.top)}px`;
+  el.embedQuickTooltip.style.transform = "none";
 }
 
 function hideEmbedQuickTooltip() {
@@ -2094,6 +2122,13 @@ function wireEvents() {
     });
   }
 
+  if (el.toggleGridOutline) {
+    el.toggleGridOutline.addEventListener("change", () => {
+      state.showGridOutline = !!el.toggleGridOutline.checked;
+      scheduleRender();
+    });
+  }
+
   if (el.togglePerfStats) {
     el.togglePerfStats.addEventListener("change", () => {
       state.showPerfStats = !!el.togglePerfStats.checked;
@@ -2131,6 +2166,7 @@ function wireEvents() {
     state.panStartX = state.panX;
     state.panStartY = state.panY;
     el.canvas.classList.add("dragging");
+    notifyHostInteraction("pan-start");
   });
 
   window.addEventListener("mousemove", (event) => {
@@ -2154,7 +2190,10 @@ function wireEvents() {
     hideHoverTooltip();
   });
 
-  window.addEventListener("mouseup", endCanvasDrag);
+  window.addEventListener("mouseup", () => {
+    endCanvasDrag();
+    notifyHostInteraction("pan-end");
+  });
   window.addEventListener("blur", endCanvasDrag);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) endCanvasDrag();
@@ -2183,6 +2222,7 @@ function wireEvents() {
     el.zoomValue.textContent = `${Math.round(newZoom * 100)}%`;
     updateEmbedQuickControls();
     scheduleRender();
+    notifyHostInteraction("zoom");
   }, { passive: false });
 
   el.canvas.addEventListener("click", (event) => {
@@ -2191,6 +2231,7 @@ function wireEvents() {
     state.selectedRoomId = room ? room.id : null;
     updateInspector();
     scheduleRender();
+    notifyHostInteraction("click");
   });
 
   el.canvas.addEventListener("contextmenu", (event) => {
@@ -3293,7 +3334,8 @@ function clampZoom(value, minZoom) {
 
 function markStaticLayerDirty() {
   state.staticLayer.version += 1;
-  state.staticLayer.key = "";
+  state.staticLayer.chunks.clear();
+  state.staticLayer.zoomKey = "";
   markRoomEdgeVariantsDirty();
 }
 
@@ -3327,6 +3369,7 @@ function updatePerfStatsPanel(force) {
     `fps ~ ${p.fpsEstimate.toFixed(1)}  frame ${p.frameMs.toFixed(2)} ms  render ${p.renderMs.toFixed(2)} ms`,
     `visible rooms ${p.visibleRooms}  quality ${p.qualityTier}`,
     `static rebuilt ${p.staticRebuilt ? "yes" : "no"}  static version ${p.staticVersion}`,
+    `static chunks drawn ${p.staticChunksDrawn}  rebuilt ${p.staticChunksRebuilt}  cache ${p.staticChunkCacheSize}`,
     `edge cache rooms ${state.roomEdgeVariants.size}`
   ].join("\n");
 }
@@ -3339,7 +3382,7 @@ function getRenderQualityProfile(visibleRoomCount) {
     drawTrailPath: state.showTraveledPath,
     drawParty: state.showParty,
     drawMobHints: state.showMobHints,
-    drawGridOutline: false,
+    drawGridOutline: state.showGridOutline,
     drawExtraExitMarkers: true,
     drawOneWayOverlays: true
   };
@@ -3356,7 +3399,6 @@ function getRenderQualityProfile(visibleRoomCount) {
     quality.drawTrailPath = false;
     quality.drawParty = false;
     quality.drawMobHints = false;
-    quality.drawGridOutline = false;
   }
 
   return quality;
@@ -3376,34 +3418,174 @@ function ensureRoomEdgeVariants() {
   state.roomEdgeVariantsDirty = false;
 }
 
-function ensureStaticLayerCanvas() {
-  const layer = state.staticLayer;
-  if (!layer.canvas) {
-    layer.canvas = document.createElement("canvas");
-    layer.ctx = layer.canvas.getContext("2d");
-    layer.key = "";
-  }
-
-  const width = Math.max(1, Math.round(el.canvas.clientWidth || 1));
-  const height = Math.max(1, Math.round(el.canvas.clientHeight || 1));
-  if (layer.canvas.width !== width || layer.canvas.height !== height) {
-    layer.canvas.width = width;
-    layer.canvas.height = height;
-    layer.key = "";
-  }
-  return layer;
+function getVisibleRoomBounds(tilePx, viewW, viewH) {
+  const minX = Math.floor((-state.panX) / tilePx) - 1;
+  const maxX = Math.ceil((viewW - state.panX) / tilePx) + 1;
+  const minY = Math.floor((-state.panY) / tilePx) - 1;
+  const maxY = Math.ceil((viewH - state.panY) / tilePx) + 1;
+  return { minX, maxX, minY, maxY };
 }
 
-function drawStaticLayer(layerCtx, visibleFadedRooms, visibleRooms) {
-  layerCtx.setTransform(1, 0, 0, 1, 0, 0);
-  layerCtx.clearRect(0, 0, state.staticLayer.canvas.width, state.staticLayer.canvas.height);
+function collectVisibleRoomsForViewport(activeGrid, activeZ, tilePx, viewW, viewH, lightMode) {
+  const bounds = getVisibleRoomBounds(tilePx, viewW, viewH);
+  const visibleRooms = [];
+  const visibleFadedRooms = [];
 
-  for (const room of visibleFadedRooms) {
-    drawRoomStaticSprite(room, { ghost: true }, layerCtx);
+  for (let y = bounds.minY; y <= bounds.maxY; y += 1) {
+    for (let x = bounds.minX; x <= bounds.maxX; x += 1) {
+      const activeId = state.roomByCoord.get(coordKey(x, y, activeZ, activeGrid));
+      if (activeId) {
+        const room = state.roomsById.get(activeId);
+        if (room) visibleRooms.push(room);
+        continue;
+      }
+
+      if (lightMode) continue;
+
+      const lowerId = state.roomByCoord.get(coordKey(x, y, activeZ - 1, activeGrid));
+      if (lowerId) {
+        const lower = state.roomsById.get(lowerId);
+        if (lower) visibleFadedRooms.push(lower);
+      }
+      const upperId = state.roomByCoord.get(coordKey(x, y, activeZ + 1, activeGrid));
+      if (upperId) {
+        const upper = state.roomsById.get(upperId);
+        if (upper) visibleFadedRooms.push(upper);
+      }
+    }
   }
-  for (const room of visibleRooms) {
-    drawRoomStaticSprite(room, undefined, layerCtx);
+
+  return { bounds, visibleRooms, visibleFadedRooms };
+}
+
+function staticChunkCacheKey(activeGrid, activeZ, lightMode, chunkX, chunkY) {
+  return [
+    normalizeGridId(activeGrid),
+    activeZ,
+    Number(state.zoom).toFixed(3),
+    lightMode ? 1 : 0,
+    chunkX,
+    chunkY,
+    state.staticLayer.version
+  ].join("|");
+}
+
+function buildStaticChunkRoomLists(activeGrid, activeZ, chunkX, chunkY, lightMode) {
+  const size = STATIC_CHUNK_ROOM_SIZE;
+  const minX = chunkX * size;
+  const minY = chunkY * size;
+  const maxX = minX + size - 1;
+  const maxY = minY + size - 1;
+  const visibleRooms = [];
+  const visibleFadedRooms = [];
+
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      const activeId = state.roomByCoord.get(coordKey(x, y, activeZ, activeGrid));
+      if (activeId) {
+        const room = state.roomsById.get(activeId);
+        if (room) visibleRooms.push(room);
+        continue;
+      }
+
+      if (lightMode) continue;
+
+      const lowerId = state.roomByCoord.get(coordKey(x, y, activeZ - 1, activeGrid));
+      if (lowerId) {
+        const lower = state.roomsById.get(lowerId);
+        if (lower) visibleFadedRooms.push(lower);
+      }
+      const upperId = state.roomByCoord.get(coordKey(x, y, activeZ + 1, activeGrid));
+      if (upperId) {
+        const upper = state.roomsById.get(upperId);
+        if (upper) visibleFadedRooms.push(upper);
+      }
+    }
   }
+
+  return { minX, minY, visibleRooms, visibleFadedRooms };
+}
+
+function ensureStaticChunk(activeGrid, activeZ, lightMode, chunkX, chunkY, tilePx) {
+  const cacheKey = staticChunkCacheKey(activeGrid, activeZ, lightMode, chunkX, chunkY);
+  const cached = state.staticLayer.chunks.get(cacheKey);
+  if (cached) {
+    return { sprite: cached, rebuilt: false };
+  }
+
+  const chunkPx = Math.max(1, Math.ceil(STATIC_CHUNK_ROOM_SIZE * tilePx));
+  const canvas = document.createElement("canvas");
+  canvas.width = chunkPx;
+  canvas.height = chunkPx;
+  const g = canvas.getContext("2d");
+  if (!g) {
+    return { sprite: null, rebuilt: false };
+  }
+
+  const content = buildStaticChunkRoomLists(activeGrid, activeZ, chunkX, chunkY, lightMode);
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.clearRect(0, 0, canvas.width, canvas.height);
+
+  const worldOffsetX = -content.minX * tilePx;
+  const worldOffsetY = -content.minY * tilePx;
+  for (const room of content.visibleFadedRooms) {
+    drawRoomStaticSprite(room, { ghost: true, worldOffsetX, worldOffsetY }, g);
+  }
+  for (const room of content.visibleRooms) {
+    drawRoomStaticSprite(room, { worldOffsetX, worldOffsetY }, g);
+  }
+
+  const sprite = { canvas };
+  state.staticLayer.chunks.set(cacheKey, sprite);
+  return { sprite, rebuilt: true };
+}
+
+function drawStaticChunks(activeGrid, activeZ, lightMode, tilePx, bounds) {
+  if (!bounds) {
+    return {
+      rebuiltAny: false,
+      chunksDrawn: 0,
+      chunksRebuilt: 0,
+      cacheSize: state.staticLayer.chunks.size
+    };
+  }
+
+  const zoomKey = Number(state.zoom).toFixed(3);
+  if (state.staticLayer.zoomKey !== zoomKey) {
+    state.staticLayer.chunks.clear();
+    state.staticLayer.zoomKey = zoomKey;
+  }
+
+  const size = STATIC_CHUNK_ROOM_SIZE;
+  const minChunkX = Math.floor(bounds.minX / size);
+  const maxChunkX = Math.floor(bounds.maxX / size);
+  const minChunkY = Math.floor(bounds.minY / size);
+  const maxChunkY = Math.floor(bounds.maxY / size);
+  let rebuiltAny = false;
+  let chunksDrawn = 0;
+  let chunksRebuilt = 0;
+
+  for (let cy = minChunkY; cy <= maxChunkY; cy += 1) {
+    for (let cx = minChunkX; cx <= maxChunkX; cx += 1) {
+      const { sprite, rebuilt } = ensureStaticChunk(activeGrid, activeZ, lightMode, cx, cy, tilePx);
+      rebuiltAny = rebuiltAny || rebuilt;
+      if (rebuilt) chunksRebuilt += 1;
+      if (!sprite || !sprite.canvas) continue;
+      chunksDrawn += 1;
+      const worldChunkX = cx * size * tilePx;
+      const worldChunkY = cy * size * tilePx;
+      const screenX = state.panX + worldChunkX;
+      const screenY = state.panY + worldChunkY;
+      ctx.drawImage(sprite.canvas, screenX, screenY);
+    }
+  }
+
+  return {
+    rebuiltAny,
+    chunksDrawn,
+    chunksRebuilt,
+    cacheSize: state.staticLayer.chunks.size
+  };
 }
 
 function drawVisibleRoomWalls(visibleFadedRooms, visibleRooms) {
@@ -3415,34 +3597,43 @@ function drawVisibleRoomWalls(visibleFadedRooms, visibleRooms) {
   }
 }
 
-function drawRoomLocalIdOverlays(visibleRooms) {
+function drawRoomLocalIdOverlays(visibleRooms, visibleFadedRooms) {
   if (!state.showLocalIds) return;
-  if (!Array.isArray(visibleRooms) || visibleRooms.length === 0) return;
+  const hasVisible = Array.isArray(visibleRooms) && visibleRooms.length > 0;
+  const hasFaded = Array.isArray(visibleFadedRooms) && visibleFadedRooms.length > 0;
+  if (!hasVisible && !hasFaded) return;
 
   const tilePx = TILE_SIZE * state.zoom;
   const fontPx = Math.max(10, Math.floor(tilePx * 0.22));
   const textOpacity = Math.max(0.68, Math.min(1, wallOpacityForZoomValue(state.zoom || 1)));
+  const offLayerOpacity = 0.3;
+
+  const drawLocalIds = (rooms, alphaScale) => {
+    if (!Array.isArray(rooms) || rooms.length === 0) return;
+    ctx.save();
+    ctx.globalAlpha *= textOpacity * alphaScale;
+    for (const room of rooms) {
+      if (!Number.isFinite(Number(room.localID))) continue;
+      const x = state.panX + room.x * tilePx;
+      const y = state.panY + room.y * tilePx;
+      const label = String(room.localID);
+      const tx = x + tilePx - Math.max(4, tilePx * 0.08);
+      const ty = y + tilePx * 0.5;
+      ctx.strokeText(label, tx, ty);
+      ctx.fillText(label, tx, ty);
+    }
+    ctx.restore();
+  };
 
   ctx.save();
-  ctx.globalAlpha *= textOpacity;
   ctx.textAlign = "right";
   ctx.textBaseline = "middle";
   ctx.font = `${fontPx}px "JetBrains Mono", "Roboto Mono", "Consolas", monospace`;
   ctx.lineWidth = Math.max(2.2, fontPx * 0.24);
   ctx.strokeStyle = "rgba(0, 0, 0, 0.7)";
   ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
-
-  for (const room of visibleRooms) {
-    if (!Number.isFinite(Number(room.localID))) continue;
-    const x = state.panX + room.x * tilePx;
-    const y = state.panY + room.y * tilePx;
-    const label = String(room.localID);
-    const tx = x + tilePx - Math.max(4, tilePx * 0.08);
-    const ty = y + tilePx * 0.5;
-    ctx.strokeText(label, tx, ty);
-    ctx.fillText(label, tx, ty);
-  }
-
+  drawLocalIds(visibleFadedRooms, offLayerOpacity);
+  drawLocalIds(visibleRooms, 1);
   ctx.restore();
 }
 
@@ -3459,59 +3650,23 @@ function render() {
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
 
   const activeGrid = normalizeGridId(state.activeGridId);
-  const gridRooms = getRoomsForGrid(activeGrid);
   const rooms = getRoomsForLayer(activeGrid, state.activeZ);
   const lightMode = false;
   const tilePx = TILE_SIZE * state.zoom;
   const viewW = el.canvas.clientWidth;
   const viewH = el.canvas.clientHeight;
-  const visibleRooms = [];
-  const visibleFadedRooms = [];
-  const occupiedActive = getRoomCoordSetForLayer(activeGrid, state.activeZ);
-
-  for (const room of rooms) {
-    const sx = state.panX + room.x * tilePx;
-    const sy = state.panY + room.y * tilePx;
-    if (sx + tilePx < 0 || sy + tilePx < 0 || sx > viewW || sy > viewH) continue;
-    visibleRooms.push(room);
-  }
-
-  if (!lightMode) {
-    for (const room of gridRooms) {
-      if (room.z === state.activeZ) continue;
-      if (Math.abs(room.z - state.activeZ) !== 1) continue;
-      const activeId = state.roomByCoord.get(coordKey(room.x, room.y, state.activeZ, activeGrid));
-      if (activeId) continue;
-      if (occupiedActive.has(`${room.x}:${room.y}`)) continue;
-      const sx = state.panX + room.x * tilePx;
-      const sy = state.panY + room.y * tilePx;
-      if (sx + tilePx < 0 || sy + tilePx < 0 || sx > viewW || sy > viewH) continue;
-      visibleFadedRooms.push(room);
-    }
-  }
+  const visible = collectVisibleRoomsForViewport(activeGrid, state.activeZ, tilePx, viewW, viewH, lightMode);
+  const visibleRooms = visible.visibleRooms;
+  const visibleFadedRooms = visible.visibleFadedRooms;
 
   const quality = getRenderQualityProfile(visibleRooms.length);
-  const staticLayer = ensureStaticLayerCanvas();
-  const staticKey = [
-    staticLayer.canvas.width,
-    staticLayer.canvas.height,
-    normalizeGridId(state.activeGridId),
-    state.activeZ,
-    Number(state.zoom).toFixed(3),
-    Number(state.panX).toFixed(2),
-    Number(state.panY).toFixed(2),
-    lightMode ? 1 : 0,
-    state.staticLayer.version
-  ].join("|");
 
-  let staticRebuilt = false;
-  if (state.staticLayer.key !== staticKey) {
-    drawStaticLayer(staticLayer.ctx, visibleFadedRooms, visibleRooms);
-    state.staticLayer.key = staticKey;
-    staticRebuilt = true;
+  if (quality.drawGridOutline) {
+    drawGridOutline(tilePx, viewW, viewH);
   }
 
-  ctx.drawImage(staticLayer.canvas, 0, 0);
+  const staticStats = drawStaticChunks(activeGrid, state.activeZ, lightMode, tilePx, visible.bounds);
+  const staticRebuilt = !!(staticStats && staticStats.rebuiltAny);
 
   drawNonActiveRoomDimming(visibleRooms);
 
@@ -3533,7 +3688,7 @@ function render() {
   }
 
   drawVisibleRoomWalls(visibleFadedRooms, visibleRooms);
-  drawRoomLocalIdOverlays(visibleRooms);
+  drawRoomLocalIdOverlays(visibleRooms, visibleFadedRooms);
 
   for (const room of visibleRooms) {
     drawRoomDoorOverlays(room);
@@ -3557,9 +3712,6 @@ function render() {
     }
     if (quality.drawMobHints) {
       drawMobHints(visibleRooms);
-    }
-    if (quality.drawGridOutline) {
-      drawGridOutline(rooms);
     }
   }
 
@@ -3593,6 +3745,9 @@ function render() {
   state.perf.qualityTier = quality.tier;
   state.perf.staticRebuilt = staticRebuilt;
   state.perf.staticVersion = state.staticLayer.version;
+  state.perf.staticChunksDrawn = staticStats ? staticStats.chunksDrawn : 0;
+  state.perf.staticChunksRebuilt = staticStats ? staticStats.chunksRebuilt : 0;
+  state.perf.staticChunkCacheSize = staticStats ? staticStats.cacheSize : state.staticLayer.chunks.size;
   if (state.showPerfStats) {
     updatePerfStatsPanel(false);
   }
@@ -4914,10 +5069,12 @@ function shouldReduceGlowEffects() {
 function drawRoomStaticSprite(room, options, targetCtx) {
   const opts = options || {};
   const ghost = !!opts.ghost;
+  const worldOffsetX = Number.isFinite(opts.worldOffsetX) ? opts.worldOffsetX : state.panX;
+  const worldOffsetY = Number.isFinite(opts.worldOffsetY) ? opts.worldOffsetY : state.panY;
   const drawCtx = targetCtx || ctx;
   const tilePx = TILE_SIZE * state.zoom;
-  const screenX = state.panX + room.x * tilePx;
-  const screenY = state.panY + room.y * tilePx;
+  const screenX = worldOffsetX + room.x * tilePx;
+  const screenY = worldOffsetY + room.y * tilePx;
   const zoomBucket = getZoomSpriteBucket();
   const sprite = getRoomStaticSprite(room, zoomBucket, ghost);
   if (!sprite) return;
@@ -5941,30 +6098,40 @@ function getExtraExitSprite(room, zoomBucket) {
   return canvas;
 }
 
-function drawGridOutline(rooms) {
-  if (rooms.length === 0) return;
-  const tilePx = TILE_SIZE * state.zoom;
+function drawGridOutline(tilePx, viewW, viewH) {
+  const size = tilePx || (TILE_SIZE * state.zoom);
+  const gridColor = state.themeHighlightColor || "#d9b05f";
+  const alpha = 0.09;
+  const lineWidth = Math.max(WALL_LINE_WIDTH_BASE, WALL_LINE_WIDTH_BASE * state.zoom);
+  const startX = Math.floor((-state.panX) / size) - 1;
+  const endX = Math.ceil((viewW - state.panX) / size) + 1;
+  const startY = Math.floor((-state.panY) / size) - 1;
+  const endY = Math.ceil((viewH - state.panY) / size) + 1;
 
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minY = Infinity;
-  let maxY = -Infinity;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = gridColor;
+  ctx.lineWidth = lineWidth;
+  ctx.lineCap = "square";
+  ctx.lineJoin = "miter";
 
-  for (const room of rooms) {
-    minX = Math.min(minX, room.x);
-    maxX = Math.max(maxX, room.x);
-    minY = Math.min(minY, room.y);
-    maxY = Math.max(maxY, room.y);
+  for (let x = startX; x <= endX; x += 1) {
+    const screenX = state.panX + x * size;
+    ctx.beginPath();
+    ctx.moveTo(screenX + 0.5, 0);
+    ctx.lineTo(screenX + 0.5, viewH);
+    ctx.stroke();
   }
 
-  const x = state.panX + minX * tilePx;
-  const y = state.panY + minY * tilePx;
-  const width = (maxX - minX + 1) * tilePx;
-  const height = (maxY - minY + 1) * tilePx;
+  for (let y = startY; y <= endY; y += 1) {
+    const screenY = state.panY + y * size;
+    ctx.beginPath();
+    ctx.moveTo(0, screenY + 0.5);
+    ctx.lineTo(viewW, screenY + 0.5);
+    ctx.stroke();
+  }
 
-  ctx.strokeStyle = "rgba(103, 126, 147, 0.25)";
-  ctx.lineWidth = 1;
-  ctx.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1);
+  ctx.restore();
 }
 
 function pickRoomAt(clientX, clientY) {
@@ -6044,6 +6211,15 @@ function formatRoomHoverTooltip(room) {
   ].filter(Boolean).join("\n");
 }
 
+function clampTooltipPositionInWrap(wrap, tooltip, preferredLeft, preferredTop) {
+  const maxX = Math.max(0, wrap.clientWidth - tooltip.offsetWidth - 8);
+  const maxY = Math.max(0, wrap.clientHeight - tooltip.offsetHeight - 8);
+  return {
+    left: Math.max(8, Math.min(maxX, preferredLeft)),
+    top: Math.max(8, Math.min(maxY, preferredTop))
+  };
+}
+
 function setHoverTooltip(room, clientX, clientY) {
   if (!el.roomHoverTooltip) return;
   if (!room) {
@@ -6059,13 +6235,12 @@ function setHoverTooltip(room, clientX, clientY) {
   tooltip.hidden = false;
 
   const offset = 14;
-  const maxX = Math.max(0, wrap.clientWidth - tooltip.offsetWidth - 8);
-  const maxY = Math.max(0, wrap.clientHeight - tooltip.offsetHeight - 8);
-  const left = Math.max(8, Math.min(maxX, clientX - wrapRect.left + offset));
-  const top = Math.max(8, Math.min(maxY, clientY - wrapRect.top + offset));
+  const preferredLeft = clientX - wrapRect.left + offset;
+  const preferredTop = clientY - wrapRect.top + offset;
+  const pos = clampTooltipPositionInWrap(wrap, tooltip, preferredLeft, preferredTop);
 
-  tooltip.style.left = `${left}px`;
-  tooltip.style.top = `${top}px`;
+  tooltip.style.left = `${pos.left}px`;
+  tooltip.style.top = `${pos.top}px`;
 }
 
 function hideHoverTooltip() {
