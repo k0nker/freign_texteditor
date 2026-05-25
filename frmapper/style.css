@@ -474,6 +474,10 @@ body.embed-mode {
   background: transparent;
 }
 
+html:has(body.embed-mode) {
+  background: transparent;
+}
+
 body.embed-mode #fr-shellbar-mount {
   display: none;
 }

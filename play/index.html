@@ -194,8 +194,8 @@
       <!-- Macro quick-access bar (hidden when no macros defined) -->
       <div id="macro-bar" aria-label="Macro shortcuts"></div>
 
-      <!-- Vitals bar: floats above the command input; hidden until Char.Vitals GMCP data arrives -->
-      <div id="vitals-strip" aria-label="Character Vitals" hidden>
+      <!-- Vitals bar: always visible to keep terminal layout stable from first paint -->
+      <div id="vitals-strip" aria-label="Character Vitals">
         <div class="vbar-vital" title="Hit Points">
           <div class="condition-badge hp">
             <div class="vbar-identity">

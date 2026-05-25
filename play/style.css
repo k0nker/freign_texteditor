@@ -1932,6 +1932,7 @@ body:has(#workspace[data-layout="rounded"]) #settings-drawer {
   min-height: 0;
   padding: 0;
   overflow: hidden;
+  background: transparent;
 }
 
 .mapv2-frame {
@@ -1943,12 +1944,13 @@ body:has(#workspace[data-layout="rounded"]) #settings-drawer {
   width: 100%;
   border: 1px solid color-mix(in srgb, var(--panel-border) 60%, transparent);
   border-radius: 6px;
-  background: color-mix(in srgb, var(--terminal-bg) 85%, black);
+  background: transparent;
 }
 
 #panel-mapv2 > .panel-body {
   padding: 6px;
   overflow: hidden;
+  background: transparent;
 }
 
 .map-meta {

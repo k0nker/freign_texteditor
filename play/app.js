@@ -653,23 +653,31 @@
       saveSettings();
     });
 
-    el.addGmcpPanel.addEventListener('click', function () {
-      state.settings.gmcpPanels.push({ id: uid(), name: 'Panel', gmcpPath: '', enabled: true, side: 'left' });
-      saveAndRefresh();
-    });
+    if (el.addGmcpPanel) {
+      el.addGmcpPanel.addEventListener('click', function () {
+        state.settings.gmcpPanels.push({ id: uid(), name: 'Panel', gmcpPath: '', enabled: true, side: 'left' });
+        saveAndRefresh();
+      });
+    }
 
-    el.addAlias.addEventListener('click', function () {
-      state.settings.aliases.push({ enabled: true, pattern: '', replacement: '' });
-      saveAndRefresh();
-    });
-    el.addTrigger.addEventListener('click', function () {
-      state.settings.triggers.push({ enabled: true, pattern: '', flags: 'i', action: 'highlight', value: '' });
-      saveAndRefresh();
-    });
-    el.addMacro.addEventListener('click', function () {
-      state.settings.macros.push({ enabled: true, label: '', command: '' });
-      saveAndRefresh();
-    });
+    if (el.addAlias) {
+      el.addAlias.addEventListener('click', function () {
+        state.settings.aliases.push({ enabled: true, pattern: '', replacement: '' });
+        saveAndRefresh();
+      });
+    }
+    if (el.addTrigger) {
+      el.addTrigger.addEventListener('click', function () {
+        state.settings.triggers.push({ enabled: true, pattern: '', flags: 'i', action: 'highlight', value: '' });
+        saveAndRefresh();
+      });
+    }
+    if (el.addMacro) {
+      el.addMacro.addEventListener('click', function () {
+        state.settings.macros.push({ enabled: true, label: '', command: '' });
+        saveAndRefresh();
+      });
+    }
 
     bindSettingsFileControls(
       el.exportSettings,
@@ -1456,7 +1464,13 @@
     rebuildPalette();
   }
 
-  function saveSettings()    { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.settings)); }
+  function saveSettings()    {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state.settings));
+    } catch (_) {
+      // Storage may be unavailable or full; keep runtime settings functional.
+    }
+  }
   function saveAndRefresh()  { saveSettings(); renderAll(); }
 
   /* ═══════════════════════════════════════════════════════════════
@@ -1937,6 +1951,9 @@
     var labels = { online: '\u25CF Online', offline: '\u25CF Offline', connecting: '\u25CC Connecting\u2026' };
     el.connStatus.textContent = labels[status] || '\u25CF Offline';
     el.connStatus.className   = status;
+    if (status === 'connecting' || status === 'online') {
+      requestAnimationFrame(scrollTerminalToBottom);
+    }
   }
 
   function sendWs(payload) {
