@@ -199,6 +199,23 @@ body {
   white-space: nowrap;
 }
 
+.embed-room-meta-toggle {
+  border: 1px solid color-mix(in srgb, var(--fm-panel-border) 78%, #ffffff 8%);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--fm-input-bg) 88%, transparent);
+  color: color-mix(in srgb, var(--fm-text) 93%, #ffffff);
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 7px;
+  min-height: 18px;
+}
+
+.embed-room-meta-toggle[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--fm-accent) 72%, #ffffff 16%);
+  background: color-mix(in srgb, var(--fm-input-bg) 66%, var(--fm-accent) 22%);
+  color: #ffffff;
+}
+
 .embed-quick-tooltip {
   min-width: 0;
   max-width: 260px;

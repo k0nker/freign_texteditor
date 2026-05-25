@@ -271,6 +271,7 @@ const state = {
   showTraveledPath: true,
   showFogOfWar: true,
   showPerfStats: false,
+  showLocalIds: false,
   followPlayer: true,
   scanDistance: DEFAULT_SCAN_DISTANCE,
   sectorIcons: new Map(),
@@ -1790,6 +1791,7 @@ const el = {
   embedRoomMeta: document.getElementById("embed-room-meta"),
   embedRoomNsid: document.getElementById("embed-room-nsid"),
   embedRoomEph: document.getElementById("embed-room-eph"),
+  embedLocalIdToggle: document.getElementById("embed-localid-toggle"),
   embedFollow: document.getElementById("embed-follow"),
   embedQuickTooltip: document.getElementById("embed-quick-tooltip"),
   canvas: document.getElementById("map-canvas"),
@@ -1851,6 +1853,14 @@ function setupEmbedMode() {
   el.embedToggle.addEventListener("click", () => {
     setEmbedControlsExpanded(undefined);
   });
+
+  if (el.embedLocalIdToggle) {
+    el.embedLocalIdToggle.addEventListener("click", () => {
+      state.showLocalIds = !state.showLocalIds;
+      updateEmbedQuickControls();
+      scheduleRender();
+    });
+  }
 }
 
 function setEmbedControlsExpanded(expanded) {
@@ -1906,6 +1916,14 @@ function updateEmbedQuickControls() {
       el.embedRoomEph.textContent = `ephNum: ${eph}`;
       el.embedRoomMeta.hidden = false;
     }
+  }
+  if (el.embedLocalIdToggle) {
+    el.embedLocalIdToggle.setAttribute("aria-pressed", state.showLocalIds ? "true" : "false");
+    el.embedLocalIdToggle.textContent = state.showLocalIds ? "IDs On" : "IDs Off";
+    el.embedLocalIdToggle.setAttribute(
+      "title",
+      state.showLocalIds ? "Hide localID labels on map" : "Show localID labels on map"
+    );
   }
   if (el.embedFollow) {
     el.embedFollow.classList.toggle("active", !!state.followPlayer);
@@ -3397,6 +3415,37 @@ function drawVisibleRoomWalls(visibleFadedRooms, visibleRooms) {
   }
 }
 
+function drawRoomLocalIdOverlays(visibleRooms) {
+  if (!state.showLocalIds) return;
+  if (!Array.isArray(visibleRooms) || visibleRooms.length === 0) return;
+
+  const tilePx = TILE_SIZE * state.zoom;
+  const fontPx = Math.max(10, Math.floor(tilePx * 0.22));
+  const textOpacity = Math.max(0.68, Math.min(1, wallOpacityForZoomValue(state.zoom || 1)));
+
+  ctx.save();
+  ctx.globalAlpha *= textOpacity;
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  ctx.font = `${fontPx}px "JetBrains Mono", "Roboto Mono", "Consolas", monospace`;
+  ctx.lineWidth = Math.max(2.2, fontPx * 0.24);
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.7)";
+  ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
+
+  for (const room of visibleRooms) {
+    if (!Number.isFinite(Number(room.localID))) continue;
+    const x = state.panX + room.x * tilePx;
+    const y = state.panY + room.y * tilePx;
+    const label = String(room.localID);
+    const tx = x + tilePx - Math.max(4, tilePx * 0.08);
+    const ty = y + tilePx * 0.5;
+    ctx.strokeText(label, tx, ty);
+    ctx.fillText(label, tx, ty);
+  }
+
+  ctx.restore();
+}
+
 function render() {
   if (!ctx) return;
   ensureRoomEdgeVariants();
@@ -3484,6 +3533,7 @@ function render() {
   }
 
   drawVisibleRoomWalls(visibleFadedRooms, visibleRooms);
+  drawRoomLocalIdOverlays(visibleRooms);
 
   for (const room of visibleRooms) {
     drawRoomDoorOverlays(room);

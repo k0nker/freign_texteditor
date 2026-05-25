@@ -667,6 +667,23 @@
 
     if (el.terminal) {
       el.terminal.addEventListener('scroll', updateTerminalBottomButton);
+      el.terminal.addEventListener('pointerdown', function () {
+        if (el.cmdInput && document.activeElement === el.cmdInput) {
+          el.cmdInput.blur();
+        }
+      }, true);
+    }
+
+    if (el.leftPanels) {
+      el.leftPanels.addEventListener('pointerdown', maybeQueueCommandInputFocus, true);
+    }
+    if (el.rightPanels) {
+      el.rightPanels.addEventListener('pointerdown', maybeQueueCommandInputFocus, true);
+    }
+    if (el.mapV2Frame) {
+      el.mapV2Frame.addEventListener('pointerdown', function () {
+        queueCommandInputFocus();
+      }, true);
     }
 
     window.addEventListener('resize', updateTerminalBottomButton);
@@ -4001,6 +4018,31 @@
     if (!el.languagePicker) return;
     el.languagePicker.hidden = true;
     setLanguagePickerOpenState(false);
+  }
+
+  function isEditableUiTarget(target) {
+    var t = target;
+    if (!t || !t.tagName) return false;
+    if (t.isContentEditable) return true;
+    var tag = String(t.tagName).toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'button';
+  }
+
+  function maybeQueueCommandInputFocus(e) {
+    if (!e || !e.target) return;
+    if (state.startupProfileSelectionRequired && el.startupProfilePicker && !el.startupProfilePicker.hidden) return;
+    if (isEditableUiTarget(e.target)) return;
+    queueCommandInputFocus();
+  }
+
+  function queueCommandInputFocus() {
+    if (!el.cmdInput) return;
+    if (state.startupProfileSelectionRequired && el.startupProfilePicker && !el.startupProfilePicker.hidden) return;
+    window.setTimeout(function () {
+      if (!el.cmdInput) return;
+      if (document.activeElement === el.cmdInput) return;
+      el.cmdInput.focus({ preventScroll: true });
+    }, 0);
   }
 
   function setLanguagePickerOpenState(open) {
