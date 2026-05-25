@@ -45,6 +45,19 @@
                 10: { name: 'Desert',      fill: '#22180a', border: '#806030' },
                 11: { name: 'Lava',        fill: '#1e0c06', border: '#783018' },
                 12: { name: 'Snow',        fill: '#1a1e22', border: '#6888a0' },
+                13: { name: 'Unused',      fill: '#181820', border: '#444452' },
+                14: { name: 'Meadow',      fill: '#16210f', border: '#4e8a3c' },
+                15: { name: 'Cave',        fill: '#1a1a1a', border: '#5e5e5e' },
+                16: { name: 'Dungeon',     fill: '#18131a', border: '#5d4b6b' },
+                17: { name: 'Ice',         fill: '#1d2530', border: '#7ba8cf' },
+                18: { name: 'Village',     fill: '#2a2219', border: '#9a7c4b' },
+                19: { name: 'Underwater',  fill: '#0d2342', border: '#3b79c0' },
+                20: { name: 'Underwater Cave', fill: '#101f30', border: '#4c708f' },
+                21: { name: 'Underwater City', fill: '#14293d', border: '#4e8ea2' },
+                22: { name: 'Mesa',        fill: '#2b1e12', border: '#a26f36' },
+                23: { name: 'Sewer',       fill: '#171d12', border: '#638245' },
+                24: { name: 'Crypt',       fill: '#19161f', border: '#6f617f' },
+                25: { name: 'Planar',      fill: '#1d1430', border: '#8f64bf' },
                 _default: { name: 'Unknown', fill: '#181820', border: '#383848' },
             }
         },
@@ -74,6 +87,19 @@
                 10: { name: 'Desert',      fill: '#e6d29e', border: '#a1843c' },
                 11: { name: 'Lava',        fill: '#d4b09e', border: '#a05a35' },
                 12: { name: 'Snow',        fill: '#eef3f8', border: '#7fa3ba' },
+                13: { name: 'Unused',      fill: '#dfd7c8', border: '#8e816d' },
+                14: { name: 'Meadow',      fill: '#d2ddb3', border: '#71924c' },
+                15: { name: 'Cave',        fill: '#c9c1b4', border: '#756b5d' },
+                16: { name: 'Dungeon',     fill: '#c5bdb1', border: '#7b6f7f' },
+                17: { name: 'Ice',         fill: '#dce8f2', border: '#7ba4c3' },
+                18: { name: 'Village',     fill: '#e2d2b8', border: '#a57d4f' },
+                19: { name: 'Underwater',  fill: '#b1c8df', border: '#5f83ad' },
+                20: { name: 'Underwater Cave', fill: '#b8c8d2', border: '#708898' },
+                21: { name: 'Underwater City', fill: '#c1d6dd', border: '#6f99a7' },
+                22: { name: 'Mesa',        fill: '#dfc6a1', border: '#ab7642' },
+                23: { name: 'Sewer',       fill: '#c9d2b1', border: '#738951' },
+                24: { name: 'Crypt',       fill: '#cbc4d2', border: '#817590' },
+                25: { name: 'Planar',      fill: '#d2c3df', border: '#916db0' },
                 _default: { name: 'Unknown', fill: '#dfd7c8', border: '#8e816d' },
             }
         },
@@ -103,6 +129,19 @@
                 10: { name: 'Desert',      fill: '#322c23', border: '#9a8054' },
                 11: { name: 'Lava',        fill: '#3a2520', border: '#a25d49' },
                 12: { name: 'Snow',        fill: '#2b3340', border: '#7e9fbe' },
+                13: { name: 'Unused',      fill: '#222936', border: '#5f728d' },
+                14: { name: 'Meadow',      fill: '#1f2d21', border: '#5f9b69' },
+                15: { name: 'Cave',        fill: '#26282d', border: '#7f8896' },
+                16: { name: 'Dungeon',     fill: '#2b2531', border: '#8b76a3' },
+                17: { name: 'Ice',         fill: '#293848', border: '#88b6dd' },
+                18: { name: 'Village',     fill: '#342d24', border: '#b18b5a' },
+                19: { name: 'Underwater',  fill: '#18385e', border: '#5ca1f5' },
+                20: { name: 'Underwater Cave', fill: '#1d3448', border: '#6b8fae' },
+                21: { name: 'Underwater City', fill: '#1f3c4a', border: '#66a5b5' },
+                22: { name: 'Mesa',        fill: '#3a2a18', border: '#c48847' },
+                23: { name: 'Sewer',       fill: '#233021', border: '#7da861' },
+                24: { name: 'Crypt',       fill: '#2d2938', border: '#9887ab' },
+                25: { name: 'Planar',      fill: '#342850', border: '#a47cd5' },
                 _default: { name: 'Unknown', fill: '#222936', border: '#5f728d' },
             }
         },
@@ -132,6 +171,19 @@
                 10: { name: 'Desert',      fill: '#453a31', border: '#ba9e72' },
                 11: { name: 'Lava',        fill: '#4a2e2d', border: '#c7736d' },
                 12: { name: 'Snow',        fill: '#3c4352', border: '#9bb4d5' },
+                13: { name: 'Unused',      fill: '#332d3f', border: '#8976a5' },
+                14: { name: 'Meadow',      fill: '#314034', border: '#84b387' },
+                15: { name: 'Cave',        fill: '#3a3742', border: '#9d91af' },
+                16: { name: 'Dungeon',     fill: '#3f3044', border: '#b18ab8' },
+                17: { name: 'Ice',         fill: '#434f66', border: '#a9c3e3' },
+                18: { name: 'Village',     fill: '#4a3b34', border: '#c8a37a' },
+                19: { name: 'Underwater',  fill: '#304a6f', border: '#82b8ff' },
+                20: { name: 'Underwater Cave', fill: '#35495f', border: '#8ca8c2' },
+                21: { name: 'Underwater City', fill: '#365665', border: '#87bdc8' },
+                22: { name: 'Mesa',        fill: '#513a2e', border: '#d49863' },
+                23: { name: 'Sewer',       fill: '#3a4633', border: '#97bd7d' },
+                24: { name: 'Crypt',       fill: '#4a4156', border: '#b4a0cb' },
+                25: { name: 'Planar',      fill: '#4b375c', border: '#c796d2' },
                 _default: { name: 'Unknown', fill: '#332d3f', border: '#8976a5' },
             }
         }
@@ -153,6 +205,9 @@
         B: '#4f92ff',
         c: '#4db7c8',
         R: '#cf4a4a',
+        d: '#6f6f76',
+        D: '#7b648e',
+        m: '#b176d4',
         br: '#6b3f1e',
         ob: '#8c5a1e',
     };
@@ -172,7 +227,32 @@
             case 10: return 'Y'; // desert
             case 11: return 'R'; // lava
             case 12: return 'W'; // snow
+            case 13: return 'w'; // unused
+            case 14: return 'g'; // meadow
+            case 15: return 'd'; // cave
+            case 16: return 'D'; // dungeon
+            case 17: return 'W'; // ice
+            case 18: return 'mp'; // village
+            case 19: return 'B'; // underwater
+            case 20: return 'b'; // underwater_cave
+            case 21: return 'c'; // underwater_city
+            case 22: return 'ob'; // mesa
+            case 23: return 'G'; // sewer
+            case 24: return 'd'; // crypt
+            case 25: return 'm'; // planar
+            case 26: return 'R'; // volcanic
+            case 27: return 'g'; // deep_forest
+            case 28: return 'd'; // ruins
             default: return 'w';
+        }
+    }
+
+    function sectorDisplayName(sector) {
+        switch (sector) {
+            case 26: return 'Volcanic';
+            case 27: return 'Deep Forest';
+            case 28: return 'Ruins';
+            default: return null;
         }
     }
 
@@ -209,9 +289,10 @@
         var ansiBase = ANSI_COLOR_HEX[sectorAnsiCode(s)] || ANSI_COLOR_HEX.w;
         var fill = ansiBase;
         var border = blendHex(ansiBase, '#000000', 0.28);
+        var displayName = sectorDisplayName(s) || sec.name;
 
         return {
-            name: sec.name,
+            name: displayName,
             fill: fill,
             border: border,
         };

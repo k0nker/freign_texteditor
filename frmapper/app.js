@@ -2,9 +2,11 @@
 
 const TILE_SIZE = 48;
 const WALL_COLOR = "#5f4126";
+const OFF_LAYER_WALL_COLOR = "#3f6ca6";
 const WALL_BORDER_COLOR = "rgba(16, 12, 8, 0.96)";
-const LEGACY_STORAGE_KEY = "frmapper.savedMap.v1";
 const STORAGE_KEY_PREFIX = "frmapper.savedMap.v2";
+const SITE_THEME_KEY = "freign.site.theme.v1";
+const FRMAPPER_THEME_DEFAULT = "onyx";
 const TRAIL_DOT_HOLD_MS = 3000;
 const TRAIL_DOT_FADE_MIN_MS = 2000;
 const TRAIL_DOT_FADE_MAX_MS = 2000;
@@ -26,6 +28,7 @@ const TRAIL_SPRITE_CACHE_REV = 4;
 const ROOM_WALL_SPRITE_CACHE_REV = 3;
 const ROOM_STATIC_SPRITE_CACHE_REV = 2;
 const SECTOR_TILE_VARIANT_CACHE = new Map();
+const SECTOR_TILE_VARIANT_CACHE_REV = 2;
 const MAX_TRAIL_SPRITE_CACHE = 256;
 const MAX_EDGE_SPRITE_CACHE = 512;
 const MAX_EXTRA_EXIT_SPRITE_CACHE = 256;
@@ -37,20 +40,38 @@ const MAX_POI_SPRITE_CACHE = 512;
 const MAX_WATER_DROP_SPRITE_CACHE = 256;
 const MAX_PLAYER_CENTER_SPRITE_CACHE = 256;
 const DEFAULT_SCAN_DISTANCE = 3;
+const QUALITY_MEDIUM_ROOM_COUNT = 1400;
+const QUALITY_LOW_ROOM_COUNT = 2600;
+const QUALITY_ULTRA_ROOM_COUNT = 4200;
 const SECTOR_VARIANT_COUNT = 6;
 const TEXTURED_SECTORS = new Set([
   "city",
+  "village",
   "field",
+  "meadow",
   "forest",
+  "deep_forest",
   "hills",
+  "mesa",
   "mountain",
+  "cave",
+  "dungeon",
+  "crypt",
+  "ruins",
+  "sewer",
+  "volcanic",
   "swamp",
   "water_swim",
   "water_noswim",
+  "underwater",
+  "underwater_cave",
+  "underwater_city",
   "air",
+  "ice",
   "desert",
   "lava",
-  "snow"
+  "snow",
+  "planar"
 ]);
 const MOB_DOT_PALETTE = {
   glowInner: "rgba(255, 70, 70, 0.56)",
@@ -75,20 +96,36 @@ const TRAIL_DOT_PALETTE = {
 };
 const PARTY_NEON_COLOR = "rgba(150, 166, 255, 0.94)";
 const PARTY_NEON_GLOW = "rgba(164, 150, 255, 0.97)";
+const PARTY_JELLY_FADE_MS = 1000;
 const SECTOR_ORDER = [
   "inside",
+  "dungeon",
+  "crypt",
   "city",
+  "village",
   "field",
+  "meadow",
   "forest",
+  "deep_forest",
   "hills",
+  "mesa",
   "mountain",
+  "cave",
+  "sewer",
   "water_swim",
   "water_noswim",
+  "underwater",
+  "underwater_cave",
+  "underwater_city",
   "swamp",
   "air",
+  "ice",
   "desert",
   "lava",
-  "snow"
+  "volcanic",
+  "snow",
+  "ruins",
+  "planar"
 ];
 
 const SECTOR_ALIASES = {
@@ -105,12 +142,38 @@ const SECTOR_ALIASES = {
   water_no_swim: "water_noswim",
   water_noswimming: "water_noswim",
   no_swim: "water_noswim",
-  under_water: "water_swim",
-  underwater: "water_swim",
+  under_water: "underwater",
+  underwater: "underwater",
+  underwatercave: "underwater_cave",
+  underwater_city: "underwater_city",
+  underwatercity: "underwater_city",
+  underwater_cavern: "underwater_cave",
+  underwater_town: "underwater_city",
   sky: "air",
-  cave: "mountain",
-  caves: "mountain",
-  dungeon: "inside"
+  cave: "cave",
+  caves: "cave",
+  dungeon: "dungeon",
+  dungeons: "dungeon",
+  meadow: "meadow",
+  meadows: "meadow",
+  village: "village",
+  villages: "village",
+  mesa: "mesa",
+  sewer: "sewer",
+  sewers: "sewer",
+  crypt: "crypt",
+  crypts: "crypt",
+  deepforest: "deep_forest",
+  deep_forest: "deep_forest",
+  ancientforest: "deep_forest",
+  volcanic: "volcanic",
+  volcano: "volcanic",
+  volcanoes: "volcanic",
+  ruin: "ruins",
+  ruins: "ruins",
+  ice: "ice",
+  planar: "planar",
+  plane: "planar"
 };
 
 const DIRECTION_VECTORS = {
@@ -188,17 +251,22 @@ const state = {
   persistIdleId: 0,
   gridOptionsKey: "",
   zOptionsKey: "",
-  isSafari: false,
   showParty: true,
   showMobHints: true,
   showTraveledPath: true,
   showFogOfWar: true,
+  showPerfStats: false,
+  followPlayer: true,
   scanDistance: DEFAULT_SCAN_DISTANCE,
   sectorIcons: new Map(),
   playerLocation: null,
   playerRoomId: null,
   partyMembers: [],
+  partyMemberLastPos: new Map(),
+  partyJellyTrail: [],
   roomMobs: [],
+  roomEdgeVariants: new Map(),
+  roomEdgeVariantsDirty: true,
   sessionSocket: null,
   sessionSocketState: "disconnected",
   sessionSocketReconnectTimer: 0,
@@ -220,8 +288,89 @@ const state = {
     lastRenderTs: 0,
     fromCoord: null,
     toCoord: null
+  },
+  staticLayer: {
+    canvas: null,
+    ctx: null,
+    key: "",
+    version: 0
+  },
+  perf: {
+    frameMs: 0,
+    renderMs: 0,
+    visibleRooms: 0,
+    qualityTier: "full",
+    staticRebuilt: false,
+    staticVersion: 0,
+    lastDrawTs: 0,
+    fpsEstimate: 0,
+    panelTs: 0
   }
 };
+
+function resolveFrmapperThemeId(rawThemeId) {
+  const raw = String(rawThemeId || "").trim().toLowerCase();
+  if (window.FreignThemes && typeof window.FreignThemes.resolveThemeId === "function") {
+    return window.FreignThemes.resolveThemeId(raw || FRMAPPER_THEME_DEFAULT) || FRMAPPER_THEME_DEFAULT;
+  }
+  return raw || FRMAPPER_THEME_DEFAULT;
+}
+
+function readSiteThemePreference() {
+  let stored = "";
+  try {
+    stored = localStorage.getItem(SITE_THEME_KEY) || "";
+  } catch (_err) {
+    stored = "";
+  }
+  return resolveFrmapperThemeId(stored || FRMAPPER_THEME_DEFAULT);
+}
+
+function applyFrmapperTheme(themeId) {
+  const resolved = resolveFrmapperThemeId(themeId || FRMAPPER_THEME_DEFAULT);
+  let vars = null;
+
+  if (window.FreignThemes && typeof window.FreignThemes.getTheme === "function") {
+    const theme = window.FreignThemes.getTheme(resolved);
+    if (theme && theme.vars) vars = theme.vars;
+  }
+
+  if (!vars) {
+    vars = {
+      bg: "#0a0a0e",
+      panel: "#111118",
+      "panel-border": "#2a2a38",
+      text: "#c8c0b0",
+      muted: "#8f8798",
+      title: "#e0c87a",
+      "input-bg": "#1a1a24",
+      "input-border": "#3a3a50",
+      accent: "#d9b05f",
+      "terminal-bg": "#0c0c13",
+      "terminal-border": "#323246"
+    };
+  }
+
+  const root = document.body;
+  root.setAttribute("data-theme", resolved);
+  root.style.setProperty("--fm-bg", vars.bg || "#0a0a0e");
+  root.style.setProperty("--fm-panel", vars.panel || "#111118");
+  root.style.setProperty("--fm-panel-border", vars["panel-border"] || "#2a2a38");
+  root.style.setProperty("--fm-text", vars.text || "#c8c0b0");
+  root.style.setProperty("--fm-muted", vars.muted || "#8f8798");
+  root.style.setProperty("--fm-title", vars.title || "#e0c87a");
+  root.style.setProperty("--fm-input-bg", vars["input-bg"] || "#1a1a24");
+  root.style.setProperty("--fm-input-border", vars["input-border"] || "#3a3a50");
+  root.style.setProperty("--fm-accent", vars.accent || "#d9b05f");
+  root.style.setProperty("--fm-terminal-bg", vars["terminal-bg"] || "#0c0c13");
+  root.style.setProperty("--fm-terminal-border", vars["terminal-border"] || "#323246");
+
+  scheduleRender();
+}
+
+function syncFrmapperThemeFromSitePreference() {
+  applyFrmapperTheme(readSiteThemePreference());
+}
 
 function hashStringFNV1a(input) {
   const text = String(input || "");
@@ -293,7 +442,7 @@ function getRoomTileImage(room, tilePx) {
     return baseIcon;
   }
 
-  const cacheKey = `${sector}:${variant}:${tilePx}`;
+  const cacheKey = `${SECTOR_TILE_VARIANT_CACHE_REV}:${sector}:${variant}:${tilePx}`;
   const cached = SECTOR_TILE_VARIANT_CACHE.get(cacheKey);
   if (cached) return cached;
 
@@ -592,7 +741,7 @@ function drawFieldTexture(g, size, variant, rng) {
   drawInteriorGrain(g, size, rng, palette.grainB, 24 + variant, 0.6, 1.8, size * 0.11);
 
   g.strokeStyle = "rgba(178, 202, 120, 0.28)";
-  g.lineWidth = Math.max(0.75, size * 0.014);
+  g.fillStyle = colorToStyle(palette.base, 0.8);
   for (let i = 0; i < 5; i += 1) {
     const y = size * (0.16 + i * 0.17) + (variant - 2.5) * 0.2;
     g.beginPath();
@@ -630,28 +779,44 @@ function drawForestTexture(g, size, variant, rng) {
 
 function drawHillsTexture(g, size, variant, rng) {
   const palette = {
-    base: { r: 84, g: 114, b: 74 },
-    ridgeA: { r: 112, g: 142, b: 94 },
-    ridgeB: { r: 70, g: 94, b: 60 },
-    edgeDark: { r: 56, g: 78, b: 48 },
-    edgeLight: { r: 122, g: 154, b: 102 }
+    base: { r: 148, g: 122, b: 84 },
+    ridgeA: { r: 178, g: 146, b: 102 },
+    ridgeB: { r: 114, g: 92, b: 62 },
+    edgeDark: { r: 98, g: 78, b: 52 },
+    edgeLight: { r: 192, g: 156, b: 110 }
   };
 
   g.fillStyle = colorToStyle(palette.base, 1);
   g.fillRect(0, 0, size, size);
   drawEdgeContinuityBand(g, size, palette);
 
-  const ridgeCount = 5;
+  const ridgeCount = 6;
   for (let i = 0; i < ridgeCount; i += 1) {
-    const y = size * (0.14 + i * 0.18) + (variant - 2.5) * 0.18;
-    g.strokeStyle = i % 2 === 0 ? colorToStyle(palette.ridgeA, 0.36) : colorToStyle(palette.ridgeB, 0.32);
-    g.lineWidth = Math.max(1, size * 0.018);
+    const y = size * (0.12 + i * 0.16) + (variant - 2.5) * 0.2;
+    g.strokeStyle = i % 2 === 0 ? colorToStyle(palette.ridgeA, 0.4) : colorToStyle(palette.ridgeB, 0.34);
+    g.lineWidth = Math.max(1.2, size * 0.02);
     g.beginPath();
     g.moveTo(size * 0.08, y);
-    g.quadraticCurveTo(size * 0.35, y - size * (0.08 + rng() * 0.02), size * 0.6, y + size * (0.05 + rng() * 0.03));
-    g.quadraticCurveTo(size * 0.78, y + size * (0.03 + rng() * 0.03), size * 0.92, y - size * (0.04 + rng() * 0.02));
+    g.bezierCurveTo(
+      size * 0.24,
+      y - size * (0.07 + rng() * 0.03),
+      size * 0.52,
+      y + size * (0.06 + rng() * 0.03),
+      size * 0.72,
+      y - size * (0.04 + rng() * 0.03)
+    );
+    g.bezierCurveTo(
+      size * 0.8,
+      y - size * (0.02 + rng() * 0.02),
+      size * 0.88,
+      y + size * (0.04 + rng() * 0.03),
+      size * 0.94,
+      y - size * (0.03 + rng() * 0.02)
+    );
     g.stroke();
   }
+
+  drawInteriorGrain(g, size, rng, palette.ridgeB, 18 + variant * 2, 0.55, 1.35, size * 0.1);
 }
 
 function drawMountainTexture(g, size, variant, rng) {
@@ -838,25 +1003,122 @@ function drawAirTexture(g, size, variant, rng) {
 
 function drawDesertTexture(g, size, variant, rng) {
   const palette = {
-    base: { r: 176, g: 152, b: 96 },
-    duneA: { r: 212, g: 188, b: 126 },
-    duneB: { r: 142, g: 120, b: 74 },
-    edgeDark: { r: 126, g: 104, b: 62 },
-    edgeLight: { r: 222, g: 198, b: 136 }
+    base: { r: 186, g: 162, b: 112 },
+    duneA: { r: 210, g: 184, b: 132 },
+    duneB: { r: 154, g: 132, b: 90 },
+    grain: { r: 132, g: 112, b: 72 },
+    edgeDark: { r: 138, g: 114, b: 76 },
+    edgeLight: { r: 218, g: 194, b: 144 }
   };
 
   g.fillStyle = colorToStyle(palette.base, 1);
   g.fillRect(0, 0, size, size);
   drawEdgeContinuityBand(g, size, palette);
 
-  g.lineWidth = Math.max(1, size * 0.018);
-  for (let i = 0; i < 5; i += 1) {
-    const y = size * (0.14 + i * 0.17) + (variant - 2.5) * 0.2;
-    g.strokeStyle = i % 2 === 0 ? colorToStyle(palette.duneA, 0.32) : colorToStyle(palette.duneB, 0.24);
+  g.lineWidth = Math.max(1, size * 0.017);
+  for (let i = 0; i < 6; i += 1) {
+    const y = size * (0.1 + i * 0.14) + (variant - 2.5) * 0.18;
+    g.strokeStyle = i % 2 === 0 ? colorToStyle(palette.duneA, 0.3) : colorToStyle(palette.duneB, 0.26);
     g.beginPath();
     g.moveTo(size * 0.06, y);
-    g.bezierCurveTo(size * 0.24, y - size * 0.05, size * 0.72, y + size * 0.06, size * 0.94, y - size * 0.01);
+    g.bezierCurveTo(size * 0.2, y - size * (0.03 + rng() * 0.02), size * 0.62, y + size * (0.04 + rng() * 0.02), size * 0.94, y - size * 0.01);
     g.stroke();
+  }
+
+  drawInteriorGrain(g, size, rng, palette.grain, 34 + variant * 3, 0.45, 1.25, size * 0.1);
+}
+
+function drawMeadowTexture(g, size, variant, rng) {
+  const palette = {
+    base: { r: 102, g: 142, b: 78 },
+    grassA: { r: 138, g: 176, b: 102 },
+    grassB: { r: 82, g: 120, b: 60 },
+    edgeDark: { r: 68, g: 102, b: 50 },
+    edgeLight: { r: 154, g: 190, b: 116 }
+  };
+
+  g.fillStyle = colorToStyle(palette.base, 1);
+  g.fillRect(0, 0, size, size);
+  drawEdgeContinuityBand(g, size, palette);
+  drawInteriorGrain(g, size, rng, palette.grassA, 30 + variant * 2, 0.7, 1.9, size * 0.1);
+  drawInteriorGrain(g, size, rng, palette.grassB, 24 + variant, 0.5, 1.5, size * 0.1);
+
+  g.strokeStyle = colorToStyle(palette.grassA, 0.3);
+  g.lineWidth = Math.max(0.8, size * 0.013);
+  for (let i = 0; i < 8; i += 1) {
+    const x = size * (0.1 + rng() * 0.8);
+    const y = size * (0.16 + rng() * 0.7);
+    g.beginPath();
+    g.moveTo(x, y);
+    g.lineTo(x + size * 0.02, y - size * (0.04 + rng() * 0.03));
+    g.stroke();
+  }
+}
+
+function drawCaveTexture(g, size, variant, rng) {
+  const palette = {
+    base: { r: 70, g: 68, b: 66 },
+    rockA: { r: 106, g: 102, b: 98 },
+    rockB: { r: 52, g: 50, b: 48 },
+    edgeDark: { r: 44, g: 42, b: 40 },
+    edgeLight: { r: 118, g: 112, b: 106 }
+  };
+
+  g.fillStyle = colorToStyle(palette.base, 1);
+  g.fillRect(0, 0, size, size);
+  drawEdgeContinuityBand(g, size, palette);
+  drawInteriorGrain(g, size, rng, palette.rockA, 24 + variant * 2, 1, 2.8, size * 0.1);
+  drawInteriorGrain(g, size, rng, palette.rockB, 30 + variant * 2, 0.7, 2.2, size * 0.1);
+
+  g.strokeStyle = colorToStyle(palette.rockA, 0.24);
+  g.lineWidth = Math.max(0.8, size * 0.014);
+  for (let i = 0; i < 4; i += 1) {
+    const y = size * (0.18 + i * 0.2);
+    g.beginPath();
+    g.moveTo(size * 0.08, y + (rng() - 0.5) * size * 0.04);
+    g.lineTo(size * 0.92, y + (rng() - 0.5) * size * 0.04);
+    g.stroke();
+  }
+}
+
+function drawDungeonTexture(g, size, variant, rng) {
+  const palette = {
+    base: { r: 64, g: 62, b: 68 },
+    stoneA: { r: 96, g: 94, b: 104 },
+    stoneB: { r: 44, g: 42, b: 50 },
+    mortar: { r: 28, g: 26, b: 32 },
+    edgeDark: { r: 36, g: 34, b: 40 },
+    edgeLight: { r: 110, g: 106, b: 116 }
+  };
+
+  g.fillStyle = colorToStyle(palette.base, 1);
+  g.fillRect(0, 0, size, size);
+  drawEdgeContinuityBand(g, size, palette);
+
+  const rowH = Math.max(4.8, size * 0.13);
+  const colW = Math.max(7.6, size * 0.18);
+  const inset = Math.max(3, size * 0.1);
+  let row = 0;
+  for (let y = inset; y < size - inset - rowH * 0.5; y += rowH) {
+    const offset = row % 2 === 0 ? 0 : colW * 0.5;
+    for (let x = inset - colW; x < size - inset + colW; x += colW) {
+      const cx = x + offset + colW * 0.5;
+      const cy = y + rowH * 0.5;
+      if (cx < inset || cx > size - inset) continue;
+
+      const w = colW * (0.8 + (rng() - 0.5) * 0.16);
+      const h = rowH * (0.72 + (rng() - 0.5) * 0.18);
+      const roll = rng();
+      g.fillStyle = roll > 0.5
+        ? colorToStyle(palette.stoneA, 0.88)
+        : colorToStyle(palette.stoneB, 0.86);
+      roundedRectPath(g, cx - w * 0.5, cy - h * 0.5, w, h, Math.max(1.1, Math.min(w, h) * 0.22));
+      g.fill();
+      g.strokeStyle = colorToStyle(palette.mortar, 0.46);
+      g.lineWidth = Math.max(0.5, size * 0.01);
+      g.stroke();
+    }
+    row += 1;
   }
 }
 
@@ -914,6 +1176,186 @@ function drawSnowTexture(g, size, variant, rng) {
   drawInteriorGrain(g, size, rng, palette.driftA, 28 + variant * 2, 0.6, 1.6, size * 0.1);
 }
 
+function drawIceTexture(g, size, variant, rng) {
+  const palette = {
+    base: { r: 198, g: 222, b: 238 },
+    crackA: { r: 140, g: 176, b: 204 },
+    crackB: { r: 118, g: 156, b: 186 },
+    edgeDark: { r: 128, g: 160, b: 186 },
+    edgeLight: { r: 224, g: 240, b: 250 }
+  };
+
+  g.fillStyle = colorToStyle(palette.base, 1);
+  g.fillRect(0, 0, size, size);
+  drawEdgeContinuityBand(g, size, palette);
+  g.lineWidth = Math.max(0.85, size * 0.013);
+  for (let i = 0; i < 6; i += 1) {
+    const x0 = size * (0.1 + rng() * 0.8);
+    const y0 = size * (0.1 + rng() * 0.8);
+    const x1 = x0 + size * (rng() - 0.5) * 0.42;
+    const y1 = y0 + size * (rng() - 0.5) * 0.42;
+    g.strokeStyle = i % 2 === 0 ? colorToStyle(palette.crackA, 0.34) : colorToStyle(palette.crackB, 0.3);
+    g.beginPath();
+    g.moveTo(x0, y0);
+    g.lineTo(x1, y1);
+    g.stroke();
+  }
+}
+
+function drawVillageTexture(g, size, variant, rng) {
+  const palette = {
+    base: { r: 150, g: 126, b: 94 },
+    roadA: { r: 122, g: 98, b: 70 },
+    roadB: { r: 176, g: 152, b: 118 },
+    edgeDark: { r: 106, g: 84, b: 60 },
+    edgeLight: { r: 190, g: 164, b: 128 }
+  };
+
+  g.fillStyle = colorToStyle(palette.base, 1);
+  g.fillRect(0, 0, size, size);
+  drawEdgeContinuityBand(g, size, palette);
+  g.strokeStyle = colorToStyle(palette.roadA, 0.4);
+  g.lineWidth = Math.max(1, size * 0.02);
+  for (let i = 0; i < 3; i += 1) {
+    const y = size * (0.22 + i * 0.26) + (variant - 2.5) * 0.16;
+    g.beginPath();
+    g.moveTo(size * 0.08, y);
+    g.bezierCurveTo(size * 0.28, y - size * 0.03, size * 0.72, y + size * 0.03, size * 0.92, y);
+    g.stroke();
+  }
+  drawInteriorGrain(g, size, rng, palette.roadB, 18 + variant * 2, 0.7, 1.8, size * 0.1);
+}
+
+function drawUnderwaterTexture(g, size, variant, rng) {
+  drawWaterTexture(g, size, variant, rng, false);
+  g.save();
+  g.fillStyle = "rgba(86, 146, 196, 0.22)";
+  g.fillRect(0, 0, size, size);
+  g.restore();
+}
+
+function drawUnderwaterCaveTexture(g, size, variant, rng) {
+  drawUnderwaterTexture(g, size, variant, rng);
+  g.save();
+  g.fillStyle = "rgba(46, 58, 74, 0.34)";
+  for (let i = 0; i < 9; i += 1) {
+    const x = size * (0.1 + rng() * 0.8);
+    const y = size * (0.1 + rng() * 0.8);
+    const r = size * (0.03 + rng() * 0.05);
+    g.beginPath();
+    g.arc(x, y, r, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.restore();
+}
+
+function drawUnderwaterCityTexture(g, size, variant, rng) {
+  drawUnderwaterTexture(g, size, variant, rng);
+  g.save();
+  g.strokeStyle = "rgba(160, 210, 226, 0.32)";
+  g.lineWidth = Math.max(0.75, size * 0.012);
+  for (let i = 0; i < 4; i += 1) {
+    const y = size * (0.18 + i * 0.2);
+    g.beginPath();
+    g.moveTo(size * 0.12, y);
+    g.lineTo(size * 0.88, y);
+    g.stroke();
+  }
+  for (let i = 0; i < 3; i += 1) {
+    const x = size * (0.2 + i * 0.24);
+    g.beginPath();
+    g.moveTo(x, size * 0.14);
+    g.lineTo(x, size * 0.86);
+    g.stroke();
+  }
+  g.restore();
+}
+
+function drawMesaTexture(g, size, variant, rng) {
+  const palette = {
+    base: { r: 146, g: 96, b: 60 },
+    ridgeA: { r: 184, g: 130, b: 86 },
+    ridgeB: { r: 108, g: 72, b: 44 },
+    edgeDark: { r: 92, g: 62, b: 38 },
+    edgeLight: { r: 194, g: 138, b: 92 }
+  };
+
+  g.fillStyle = colorToStyle(palette.base, 1);
+  g.fillRect(0, 0, size, size);
+  drawEdgeContinuityBand(g, size, palette);
+  g.lineWidth = Math.max(1.1, size * 0.019);
+  for (let i = 0; i < 5; i += 1) {
+    const y = size * (0.12 + i * 0.17) + (variant - 2.5) * 0.2;
+    g.strokeStyle = i % 2 === 0 ? colorToStyle(palette.ridgeA, 0.36) : colorToStyle(palette.ridgeB, 0.3);
+    g.beginPath();
+    g.moveTo(size * 0.08, y);
+    g.lineTo(size * 0.92, y + size * (rng() - 0.5) * 0.05);
+    g.stroke();
+  }
+}
+
+function drawSewerTexture(g, size, variant, rng) {
+  const palette = {
+    base: { r: 66, g: 84, b: 58 },
+    sludgeA: { r: 94, g: 120, b: 78 },
+    sludgeB: { r: 50, g: 66, b: 42 },
+    edgeDark: { r: 42, g: 54, b: 34 },
+    edgeLight: { r: 106, g: 128, b: 90 }
+  };
+
+  g.fillStyle = colorToStyle(palette.base, 1);
+  g.fillRect(0, 0, size, size);
+  drawEdgeContinuityBand(g, size, palette);
+  drawInteriorGrain(g, size, rng, palette.sludgeA, 28 + variant * 2, 1.1, 2.8, size * 0.1);
+  drawInteriorGrain(g, size, rng, palette.sludgeB, 22 + variant * 2, 0.8, 2.2, size * 0.1);
+}
+
+function drawCryptTexture(g, size, variant, rng) {
+  const palette = {
+    base: { r: 64, g: 56, b: 74 },
+    stoneA: { r: 94, g: 84, b: 108 },
+    stoneB: { r: 44, g: 40, b: 54 },
+    edgeDark: { r: 36, g: 32, b: 44 },
+    edgeLight: { r: 106, g: 96, b: 120 }
+  };
+
+  g.fillStyle = colorToStyle(palette.base, 1);
+  g.fillRect(0, 0, size, size);
+  drawEdgeContinuityBand(g, size, palette);
+  g.strokeStyle = colorToStyle(palette.stoneA, 0.34);
+  g.lineWidth = Math.max(0.9, size * 0.014);
+  g.beginPath();
+  g.moveTo(size * 0.2, size * 0.72);
+  g.lineTo(size * 0.8, size * 0.72);
+  g.moveTo(size * 0.5, size * 0.26);
+  g.lineTo(size * 0.5, size * 0.84);
+  g.stroke();
+  drawInteriorGrain(g, size, rng, palette.stoneB, 16 + variant, 0.6, 1.6, size * 0.12);
+}
+
+function drawPlanarTexture(g, size, variant, rng) {
+  const palette = {
+    base: { r: 88, g: 58, b: 128 },
+    riftA: { r: 168, g: 116, b: 220 },
+    riftB: { r: 98, g: 188, b: 212 },
+    edgeDark: { r: 58, g: 34, b: 94 },
+    edgeLight: { r: 184, g: 126, b: 230 }
+  };
+
+  g.fillStyle = colorToStyle(palette.base, 1);
+  g.fillRect(0, 0, size, size);
+  drawEdgeContinuityBand(g, size, palette);
+  g.lineWidth = Math.max(1, size * 0.018);
+  for (let i = 0; i < 5; i += 1) {
+    const y = size * (0.14 + i * 0.16) + (variant - 2.5) * 0.2;
+    g.strokeStyle = i % 2 === 0 ? colorToStyle(palette.riftA, 0.36) : colorToStyle(palette.riftB, 0.34);
+    g.beginPath();
+    g.moveTo(size * 0.08, y);
+    g.bezierCurveTo(size * 0.26, y - size * 0.06, size * 0.74, y + size * 0.06, size * 0.92, y);
+    g.stroke();
+  }
+}
+
 function roundedRectPath(g, x, y, w, h, r) {
   const rr = Math.min(r, w * 0.5, h * 0.5);
   g.beginPath();
@@ -934,17 +1376,32 @@ function renderProceduralSectorFallback(g, sector, variant, size) {
   const rng = mulberry32(seed);
 
   if (sector === "field") return drawFieldTexture(g, size, variant, rng);
+  if (sector === "village") return drawVillageTexture(g, size, variant, rng);
+  if (sector === "meadow") return drawMeadowTexture(g, size, variant, rng);
   if (sector === "forest") return drawForestTexture(g, size, variant, rng);
+  if (sector === "deep_forest") return drawForestTexture(g, size, variant + 2, rng);
   if (sector === "hills") return drawHillsTexture(g, size, variant, rng);
+  if (sector === "mesa") return drawMesaTexture(g, size, variant, rng);
   if (sector === "mountain") return drawMountainTexture(g, size, variant, rng);
+  if (sector === "cave") return drawCaveTexture(g, size, variant, rng);
+  if (sector === "dungeon") return drawDungeonTexture(g, size, variant, rng);
+  if (sector === "crypt") return drawCryptTexture(g, size, variant, rng);
+  if (sector === "sewer") return drawSewerTexture(g, size, variant, rng);
   if (sector === "city") return drawCityTexture(g, size, variant, rng);
   if (sector === "swamp") return drawSwampTexture(g, size, variant, rng);
   if (sector === "water_swim") return drawWaterTexture(g, size, variant, rng, true);
   if (sector === "water_noswim") return drawWaterTexture(g, size, variant, rng, false);
+  if (sector === "underwater") return drawUnderwaterTexture(g, size, variant, rng);
+  if (sector === "underwater_cave") return drawUnderwaterCaveTexture(g, size, variant, rng);
+  if (sector === "underwater_city") return drawUnderwaterCityTexture(g, size, variant, rng);
   if (sector === "air") return drawAirTexture(g, size, variant, rng);
+  if (sector === "ice") return drawIceTexture(g, size, variant, rng);
   if (sector === "desert") return drawDesertTexture(g, size, variant, rng);
   if (sector === "lava") return drawLavaTexture(g, size, variant, rng);
+  if (sector === "volcanic") return drawLavaTexture(g, size, variant + 1, rng);
   if (sector === "snow") return drawSnowTexture(g, size, variant, rng);
+  if (sector === "ruins") return drawCityTexture(g, size, variant + 2, rng);
+  if (sector === "planar") return drawPlanarTexture(g, size, variant, rng);
 
   g.fillStyle = "#1f2f3f";
   g.fillRect(0, 0, size, size);
@@ -1022,13 +1479,20 @@ function applySectorVariantTone(g, size, sector, variant, rng) {
 }
 
 function renderSectorVariantTile(g, baseIcon, sector, variant, size) {
-  const seed = hashStringFNV1a(`${sector}:${variant}:tile`);
-  const rng = mulberry32(seed);
-
-  // Keep original mapper visual identity by drawing the original sector art unchanged.
-  g.drawImage(baseIcon, 0, 0, size, size);
-  // Variants are non-destructive tone shifts only, preserving glyph shapes and edges.
-  applySectorVariantTone(g, size, sector, variant, rng);
+  // When an SVG tile exists, treat it as authoritative art.
+  // Layering the procedural fallback on top causes doubled symbols and ghost imagery.
+  if (baseIcon) {
+    g.drawImage(baseIcon, 0, 0, size, size);
+  } else if (TEXTURED_SECTORS.has(sector)) {
+    const textureCanvas = document.createElement("canvas");
+    textureCanvas.width = size;
+    textureCanvas.height = size;
+    const tg = textureCanvas.getContext("2d");
+    if (tg) {
+      renderProceduralSectorFallback(tg, sector, variant, size);
+      g.drawImage(textureCanvas, 0, 0, size, size);
+    }
+  }
 }
 
 function connectSessionSocket() {
@@ -1107,6 +1571,9 @@ function scheduleSessionReconnect() {
 
 function handleSessionMessage(msg) {
   if (!msg || typeof msg !== "object") return;
+  if (msg.type === "frmapper.theme" && msg.payload && typeof msg.payload === "object") {
+    applyFrmapperTheme(msg.payload.themeId || FRMAPPER_THEME_DEFAULT);
+  }
   if (msg.type === "frmapper.identity" && msg.payload && typeof msg.payload === "object") {
     updateStorageIdentity(msg.payload);
   }
@@ -1222,11 +1689,11 @@ function buildStorageNamespace(opts) {
 
   if (characterName) return `${realm}:char:${characterName}`;
   if (mode === "ws" && token) return `${realm}:session:${token}`;
-  return "";
+  if (mode === "embed") return `${realm}:embed`;
+  return `${realm}:anon`;
 }
 
 function storageKeyForNamespace(namespace) {
-  if (!namespace) return LEGACY_STORAGE_KEY;
   return `${STORAGE_KEY_PREFIX}:${namespace}`;
 }
 
@@ -1243,6 +1710,7 @@ function loadPersistedMapFromKey(key) {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.rooms)) return false;
     applyMapObject(parsed);
+    state.storageLoadedKey = key;
     return true;
   } catch (_error) {
     return false;
@@ -1259,19 +1727,6 @@ function storageLoadCandidates() {
   };
 
   push(storageKeyForNamespace(buildStorageNamespace()));
-  push(storageKeyForNamespace(buildStorageNamespace({
-    realm: resolveStorageRealm(),
-    characterName: state.storageCharacterName,
-    sessionToken: "",
-    mode: state.sessionMode
-  })));
-  push(storageKeyForNamespace(buildStorageNamespace({
-    realm: resolveStorageRealm(),
-    characterName: "",
-    sessionToken: state.sessionToken,
-    mode: "ws"
-  })));
-  push(LEGACY_STORAGE_KEY);
 
   return out;
 }
@@ -1301,12 +1756,21 @@ function updateStorageIdentity(identity) {
     return;
   }
 
+  resetToEmptyMap();
   state.storageLoadedKey = nextKey;
-  persistMap();
 }
 
 const el = {
   embedToggle: document.getElementById("embed-toggle"),
+  embedQuickControls: document.getElementById("embed-quick-controls"),
+  embedZDown: document.getElementById("embed-z-down"),
+  embedZUp: document.getElementById("embed-z-up"),
+  embedZLabel: document.getElementById("embed-z-label"),
+  embedRoomMeta: document.getElementById("embed-room-meta"),
+  embedRoomNsid: document.getElementById("embed-room-nsid"),
+  embedRoomEph: document.getElementById("embed-room-eph"),
+  embedFollow: document.getElementById("embed-follow"),
+  embedQuickTooltip: document.getElementById("embed-quick-tooltip"),
   canvas: document.getElementById("map-canvas"),
   zoomRange: document.getElementById("zoom-range"),
   zoomValue: document.getElementById("zoom-value"),
@@ -1316,6 +1780,8 @@ const el = {
   toggleMobs: document.getElementById("toggle-mobs"),
   toggleTraveledPath: document.getElementById("toggle-traveled-path"),
   toggleFog: document.getElementById("toggle-fog"),
+  togglePerfStats: document.getElementById("toggle-perf-stats"),
+  perfStats: document.getElementById("perf-stats"),
   roomInspector: document.getElementById("room-inspector"),
   fileInput: document.getElementById("file-input"),
   btnClearMap: document.getElementById("btn-clear-map"),
@@ -1331,7 +1797,7 @@ const el = {
 const ctx = el.canvas.getContext("2d");
 
 async function init() {
-  state.isSafari = detectSafari();
+  syncFrmapperThemeFromSitePreference();
   setupEmbedMode();
   await loadSectorIcons();
   buildLegend();
@@ -1358,7 +1824,9 @@ function setupEmbedMode() {
   document.body.classList.remove("controls-expanded");
 
   el.embedToggle.hidden = false;
+  if (el.embedQuickControls) el.embedQuickControls.hidden = false;
   applyEmbedToggleState(false);
+  updateEmbedQuickControls();
   el.embedToggle.addEventListener("click", () => {
     setEmbedControlsExpanded(undefined);
   });
@@ -1379,6 +1847,84 @@ function applyEmbedToggleState(expanded) {
   el.embedToggle.setAttribute("aria-expanded", expanded ? "true" : "false");
   el.embedToggle.setAttribute("title", expanded ? "Hide mapper controls" : "Show mapper controls");
   el.embedToggle.setAttribute("aria-label", expanded ? "Hide mapper controls" : "Show mapper controls");
+}
+
+function updateEmbedQuickControls() {
+  if (!state.isEmbedMode) return;
+  const quickFade = Math.max(0.24, Math.min(1, wallOpacityForZoomValue(state.zoom || 1)));
+  document.body.style.setProperty("--fm-embed-z-fade", String(quickFade.toFixed(3)));
+
+  if (el.embedZLabel) {
+    el.embedZLabel.textContent = `z=${state.activeZ}`;
+  }
+  if (el.embedRoomMeta && el.embedRoomNsid && el.embedRoomEph) {
+    let room = null;
+    if (state.playerRoomId) {
+      room = state.roomsById.get(String(state.playerRoomId)) || null;
+    }
+    if (!room && state.playerLocation) {
+      const id = state.roomByCoord.get(coordKey(
+        state.playerLocation.x,
+        state.playerLocation.y,
+        state.playerLocation.z,
+        state.playerLocation.gridId
+      ));
+      room = id ? state.roomsById.get(id) || null : null;
+    }
+
+    if (!room) {
+      el.embedRoomMeta.hidden = true;
+      el.embedRoomNsid.textContent = "NSID: --";
+      el.embedRoomEph.textContent = "ephNum: --";
+    } else {
+      const hasArea = Number.isFinite(Number(room.areaID));
+      const hasLocal = Number.isFinite(Number(room.localID));
+      const nsid = hasArea && hasLocal ? `${room.areaID}:${room.localID}` : "--";
+      const eph = room.ephNum != null && String(room.ephNum).trim() ? String(room.ephNum) : "--";
+      el.embedRoomNsid.textContent = `NSID: ${nsid}`;
+      el.embedRoomEph.textContent = `ephNum: ${eph}`;
+      el.embedRoomMeta.hidden = false;
+    }
+  }
+  if (el.embedFollow) {
+    el.embedFollow.classList.toggle("active", !!state.followPlayer);
+    el.embedFollow.setAttribute("aria-pressed", state.followPlayer ? "true" : "false");
+    el.embedFollow.setAttribute(
+      "aria-label",
+      state.followPlayer ? "Follow player enabled" : "Follow player disabled"
+    );
+  }
+}
+
+function showEmbedQuickTooltip(sourceEl, message) {
+  if (!el.embedQuickTooltip || !sourceEl || !message) return;
+  const hostRect = el.canvas.getBoundingClientRect();
+  const sourceRect = sourceEl.getBoundingClientRect();
+  const left = sourceRect.left - hostRect.left + (sourceRect.width / 2);
+  const top = sourceRect.bottom - hostRect.top + 6;
+  el.embedQuickTooltip.textContent = message;
+  el.embedQuickTooltip.style.left = `${Math.round(left)}px`;
+  el.embedQuickTooltip.style.top = `${Math.round(top)}px`;
+  el.embedQuickTooltip.style.transform = "translateX(-50%)";
+  el.embedQuickTooltip.hidden = false;
+}
+
+function hideEmbedQuickTooltip() {
+  if (!el.embedQuickTooltip) return;
+  el.embedQuickTooltip.hidden = true;
+}
+
+function stepActiveZ(delta) {
+  if (!Array.isArray(state.zLevels) || state.zLevels.length === 0) return;
+  const currentIndex = state.zLevels.indexOf(state.activeZ);
+  const baseIndex = currentIndex >= 0 ? currentIndex : 0;
+  const nextIndex = Math.max(0, Math.min(state.zLevels.length - 1, baseIndex + delta));
+  if (nextIndex === baseIndex) return;
+  state.activeZ = state.zLevels[nextIndex];
+  state.selectedRoomId = null;
+  updateInspector();
+  syncZLevels();
+  scheduleRender();
 }
 
 function wireEvents() {
@@ -1414,6 +1960,7 @@ function wireEvents() {
     const minZoom = getMinZoomForActiveGrid();
     state.zoom = clampZoom(Number.parseFloat(el.zoomRange.value) || 1, minZoom);
     el.zoomValue.textContent = `${Math.round(state.zoom * 100)}%`;
+    updateEmbedQuickControls();
     scheduleRender();
   });
 
@@ -1430,8 +1977,55 @@ function wireEvents() {
     state.activeZ = Number.parseInt(el.zLevel.value, 10);
     state.selectedRoomId = null;
     updateInspector();
+    updateEmbedQuickControls();
     scheduleRender();
   });
+
+  if (state.isEmbedMode && el.embedZDown) {
+    el.embedZDown.addEventListener("click", () => {
+      stepActiveZ(-1);
+    });
+    el.embedZDown.addEventListener("mouseenter", () => showEmbedQuickTooltip(el.embedZDown, "Lower z-layer"));
+    el.embedZDown.addEventListener("mouseleave", hideEmbedQuickTooltip);
+  }
+
+  if (state.isEmbedMode && el.embedZUp) {
+    el.embedZUp.addEventListener("click", () => {
+      stepActiveZ(1);
+    });
+    el.embedZUp.addEventListener("mouseenter", () => showEmbedQuickTooltip(el.embedZUp, "Higher z-layer"));
+    el.embedZUp.addEventListener("mouseleave", hideEmbedQuickTooltip);
+  }
+
+  if (state.isEmbedMode && el.embedFollow) {
+    el.embedFollow.addEventListener("click", () => {
+      state.followPlayer = !state.followPlayer;
+      updateEmbedQuickControls();
+      if (state.followPlayer && state.playerRoomId) {
+        const room = state.roomsById.get(state.playerRoomId);
+        if (room) {
+          setActiveLayerFromRoom(room);
+          const targetPan = panForRoom(room);
+          startPanAnimation(targetPan.x, targetPan.y, 180, null, null);
+        }
+      }
+    });
+    el.embedFollow.addEventListener("mouseenter", () => {
+      const msg = state.followPlayer
+        ? "Follow Player enabled: auto-center on player movement"
+        : "Follow Player disabled: keep map position while player moves";
+      showEmbedQuickTooltip(el.embedFollow, msg);
+    });
+    el.embedFollow.addEventListener("mouseleave", hideEmbedQuickTooltip);
+  }
+
+  if (state.isEmbedMode && el.embedQuickControls) {
+    el.embedQuickControls.addEventListener("focusout", (event) => {
+      if (!el.embedQuickControls.contains(event.relatedTarget)) {
+        hideEmbedQuickTooltip();
+      }
+    });
+  }
 
   if (el.toggleParty) {
     el.toggleParty.addEventListener("change", () => {
@@ -1460,6 +2054,15 @@ function wireEvents() {
       scheduleRender();
     });
   }
+
+  if (el.togglePerfStats) {
+    el.togglePerfStats.addEventListener("change", () => {
+      state.showPerfStats = !!el.togglePerfStats.checked;
+      updatePerfStatsPanel(true);
+      scheduleRender();
+    });
+  }
+  updatePerfStatsPanel(true);
 
   el.fileInput.addEventListener("change", async (event) => {
     const input = event.target;
@@ -1539,6 +2142,7 @@ function wireEvents() {
 
     el.zoomRange.value = String(newZoom);
     el.zoomValue.textContent = `${Math.round(newZoom * 100)}%`;
+    updateEmbedQuickControls();
     scheduleRender();
   }, { passive: false });
 
@@ -1599,6 +2203,11 @@ function wireEvents() {
   window.addEventListener("message", (event) => {
     handleSessionMessage(event.data);
   });
+
+  window.addEventListener("storage", (event) => {
+    if (!event || event.key !== SITE_THEME_KEY) return;
+    syncFrmapperThemeFromSitePreference();
+  });
 }
 
 function requestCanvasResizePass() {
@@ -1647,7 +2256,10 @@ function resetToEmptyMap() {
   state.mapData = { version: "frmapper.v1", meta: {}, rooms: [] };
   state.playerLocation = null;
   state.movementTrail = [];
+  state.partyMemberLastPos = new Map();
+  state.partyJellyTrail = [];
   state.selectedRoomId = null;
+  markStaticLayerDirty();
   rebuildIndexes();
   syncZLevels();
   fitToView();
@@ -1682,6 +2294,7 @@ function removeRoomById(roomId) {
   }
 
   state.mapData.rooms = nextRooms;
+  markStaticLayerDirty();
   if (state.selectedRoomId === id) state.selectedRoomId = null;
   if (state.playerLocation) {
     const playerKey = coordKey(
@@ -1765,13 +2378,20 @@ function applyMapObject(data) {
     return;
   }
 
+  const rooms = data.rooms
+    .map(normalizeRoom)
+    .filter((room) => !!room);
+
   state.mapData = {
     version: data.version || "frmapper.v1",
     meta: data.meta || {},
-    rooms: data.rooms.map(normalizeRoom)
+    rooms
   };
+  markStaticLayerDirty();
   state.playerLocation = null;
   state.movementTrail = [];
+  state.partyMemberLastPos = new Map();
+  state.partyJellyTrail = [];
   state.selectedRoomId = null;
   rebuildIndexes();
   syncZLevels();
@@ -1782,19 +2402,27 @@ function applyMapObject(data) {
 }
 
 function normalizeRoom(room) {
+  if (!room || typeof room !== "object") return null;
   const parsedScanRange = Number.parseInt(room.scanRange, 10);
   const parsedLastSeenAt = Number.parseInt(room.lastSeenAt, 10);
   const hasName = !!(room.name && String(room.name).trim());
   const parsedEphNum = Number.parseInt(room.ephNum, 10);
   const parsedAreaID = Number.parseInt(room.areaID ?? room.areaId, 10);
   const parsedLocalID = Number.parseInt(room.localID ?? room.localId, 10);
+  const parsedX = Number.parseInt(room.x, 10);
+  const parsedY = Number.parseInt(room.y, 10);
+  const parsedZ = Number.parseInt(room.z, 10);
+  const normalizedGridId = normalizeGridId(room.gridId);
+  if (!Number.isFinite(parsedX) || !Number.isFinite(parsedY) || !Number.isFinite(parsedZ) || !normalizedGridId) {
+    return null;
+  }
   const normalized = {
     id: String(room.id),
     name: room.name ? String(room.name) : "",
-    x: Number.parseInt(room.x, 10) || 0,
-    y: Number.parseInt(room.y, 10) || 0,
-    z: Number.parseInt(room.z, 10) || 0,
-    gridId: normalizeGridId(room.gridId),
+    x: parsedX,
+    y: parsedY,
+    z: parsedZ,
+    gridId: normalizedGridId,
     sector: normalizeSector(room.sector),
     area: room.area ? String(room.area) : "",
     exits: normalizeExits(room.exits || {}),
@@ -1864,8 +2492,7 @@ function buildRoomStaticSignature(room) {
     markers.shop ? "1" : "0",
     markers.bank ? "1" : "0",
     markers.runegate ? "1" : "0",
-    markers.waterSource ? "1" : "0",
-    JSON.stringify(room && room.exits ? room.exits : {})
+    markers.waterSource ? "1" : "0"
   ].join("|");
 }
 
@@ -2018,15 +2645,13 @@ function roomFromRoomInfo(info, existingRoom) {
   const rawX = coordInfo ? Number.parseInt(coordInfo.x, 10) : Number.NaN;
   const rawY = coordInfo ? -Number.parseInt(coordInfo.y, 10) : Number.NaN;
   const rawZ = coordInfo ? Number.parseInt(coordInfo.z, 10) : Number.NaN;
-  const hasCoord = Number.isFinite(rawX) && Number.isFinite(rawY) && Number.isFinite(rawZ);
+  const gridId = normalizeGridId(coordInfo && coordInfo.gridId);
+  const hasCoord = Number.isFinite(rawX) && Number.isFinite(rawY) && Number.isFinite(rawZ) && !!gridId;
+  if (!hasCoord) return null;
 
-  const fallback = hasCoord ? null : deriveFallbackCoord(info, roomId, existingRoom || null);
-  const x = hasCoord ? rawX : fallback.x;
-  const y = hasCoord ? rawY : fallback.y;
-  const z = hasCoord ? rawZ : fallback.z;
-  const gridId = hasCoord
-    ? normalizeGridId(coordInfo && coordInfo.gridId)
-    : fallback.gridId;
+  const x = rawX;
+  const y = rawY;
+  const z = rawZ;
 
   if (!roomId) roomId = coordKey(x, y, z, gridId);
   const canSeeRoom = info.name !== null && info.name !== undefined;
@@ -2182,7 +2807,7 @@ function ingestRoomScannedMobs(payload) {
 
 function updatePartyFromGroupInfo(payload) {
   const members = Array.isArray(payload && payload.members) ? payload.members : [];
-  state.partyMembers = members.map((m) => {
+  const nextMembers = members.map((m) => {
     const roomId = String(m && m.room_id ? m.room_id : "");
     const coord = m && m.room_coord && typeof m.room_coord === "object" ? m.room_coord : null;
     return {
@@ -2192,7 +2817,63 @@ function updatePartyFromGroupInfo(payload) {
       isLeader: !!(m && m.is_leader)
     };
   });
+
+  const nextLastPos = new Map();
+  for (let i = 0; i < nextMembers.length; i++) {
+    const member = nextMembers[i];
+    const memberKey = partyMemberKey(member, i);
+    const nextPos = resolvePartyMemberPosition(member);
+    if (!nextPos) continue;
+
+    const priorPos = state.partyMemberLastPos.get(memberKey);
+    if (didPartyMemberMove(priorPos, nextPos)) {
+      addPartyJellyTrail(priorPos, nextPos);
+    }
+    nextLastPos.set(memberKey, nextPos);
+  }
+
+  state.partyMemberLastPos = nextLastPos;
+  state.partyMembers = nextMembers;
   scheduleRender();
+}
+
+function partyMemberKey(member, index) {
+  const base = String(member && member.name ? member.name : "").trim().toLowerCase();
+  if (base) return base;
+  return `member-${index}`;
+}
+
+function resolvePartyMemberPosition(member) {
+  if (!member || typeof member !== "object") return null;
+  const roomId = String(member.roomId || "").trim();
+  if (roomId) {
+    const room = state.roomsById.get(roomId);
+    if (room) {
+      return {
+        x: room.x,
+        y: room.y,
+        z: room.z,
+        gridId: normalizeGridId(room.gridId)
+      };
+    }
+  }
+  if (!member.coord) return null;
+  return {
+    x: member.coord.x,
+    y: member.coord.y,
+    z: member.coord.z,
+    gridId: normalizeGridId(member.coord.gridId)
+  };
+}
+
+function didPartyMemberMove(from, to) {
+  if (!from || !to) return false;
+  return (
+    from.x !== to.x ||
+    from.y !== to.y ||
+    from.z !== to.z ||
+    normalizeGridId(from.gridId) !== normalizeGridId(to.gridId)
+  );
 }
 
 function updateRoomMobs(payload) {
@@ -2202,6 +2883,7 @@ function updateRoomMobs(payload) {
 
 function upsertRoom(rawRoom) {
   const room = normalizeRoom(rawRoom);
+  if (!room) return;
   const index = state.roomIndexById.get(room.id);
 
   if (index !== undefined) {
@@ -2226,6 +2908,7 @@ function upsertRoom(rawRoom) {
   state.roomsById.set(room.id, room);
   state.roomByCoord.set(coordKey(room.x, room.y, room.z, room.gridId), room.id);
   state.roomLayerIndexDirty = true;
+  markStaticLayerDirty();
 }
 
 function areRoomsEquivalent(a, b) {
@@ -2350,6 +3033,7 @@ function rebuildIndexes() {
   }
 
   state.roomLayerIndexDirty = false;
+  markRoomEdgeVariantsDirty();
 }
 
 function updateRoomBounds(boundsMap, key, room) {
@@ -2444,6 +3128,7 @@ function syncZLevels() {
   if (el.zLevel.value !== String(state.activeZ)) {
     el.zLevel.value = String(state.activeZ);
   }
+  updateEmbedQuickControls();
 
   const minZoom = getMinZoomForActiveGrid();
   if (el.zoomRange) {
@@ -2528,8 +3213,129 @@ function clampZoom(value, minZoom) {
   return Math.min(3, Math.max(min, value));
 }
 
+function markStaticLayerDirty() {
+  state.staticLayer.version += 1;
+  state.staticLayer.key = "";
+  markRoomEdgeVariantsDirty();
+}
+
+function markRoomEdgeVariantsDirty() {
+  state.roomEdgeVariantsDirty = true;
+}
+
+function qualityTierName(visibleRoomCount) {
+  if (visibleRoomCount > QUALITY_ULTRA_ROOM_COUNT) return "ultra";
+  if (visibleRoomCount > QUALITY_LOW_ROOM_COUNT) return "low";
+  if (visibleRoomCount > QUALITY_MEDIUM_ROOM_COUNT) return "medium";
+  return "full";
+}
+
+function updatePerfStatsPanel(force) {
+  if (!el.perfStats) return;
+
+  const enabled = !!state.showPerfStats;
+  el.perfStats.hidden = !enabled;
+  if (el.togglePerfStats && el.togglePerfStats.checked !== enabled) {
+    el.togglePerfStats.checked = enabled;
+  }
+  if (!enabled) return;
+
+  const now = performance.now();
+  if (!force && (now - state.perf.panelTs) < 220) return;
+  state.perf.panelTs = now;
+
+  const p = state.perf;
+  el.perfStats.textContent = [
+    `fps ~ ${p.fpsEstimate.toFixed(1)}  frame ${p.frameMs.toFixed(2)} ms  render ${p.renderMs.toFixed(2)} ms`,
+    `visible rooms ${p.visibleRooms}  quality ${p.qualityTier}`,
+    `static rebuilt ${p.staticRebuilt ? "yes" : "no"}  static version ${p.staticVersion}`,
+    `edge cache rooms ${state.roomEdgeVariants.size}`
+  ].join("\n");
+}
+
+function getRenderQualityProfile(visibleRoomCount) {
+  const quality = {
+    tier: qualityTierName(visibleRoomCount),
+    drawFog: state.showFogOfWar,
+    drawTrailOverlay: state.showTraveledPath,
+    drawTrailPath: state.showTraveledPath,
+    drawParty: state.showParty,
+    drawMobHints: state.showMobHints,
+    drawGridOutline: true,
+    drawExtraExitMarkers: true,
+    drawOneWayOverlays: true
+  };
+
+  if (visibleRoomCount > QUALITY_MEDIUM_ROOM_COUNT) {
+    quality.drawFog = false;
+  }
+  if (visibleRoomCount > QUALITY_LOW_ROOM_COUNT) {
+    quality.drawExtraExitMarkers = false;
+    quality.drawOneWayOverlays = false;
+    quality.drawTrailOverlay = false;
+  }
+  if (visibleRoomCount > QUALITY_ULTRA_ROOM_COUNT) {
+    quality.drawTrailPath = false;
+    quality.drawParty = false;
+    quality.drawMobHints = false;
+    quality.drawGridOutline = false;
+  }
+
+  return quality;
+}
+
+function ensureRoomEdgeVariants() {
+  if (!state.roomEdgeVariantsDirty) return;
+  const next = new Map();
+  for (const room of state.mapData.rooms) {
+    const variants = Object.create(null);
+    for (const dir of ["n", "e", "s", "w"]) {
+      variants[dir] = computeEdgeVariantRaw(room, dir);
+    }
+    next.set(room.id, variants);
+  }
+  state.roomEdgeVariants = next;
+  state.roomEdgeVariantsDirty = false;
+}
+
+function ensureStaticLayerCanvas() {
+  const layer = state.staticLayer;
+  if (!layer.canvas) {
+    layer.canvas = document.createElement("canvas");
+    layer.ctx = layer.canvas.getContext("2d");
+    layer.key = "";
+  }
+
+  const width = Math.max(1, Math.round(el.canvas.clientWidth || 1));
+  const height = Math.max(1, Math.round(el.canvas.clientHeight || 1));
+  if (layer.canvas.width !== width || layer.canvas.height !== height) {
+    layer.canvas.width = width;
+    layer.canvas.height = height;
+    layer.key = "";
+  }
+  return layer;
+}
+
+function drawStaticLayer(layerCtx, visibleFadedRooms, visibleRooms) {
+  layerCtx.setTransform(1, 0, 0, 1, 0, 0);
+  layerCtx.clearRect(0, 0, state.staticLayer.canvas.width, state.staticLayer.canvas.height);
+
+  for (const room of visibleFadedRooms) {
+    drawRoomStaticSprite(room, { ghost: true }, layerCtx);
+    drawRoomWallBase(room, layerCtx, { offLayer: true });
+  }
+  for (const room of visibleRooms) {
+    drawRoomStaticSprite(room, undefined, layerCtx);
+  }
+  for (const room of visibleRooms) {
+    drawRoomWallBase(room, layerCtx);
+  }
+}
+
 function render() {
   if (!ctx) return;
+  ensureRoomEdgeVariants();
+  const frameStart = performance.now();
 
   const ratio = window.devicePixelRatio || 1;
   ctx.save();
@@ -2541,7 +3347,7 @@ function render() {
   const activeGrid = normalizeGridId(state.activeGridId);
   const gridRooms = getRoomsForGrid(activeGrid);
   const rooms = getRoomsForLayer(activeGrid, state.activeZ);
-  const lightMode = state.isSafari && (state.dragging || state.animation.active);
+  const lightMode = false;
   const tilePx = TILE_SIZE * state.zoom;
   const viewW = el.canvas.clientWidth;
   const viewH = el.canvas.clientHeight;
@@ -2559,6 +3365,9 @@ function render() {
   if (!lightMode) {
     for (const room of gridRooms) {
       if (room.z === state.activeZ) continue;
+      if (Math.abs(room.z - state.activeZ) !== 1) continue;
+      const activeId = state.roomByCoord.get(coordKey(room.x, room.y, state.activeZ, activeGrid));
+      if (activeId) continue;
       if (occupiedActive.has(`${room.x}:${room.y}`)) continue;
       const sx = state.panX + room.x * tilePx;
       const sy = state.panY + room.y * tilePx;
@@ -2567,15 +3376,38 @@ function render() {
     }
   }
 
-  for (const room of visibleFadedRooms) {
-    drawRoomStaticSprite(room, { ghost: true });
+  const quality = getRenderQualityProfile(visibleRooms.length);
+  const staticLayer = ensureStaticLayerCanvas();
+  const staticKey = [
+    staticLayer.canvas.width,
+    staticLayer.canvas.height,
+    normalizeGridId(state.activeGridId),
+    state.activeZ,
+    Number(state.zoom).toFixed(3),
+    Number(state.panX).toFixed(2),
+    Number(state.panY).toFixed(2),
+    lightMode ? 1 : 0,
+    state.staticLayer.version
+  ].join("|");
+
+  let staticRebuilt = false;
+  if (state.staticLayer.key !== staticKey) {
+    drawStaticLayer(staticLayer.ctx, visibleFadedRooms, visibleRooms);
+    state.staticLayer.key = staticKey;
+    staticRebuilt = true;
   }
 
-  for (const room of visibleRooms) {
-    drawRoomStaticSprite(room);
+  ctx.drawImage(staticLayer.canvas, 0, 0);
+
+  drawNonActiveRoomDimming(visibleRooms);
+
+  const activeRoom = state.playerRoomId ? state.roomsById.get(String(state.playerRoomId)) : null;
+  if (activeRoom && activeRoom.z === state.activeZ
+      && normalizeGridId(activeRoom.gridId) === normalizeGridId(state.activeGridId)) {
+    drawActiveRoomPulse(activeRoom);
   }
 
-  if (state.showFogOfWar) {
+  if (quality.drawFog) {
     const now = Date.now();
     for (const room of visibleRooms) {
       drawFogOfWarHaze(room, now);
@@ -2583,41 +3415,104 @@ function render() {
   }
 
   for (const room of visibleRooms) {
-    drawRoomWallsAndDoors(room);
+    drawRoomDoorOverlays(room);
   }
 
-  for (const room of visibleRooms) {
-    drawExtraExitMarkers(room);
+  if (quality.drawExtraExitMarkers) {
+    for (const room of visibleRooms) {
+      drawExtraExitMarkers(room);
+    }
   }
 
   if (!lightMode) {
-    for (const room of visibleRooms) {
-      drawTrailOverlay(room);
+    if (quality.drawTrailOverlay) {
+      for (const room of visibleRooms) {
+        drawTrailOverlay(room);
+      }
     }
 
-    drawPartyOverlays(visibleRooms);
-    drawMobHints(visibleRooms);
-    drawGridOutline(rooms);
+    if (quality.drawParty) {
+      drawPartyOverlays(visibleRooms);
+    }
+    if (quality.drawMobHints) {
+      drawMobHints(visibleRooms);
+    }
+    if (quality.drawGridOutline) {
+      drawGridOutline(rooms);
+    }
   }
 
-  for (const room of visibleRooms) {
-    drawOneWayExitOverlays(room);
+  if (quality.drawOneWayOverlays) {
+    for (const room of visibleRooms) {
+      drawOneWayExitOverlays(room);
+    }
   }
 
-  drawActiveMoveLine();
+  drawActiveMoveLine({ drawTrailPath: quality.drawTrailPath });
 
   for (const room of visibleRooms) {
     if (room.id === state.selectedRoomId) {
       drawSelectedRoomOutline(room);
     }
   }
+
+  const frameEnd = performance.now();
+  const elapsed = frameEnd - frameStart;
+  const sinceLast = state.perf.lastDrawTs > 0 ? (frameEnd - state.perf.lastDrawTs) : 0;
+  if (sinceLast > 0.5) {
+    const instFps = 1000 / sinceLast;
+    state.perf.fpsEstimate = state.perf.fpsEstimate > 0
+      ? (state.perf.fpsEstimate * 0.82 + instFps * 0.18)
+      : instFps;
+  }
+  state.perf.lastDrawTs = frameEnd;
+  state.perf.frameMs = elapsed;
+  state.perf.renderMs = elapsed;
+  state.perf.visibleRooms = visibleRooms.length;
+  state.perf.qualityTier = quality.tier;
+  state.perf.staticRebuilt = staticRebuilt;
+  state.perf.staticVersion = state.staticLayer.version;
+  if (state.showPerfStats) {
+    updatePerfStatsPanel(false);
+  }
 }
 
-function detectSafari() {
-  const ua = String((navigator && navigator.userAgent) || "").toLowerCase();
-  if (!ua.includes("safari")) return false;
-  if (ua.includes("chrome") || ua.includes("crios") || ua.includes("fxios") || ua.includes("edg")) return false;
-  return true;
+function drawNonActiveRoomDimming(visibleRooms) {
+  if (!Array.isArray(visibleRooms) || visibleRooms.length === 0) return;
+  const tilePx = TILE_SIZE * state.zoom;
+  const activeId = state.playerRoomId ? String(state.playerRoomId) : "";
+  const baseAlpha = activeId ? 0.12 : 0.08;
+
+  ctx.save();
+  ctx.fillStyle = `rgba(6, 8, 12, ${baseAlpha})`;
+  for (const room of visibleRooms) {
+    if (!room || String(room.id || "") === activeId) continue;
+    const x = state.panX + room.x * tilePx;
+    const y = state.panY + room.y * tilePx;
+    ctx.fillRect(x, y, tilePx, tilePx);
+  }
+  ctx.restore();
+}
+
+function drawActiveRoomPulse(room) {
+  if (!room) return;
+  const tilePx = TILE_SIZE * state.zoom;
+  const x = state.panX + room.x * tilePx;
+  const y = state.panY + room.y * tilePx;
+  const pulse = (Math.sin(performance.now() / 680) + 1) * 0.5;
+  const glowAlpha = 0.06 + pulse * 0.06;
+  const strokeAlpha = 0.12 + pulse * 0.08;
+
+  ctx.save();
+  ctx.shadowColor = `rgba(217, 176, 95, ${Math.min(0.2, glowAlpha + 0.06)})`;
+  ctx.shadowBlur = Math.max(6, tilePx * 0.22);
+  ctx.fillStyle = `rgba(217, 176, 95, ${glowAlpha})`;
+  ctx.fillRect(x + 1, y + 1, tilePx - 2, tilePx - 2);
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = `rgba(237, 205, 138, ${strokeAlpha})`;
+  ctx.lineWidth = Math.max(1, state.zoom * 1.1);
+  ctx.strokeRect(x + 0.5, y + 0.5, tilePx - 1, tilePx - 1);
+  ctx.restore();
 }
 
 function drawTrailOverlay(room) {
@@ -2907,6 +3802,8 @@ function drawPartyOverlays(visibleRooms) {
   if (!state.showParty || !state.partyMembers.length) return;
   const visibleById = new Set(visibleRooms.map((r) => r.id));
 
+  drawPartyJellyTrails();
+
   for (const member of state.partyMembers) {
     if (!member.roomId || member.roomId === state.playerRoomId) continue;
     const room = state.roomsById.get(member.roomId);
@@ -2927,6 +3824,77 @@ function drawPartyOverlays(visibleRooms) {
     }
 
     drawOffscreenPartyWaypoint(room);
+  }
+}
+
+function addPartyJellyTrail(from, to) {
+  if (!from || !to) return;
+  const fromGrid = normalizeGridId(from.gridId);
+  const toGrid = normalizeGridId(to.gridId);
+  const gridId = toGrid || fromGrid;
+  if (!gridId) return;
+
+  const now = performance.now();
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const dist = Math.hypot(dx, dy);
+  const steps = Math.max(2, Math.min(5, Math.ceil(dist * 1.5)));
+
+  for (let i = 0; i < steps; i++) {
+    const t = steps <= 1 ? 0 : i / (steps - 1);
+    const px = from.x + dx * t;
+    const py = from.y + dy * t;
+    state.partyJellyTrail.push({
+      x: px,
+      y: py,
+      z: to.z,
+      gridId,
+      targetX: to.x,
+      targetY: to.y,
+      createdAt: now - i * 70,
+      durationMs: PARTY_JELLY_FADE_MS
+    });
+  }
+
+  if (state.partyJellyTrail.length > 640) {
+    state.partyJellyTrail.splice(0, state.partyJellyTrail.length - 640);
+  }
+  ensureEffectsLoop();
+}
+
+function drawPartyJellyTrails() {
+  if (!Array.isArray(state.partyJellyTrail) || state.partyJellyTrail.length === 0) return;
+
+  const tilePx = TILE_SIZE * state.zoom;
+  const now = performance.now();
+  const reduceGlow = shouldReduceGlowEffects();
+
+  for (const trail of state.partyJellyTrail) {
+    if (!trail) continue;
+    if (trail.z !== state.activeZ) continue;
+    if (normalizeGridId(trail.gridId) !== normalizeGridId(state.activeGridId)) continue;
+
+    const age = now - trail.createdAt;
+    if (age < 0 || age > trail.durationMs) continue;
+
+    const t = Math.max(0, Math.min(1, age / trail.durationMs));
+    const eased = 1 - Math.pow(1 - t, 3);
+    const xPos = trail.x + (trail.targetX - trail.x) * eased;
+    const yPos = trail.y + (trail.targetY - trail.y) * eased;
+    const sx = state.panX + (xPos + 0.5) * tilePx;
+    const sy = state.panY + (yPos + 0.5) * tilePx;
+
+    const side = Math.max(2.4, tilePx * (0.35 - 0.23 * eased));
+    const alpha = (1 - t) * (1 - t) * 0.62;
+    if (alpha <= 0.015) continue;
+
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    ctx.shadowColor = "rgba(182, 132, 255, 0.95)";
+    ctx.shadowBlur = Math.max(4, side * (reduceGlow ? 0.6 : 1.6));
+    ctx.fillStyle = "rgba(152, 102, 246, 0.82)";
+    ctx.fillRect(sx - side * 0.5, sy - side * 0.5, side, side);
+    ctx.restore();
   }
 }
 
@@ -3162,6 +4130,7 @@ function getDotSprite(radius, reduceGlow, palette) {
 }
 
 function centerOnPayload(payload) {
+  if (!state.followPlayer) return;
   if (!payload || typeof payload !== "object") return;
   const durationMs = Math.max(50, Number.parseInt(payload.durationMs, 10) || 250);
   const to = normalizeCoord(payload.to);
@@ -3210,17 +4179,22 @@ function setPlayerLocationPayload(payload) {
   state.playerLocation = next;
   state.playerRoomId = targetRoom.id;
   state.scanDistance = resolveScanDistance(targetRoom);
+  updateEmbedQuickControls();
   if (!state.selectedRoomId) {
     state.selectedRoomId = targetRoom.id;
     updateInspector();
   }
 
-  setActiveLayerFromRoom(targetRoom);
-  const targetPan = panForRoom(targetRoom);
   if (moved) {
     addMovementTrail(prior, next);
   }
-  startPanAnimation(targetPan.x, targetPan.y, durationMs, moved ? prior : null, moved ? next : null);
+  if (state.followPlayer) {
+    setActiveLayerFromRoom(targetRoom);
+    const targetPan = panForRoom(targetRoom);
+    startPanAnimation(targetPan.x, targetPan.y, durationMs, moved ? prior : null, moved ? next : null);
+    return;
+  }
+  scheduleRender();
 }
 
 function touchRoomSeen(roomId) {
@@ -3241,6 +4215,7 @@ function touchRoomSeen(roomId) {
 }
 
 function moveToPayload(payload) {
+  if (!state.followPlayer) return;
   if (!payload || typeof payload !== "object") return;
   const durationMs = Math.max(50, Number.parseInt(payload.durationMs, 10) || 250);
   const from = normalizeCoord(payload.from);
@@ -3317,11 +4292,13 @@ function easeOutCubic(t) {
   return 1 - inv * inv * inv;
 }
 
-function drawActiveMoveLine() {
+function drawActiveMoveLine(options) {
+  const opts = options || {};
+  const drawTrailPath = opts.drawTrailPath !== false;
   const tilePx = TILE_SIZE * state.zoom;
   const now = performance.now();
 
-  if (state.showTraveledPath) {
+  if (drawTrailPath && state.showTraveledPath) {
     for (const dot of state.movementTrail) {
       if (dot.z !== state.activeZ) continue;
       if (normalizeGridId(dot.gridId) !== normalizeGridId(state.activeGridId)) continue;
@@ -3351,21 +4328,22 @@ function drawActiveMoveLine() {
 }
 
 function drawPlayerCenterIcon(x, y) {
-  const outerR = Math.max(5.5, state.zoom * 5.4);
-  const innerR = Math.max(1.9, state.zoom * 1.9);
-  const tickLen = Math.max(2.8, state.zoom * 2.8);
-  const tickGap = Math.max(1.6, state.zoom * 1.6);
+  const outerR = Math.max(2.75, state.zoom * 2.7);
+  const innerR = Math.max(0.95, state.zoom * 0.95);
+  const tickLen = Math.max(1.4, state.zoom * 1.4);
+  const tickGap = Math.max(0.8, state.zoom * 0.8);
   const sprite = getPlayerCenterSprite(outerR, innerR, tickLen, tickGap, shouldReduceGlowEffects());
   ctx.drawImage(sprite.canvas, x - sprite.center, y - sprite.center);
 }
 
 function shouldReduceGlowEffects() {
-  return state.isSafari && (state.dragging || state.animation.active);
+  return false;
 }
 
-function drawRoomStaticSprite(room, options) {
+function drawRoomStaticSprite(room, options, targetCtx) {
   const opts = options || {};
   const ghost = !!opts.ghost;
+  const drawCtx = targetCtx || ctx;
   const tilePx = TILE_SIZE * state.zoom;
   const screenX = state.panX + room.x * tilePx;
   const screenY = state.panY + room.y * tilePx;
@@ -3373,12 +4351,24 @@ function drawRoomStaticSprite(room, options) {
   const sprite = getRoomStaticSprite(room, zoomBucket, ghost);
   if (!sprite) return;
 
-  ctx.save();
+  drawCtx.save();
   if (ghost) {
-    ctx.globalAlpha *= 0.22;
+    drawCtx.globalAlpha *= 0.22;
   }
-  ctx.drawImage(sprite, screenX, screenY, tilePx, tilePx);
-  ctx.restore();
+  drawCtx.drawImage(sprite, screenX, screenY, tilePx, tilePx);
+  drawCtx.restore();
+}
+
+function drawRoomWallBase(room, targetCtx, options) {
+  const opts = options || {};
+  const wallVariant = opts.offLayer ? "offLayer" : "default";
+  const drawCtx = targetCtx || ctx;
+  const tilePx = TILE_SIZE * state.zoom;
+  const x = state.panX + room.x * tilePx;
+  const y = state.panY + room.y * tilePx;
+  const sprite = getRoomWallSprite(room, getZoomSpriteBucket(), wallVariant);
+  if (!sprite) return;
+  drawCtx.drawImage(sprite.canvas, x - sprite.pad, y - sprite.pad, tilePx + sprite.pad * 2, tilePx + sprite.pad * 2);
 }
 
 function getRoomStaticSprite(room, zoomBucket, ghost) {
@@ -3486,7 +4476,7 @@ function getRoomWallSignature(room) {
 }
 
 function renderRoomWallsToContext(g, room, tilePx, zoomBucket) {
-  const sprite = getRoomWallSprite(room, zoomBucket);
+  const sprite = getRoomWallSprite(room, zoomBucket, "default");
   if (!sprite) return;
   const scale = sprite.tilePx > 0 ? tilePx / sprite.tilePx : 1;
   const drawPad = sprite.pad * scale;
@@ -3517,13 +4507,14 @@ function getRoomWallMask(room) {
   return mask;
 }
 
-function getRoomWallSprite(room, zoomBucket) {
+function getRoomWallSprite(room, zoomBucket, variant) {
+  const spriteVariant = variant || "default";
   const mask = getRoomWallMask(room);
   if (!mask) return null;
 
   const lineWidth = Math.max(2.6, 2.6 * zoomBucket);
   const pad = Math.ceil(lineWidth * 0.7) + 2;
-  const cacheKey = `${ROOM_WALL_SPRITE_CACHE_REV}:${mask}:${zoomBucket}:${pad}`;
+  const cacheKey = `${ROOM_WALL_SPRITE_CACHE_REV}:${mask}:${zoomBucket}:${pad}:${spriteVariant}`;
   const cached = ROOM_WALL_SPRITE_CACHE.get(cacheKey);
   if (cached) return cached;
 
@@ -3534,13 +4525,13 @@ function getRoomWallSprite(room, zoomBucket) {
   const g = canvas.getContext("2d");
   if (!g) return null;
 
-  renderRoomWallSprite(g, tilePx, pad, mask, zoomBucket);
+  renderRoomWallSprite(g, tilePx, pad, mask, zoomBucket, spriteVariant);
   const sprite = { canvas, pad, tilePx };
   setCappedCache(ROOM_WALL_SPRITE_CACHE, cacheKey, sprite, MAX_ROOM_WALL_SPRITE_CACHE);
   return sprite;
 }
 
-function renderRoomWallSprite(g, tilePx, pad, mask, zoomBucket) {
+function renderRoomWallSprite(g, tilePx, pad, mask, zoomBucket, variant) {
   const opacity = wallOpacityForZoomValue(zoomBucket);
   if (opacity <= 0) return;
 
@@ -3555,10 +4546,13 @@ function renderRoomWallSprite(g, tilePx, pad, mask, zoomBucket) {
   const hasE = (mask & TRAIL_DIR_BITS.e) !== 0;
   const hasS = (mask & TRAIL_DIR_BITS.s) !== 0;
   const hasW = (mask & TRAIL_DIR_BITS.w) !== 0;
+  const isOffLayer = variant === "offLayer";
+  const wallColor = isOffLayer ? OFF_LAYER_WALL_COLOR : WALL_COLOR;
+  const variantOpacity = isOffLayer ? 0.3 : 1;
 
   g.save();
-  g.globalAlpha *= opacity;
-  g.fillStyle = WALL_COLOR;
+  g.globalAlpha *= opacity * variantOpacity;
+  g.fillStyle = wallColor;
   if (hasN) {
     const extendLeft = hasW ? joinBleed : 0;
     const extendRight = hasE ? joinBleed : 0;
@@ -3639,6 +4633,11 @@ function drawFogOfWarHaze(room, nowMs) {
 }
 
 function drawRoomWallsAndDoors(room) {
+  drawRoomWallBase(room);
+  drawRoomDoorOverlays(room);
+}
+
+function drawRoomDoorOverlays(room) {
   const tilePx = TILE_SIZE * state.zoom;
   const x = state.panX + room.x * tilePx;
   const y = state.panY + room.y * tilePx;
@@ -3649,10 +4648,6 @@ function drawRoomWallsAndDoors(room) {
     s: { x1: x, y1: y + tilePx, x2: x + tilePx, y2: y + tilePx },
     w: { x1: x, y1: y, x2: x, y2: y + tilePx }
   };
-  const sprite = getRoomWallSprite(room, getZoomSpriteBucket());
-  if (sprite) {
-    ctx.drawImage(sprite.canvas, x - sprite.pad, y - sprite.pad, tilePx + sprite.pad * 2, tilePx + sprite.pad * 2);
-  }
 
   const isPlayerRoom = room.id && state.playerRoomId && String(room.id) === String(state.playerRoomId);
 
@@ -3671,8 +4666,18 @@ function drawRoomWallsAndDoors(room) {
 }
 
 function getEdgeVariant(room, dir) {
+  const cached = room && state.roomEdgeVariants.get(room.id);
+  if (cached && Object.prototype.hasOwnProperty.call(cached, dir)) {
+    return cached[dir] || "";
+  }
+  return computeEdgeVariantRaw(room, dir);
+}
+
+function computeEdgeVariantRaw(room, dir) {
+  if (!room) return "";
   const exit = room.exits[dir];
   const vec = DIRECTION_VECTORS[dir];
+  if (!vec) return "";
   const neighborId = state.roomByCoord.get(coordKey(room.x + vec.dx, room.y + vec.dy, room.z, room.gridId));
   const neighbor = neighborId ? state.roomsById.get(neighborId) : null;
   const reverseDir = OPPOSITE_DIRECTIONS[dir];
@@ -4491,7 +5496,19 @@ function persistMap() {
     state.persistIdleId = 0;
   }
   try {
-    localStorage.setItem(activeStorageKey(), JSON.stringify(state.mapData));
+    const rooms = state.mapData.rooms
+      .map(normalizeRoom)
+      .filter((room) => !!room);
+    if (rooms.length !== state.mapData.rooms.length) {
+      state.mapData.rooms = rooms;
+      rebuildIndexes();
+      syncZLevels();
+      updateInspector();
+    }
+    localStorage.setItem(activeStorageKey(), JSON.stringify({
+      ...state.mapData,
+      rooms
+    }));
     state.storageLoadedKey = state.storageKey;
   } catch (_error) {
     // Ignore storage failures (private mode/quota).
@@ -4585,6 +5602,13 @@ function pruneMovementTrail(now) {
   });
 }
 
+function prunePartyJellyTrail(now) {
+  state.partyJellyTrail = state.partyJellyTrail.filter((segment) => {
+    const durationMs = Number.isFinite(segment.durationMs) ? segment.durationMs : PARTY_JELLY_FADE_MS;
+    return (now - segment.createdAt) < durationMs;
+  });
+}
+
 function ensureEffectsLoop() {
   const anim = state.animation;
   if (anim.effectRafId) return;
@@ -4592,13 +5616,14 @@ function ensureEffectsLoop() {
   const tick = (now) => {
     updatePanAnimation(now);
     pruneMovementTrail(now);
+    prunePartyJellyTrail(now);
     const targetFrameMs = state.animation.active ? 33 : 16;
     if ((now - anim.lastRenderTs) >= targetFrameMs) {
       render();
       anim.lastRenderTs = now;
     }
 
-    if (state.animation.active || state.movementTrail.length > 0) {
+    if (state.animation.active || state.movementTrail.length > 0 || state.partyJellyTrail.length > 0) {
       anim.effectRafId = requestAnimationFrame(tick);
       return;
     }
@@ -4617,6 +5642,7 @@ function clearAreaByGridId(gridId) {
   const kept = state.mapData.rooms.filter((r) => normalizeGridId(r.gridId) !== key);
   if (kept.length === state.mapData.rooms.length) return;
   state.mapData.rooms = kept;
+  markStaticLayerDirty();
   if (state.selectedRoomId) {
     const still = state.roomsById.get(state.selectedRoomId);
     if (!still || normalizeGridId(still.gridId) === key) state.selectedRoomId = null;

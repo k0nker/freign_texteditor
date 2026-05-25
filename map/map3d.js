@@ -165,6 +165,22 @@
         10: '#f0cf63', // desert     (bright yellow)
         11: '#cf4a4a', // lava       (red)
         12: '#f2f2f2', // snow       (white)
+        13: '#b8b8b8', // unused     (neutral)
+        14: '#2f7a2f', // meadow     (green)
+        15: '#6f6f76', // cave       (stone gray)
+        16: '#7b648e', // dungeon    (violet gray)
+        17: '#f2f2f2', // ice        (white)
+        18: '#b07898', // village    (mauve)
+        19: '#4f92ff', // underwater (bright blue)
+        20: '#3157b0', // underwater cave (deep blue)
+        21: '#4db7c8', // underwater city (cyan)
+        22: '#8c5a1e', // mesa       (orange-brown)
+        23: '#58c35d', // sewer      (green)
+        24: '#6f6f76', // crypt      (stone gray)
+        25: '#b176d4', // planar     (violet)
+        26: '#cf4a4a', // volcanic   (red)
+        27: '#2f7a2f', // deep_forest(green)
+        28: '#6f6f76', // ruins      (stone gray)
     };
 
     function sectorStyle(sector) {

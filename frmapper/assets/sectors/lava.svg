@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Layer_1" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 64 64">
+  <!-- Generator: Adobe Illustrator 30.4.0, SVG Export Plug-In . SVG Version: 2.1.4 Build 226)  -->
+  <defs>
+    <style>
+      .st0 {
+        fill: #ffc169;
+      }
+
+      .st1 {
+        fill: #321410;
+      }
+
+      .st2 {
+        fill: none;
+        opacity: .4;
+        stroke: #a83d20;
+        stroke-width: 2px;
+      }
+
+      .st2, .st3 {
+        isolation: isolate;
+      }
+
+      .st4 {
+        fill: #ffbe64;
+      }
+
+      .st5 {
+        fill: #ff9f4a;
+      }
+
+      .st3 {
+        fill: #4a1b14;
+        opacity: .9;
+      }
+    </style>
+  </defs>
+  <rect class="st1" width="64" height="64"/>
+  <path class="st3" d="M0,18l14-6,10,5,12-4,12,5,16-6v12l-14,5-10-4-12,5-12-5L0,31v-13Z"/>
+  <path class="st2" d="M2,43c8-6,14,4,22-2s14-6,22,0,10,4,14,2"/>
+  <circle class="st0" cx="18" cy="36" r="2"/>
+  <circle class="st5" cx="38" cy="33.6" r="1.6"/>
+  <circle class="st4" cx="45.6" cy="46.7" r="2"/>
+  <circle class="st4" cx="9.9" cy="55.2" r="2"/>
+  <circle class="st4" cx="53" cy="10.7" r="2"/>
+  <circle class="st5" cx="11.9" cy="8.7" r="1.6"/>
+  <circle class="st5" cx="60.8" cy="60.3" r="1.6"/>
+</svg>

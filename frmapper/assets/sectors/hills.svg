@@ -1,14 +1,53 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" fill="#222c1f"/>
-  <ellipse cx="16" cy="18" rx="11" ry="8" fill="#4a5f3f"/>
-  <ellipse cx="36" cy="16" rx="12" ry="9" fill="#56704a"/>
-  <ellipse cx="52" cy="26" rx="9" ry="7" fill="#4e6542"/>
-  <ellipse cx="18" cy="44" rx="12" ry="9" fill="#5b744d"/>
-  <ellipse cx="40" cy="42" rx="14" ry="10" fill="#4f6742"/>
-  <g fill="none" stroke="#7f9a6d" stroke-width="1.3" opacity="0.55">
-    <ellipse cx="16" cy="18" rx="7" ry="5"/>
-    <ellipse cx="36" cy="16" rx="8" ry="6"/>
-    <ellipse cx="18" cy="44" rx="8" ry="6"/>
-    <ellipse cx="40" cy="42" rx="10" ry="7"/>
-  </g>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Layer_1" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 64 64">
+  <!-- Generator: Adobe Illustrator 30.4.0, SVG Export Plug-In . SVG Version: 2.1.4 Build 226)  -->
+  <defs>
+    <style>
+      .st0 {
+        fill: #5f4a31;
+      }
+
+      .st1 {
+        fill: #6f5538;
+      }
+
+      .st2 {
+        isolation: isolate;
+        opacity: .9;
+        stroke: #6f5538;
+        stroke-width: 2px;
+      }
+
+      .st2, .st3 {
+        fill: none;
+      }
+
+      .st3 {
+        stroke: #8a6b45;
+        stroke-width: 2.1px;
+      }
+    </style>
+  </defs>
+  <rect class="st0" width="64" height="64"/>
+  <path class="st3" d="M3.4,21.8c9.3-20.8,8.9,8.7,14.4-2.5,5.5-11.2,9.7-11.2,15.2,0s8.8-12.6,12.8,3.9"/>
+  <path class="st2" d="M58.7,51.7c-3.7-10.8-12.1-12.6-20.1-3.6-6.8,7.7-2.7,1.3-13.9-3.5-6.6-2.8-6.8,4.2-8.3,7.7"/>
+  <path class="st1" d="M27.4,34c-.6,0-.6,1,0,1s.6-1,0-1Z"/>
+  <path class="st1" d="M46,30.7c-.6,0-.6,1,0,1s.6-1,0-1Z"/>
+  <path class="st1" d="M55,24.7c-.6,0-.6,1,0,1s.6-1,0-1Z"/>
+  <path class="st1" d="M46.5,14.1c-.6,0-.6,1,0,1s.6-1,0-1Z"/>
+  <path class="st1" d="M26.2,22c-.6,0-.6,1,0,1s.6-1,0-1Z"/>
+  <path class="st1" d="M9,43.4c-.6,0-.6,1,0,1s.6-1,0-1Z"/>
+  <path class="st1" d="M23.1,53.7c-.6,0-.6,1,0,1s.6-1,0-1Z"/>
+  <path class="st1" d="M56.3,55.5c-.6,0-.6,1,0,1s.6-1,0-1Z"/>
+  <path class="st1" d="M12,30.4c-.6,0-.6,1,0,1s.6-1,0-1Z"/>
+  <path class="st1" d="M8.1,5.2c-.6,0-.6,1,0,1s.6-1,0-1Z"/>
+  <path class="st1" d="M55.2,4.2c-.6,0-.6,1,0,1s.6-1,0-1Z"/>
+  <path class="st1" d="M59.6,3.3c-.6,0-.6,1,0,1s.6-1,0-1Z"/>
+  <path class="st1" d="M37.1,57.2c-.6,0-.6,1,0,1s.6-1,0-1Z"/>
+  <path class="st1" d="M8.8,60.7c-.6,0-.6,1,0,1s.6-1,0-1Z"/>
+  <path class="st1" d="M4.4,50.5c-.6,0-.6,1,0,1s.6-1,0-1Z"/>
+  <path class="st1" d="M61.9,59.5c-.6,0-.6,1,0,1s.6-1,0-1Z"/>
+  <path class="st1" d="M25.6.6c-.6,0-.6,1,0,1s.6-1,0-1Z"/>
+  <path class="st1" d="M63,33.8c-.6,0-.6,1,0,1s.6-1,0-1Z"/>
+  <path class="st1" d="M2.7,30.4c-.6,0-.6,1,0,1s.6-1,0-1Z"/>
 </svg>

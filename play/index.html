@@ -198,6 +198,10 @@
       <div id="vitals-strip" aria-label="Character Vitals" hidden>
         <div class="vbar-vital" title="Hit Points">
           <div class="condition-badge hp">
+            <div class="vbar-identity">
+              <div class="vbar-identity-name" id="v-identity-name">Unknown</div>
+              <div class="vbar-identity-pos" id="v-identity-pos">Standing</div>
+            </div>
             <span class="status-text" id="v-hp-val">HP &#8212;</span>
             <div class="status-bar-segment" id="v-hp-gauge">
               <div class="status-bar-segments-grid">
@@ -240,7 +244,22 @@
               </div>
             </div>
           </div>
-          <span class="vbar-position" id="v-position">Standing</span>
+        </div>
+        <div class="vbar-sep" aria-hidden="true"></div>
+        <div class="vbar-vital vbar-target" title="Current Target Hit Points">
+          <div class="condition-badge opponent">
+            <div class="vbar-target-name" id="v-target-name">No Target</div>
+            <span class="status-text" id="v-target-hp-val">HP &#8212;</span>
+            <div class="status-bar-segment" id="v-target-hp-gauge">
+              <div class="status-bar-segments-grid">
+                <div class="bar-segment-block"><div class="status-bar-fill opponent"></div></div>
+                <div class="bar-segment-block"><div class="status-bar-fill opponent"></div></div>
+                <div class="bar-segment-block"><div class="status-bar-fill opponent"></div></div>
+                <div class="bar-segment-block"><div class="status-bar-fill opponent"></div></div>
+                <div class="bar-segment-block"><div class="status-bar-fill opponent"></div></div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 

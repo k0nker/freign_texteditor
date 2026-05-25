@@ -7,6 +7,7 @@
 
   var STORAGE_KEY    = 'freign.play2.settings.v1';
   var SCROLLBACK_KEY = 'freign.play2.scrollback';
+  var CMD_HISTORY_KEY = 'freign.play2.cmdhistory';
   var SITE_THEME_KEY = 'freign.site.theme.v1';
   var SINGLE_LEFT_PANEL_MODE = false;
   var MAP_PANEL_ID = 'map';
@@ -210,6 +211,11 @@
     triggerGuard:   0,
     cmdHistory:     [],
     historyIdx:     -1,
+    historyNavActive: false,
+    historyPrefix: '',
+    historyMatches: [],
+    historyMatchIdx: -1,
+    historyDraft: '',
     keepaliveTimer: null,
     lastCmd:        '',
     activeDrawer:   null,
@@ -291,6 +297,7 @@
     initAtmosphereMotes();
     initResizeHandles();
     loadScrollback();
+    loadCommandHistory();
     appendSystem('Client ready \u2014 choose a server to connect.');
   }
 
@@ -316,9 +323,14 @@
     el.vMp            = document.getElementById('v-mp-val');
     el.vMv            = document.getElementById('v-mv-val');
     el.vPos           = document.getElementById('v-position');
+    el.vIdentityName  = document.getElementById('v-identity-name');
+    el.vIdentityPos   = document.getElementById('v-identity-pos');
+    el.vTargetName    = document.getElementById('v-target-name');
+    el.vTargetHp      = document.getElementById('v-target-hp-val');
     el.vHpSegs        = document.querySelectorAll('#v-hp-gauge .status-bar-fill');
     el.vMpSegs        = document.querySelectorAll('#v-mp-gauge .status-bar-fill');
     el.vMvSegs        = document.querySelectorAll('#v-mv-gauge .status-bar-fill');
+    el.vTargetHpSegs  = document.querySelectorAll('#v-target-hp-gauge .status-bar-fill');
     el.vWimpy         = document.getElementById('v-wimpy');
 
     el.mapV2PanelBody = document.getElementById('map-panel-body');
@@ -409,6 +421,9 @@
     });
 
     el.cmdInput.addEventListener('keydown', handleInputHistory);
+    el.cmdInput.addEventListener('input', function () {
+      resetHistoryNav();
+    });
 
     el.btnRepeat.addEventListener('click', function () {
       if (state.lastCmd) sendCommand(state.lastCmd);
@@ -946,6 +961,14 @@
         });
         strip.appendChild(b);
       });
+
+      var groupOrder = ids.reduce(function (best, pid) {
+        var pEl = document.getElementById('panel-' + pid);
+        var rawOrder = pEl && pEl.style ? parseInt(pEl.style.order, 10) : NaN;
+        var orderVal = isNaN(rawOrder) ? 0 : rawOrder;
+        return Math.min(best, orderVal);
+      }, Number.POSITIVE_INFINITY);
+      strip.style.order = String(isFinite(groupOrder) ? groupOrder : 0);
 
       var anchorPanel = null;
       for (var i = 0; i < container.children.length; i++) {
@@ -2104,10 +2127,11 @@
       position: data.position != null ? data.position : data.pos,
     };
 
-    el.vHp.textContent = 'HP ' + hp + '/' + maxHp;
+    var hpPct = pct(hp, maxHp);
+    el.vHp.textContent = 'HP ' + hpPct + '%';
     el.vMp.textContent = 'MP ' + mana + '/' + maxMana;
     el.vMv.textContent = 'MV ' + move + '/' + maxMove;
-    setSegmentGauge(el.vHpSegs, pct(hp, maxHp), 'hp');
+    setSegmentGauge(el.vHpSegs, hpPct, 'hp');
     setSegmentGauge(el.vMpSegs, pct(mana, maxMana), 'mana');
     setSegmentGauge(el.vMvSegs, pct(move, maxMove), 'move');
     if (el.vWimpy) {
@@ -2118,6 +2142,7 @@
       el.vWimpy.style.left = wimpyPct + '%';
       el.vWimpy.classList.toggle('active', wimpy > 0);
     }
+    updateVitalsIdentity();
     updateVitalsPosition(state.gmcp.vitals.position);
     if (prevHp != null && hp < prevHp) {
       playDamageTone();
@@ -2944,6 +2969,7 @@
   function updateCharStatus(data) {
     state.gmcp.charStatus = data;
     pushFrmapperIdentity();
+    updateVitalsIdentity();
     updateVitalsPosition(data.position != null ? data.position : data.pos);
     pulsePkgBadge('status', 'Char.Info');
     renderLanguageUi();
@@ -2977,8 +3003,47 @@
 
     pulsePkgBadge('status', 'Char.Combat');
     pulsePkgBadge('targets', 'Char.Combat');
+    updateCurrentTargetVitals();
     renderStatusPanel();
     renderTargetsPanel();
+  }
+
+  function currentCharacterFirstName() {
+    var s = state.gmcp.charStatus || {};
+    var raw = String(
+      s.name != null ? s.name
+      : (s.char_name != null ? s.char_name
+      : (s.characterName != null ? s.characterName : ''))
+    ).trim();
+    if (!raw) return 'Unknown';
+    return raw.split(/\s+/)[0] || raw;
+  }
+
+  function updateVitalsIdentity() {
+    if (el.vIdentityName) {
+      el.vIdentityName.textContent = currentCharacterFirstName();
+    }
+    updateVitalsPosition();
+  }
+
+  function updateCurrentTargetVitals() {
+    if (!el.vTargetName || !el.vTargetHp || !el.vTargetHpSegs) return;
+    var combat = state.gmcp.charCombat || {};
+    var targets = Array.isArray(combat.targets) ? combat.targets : [];
+    var active = targets.length ? targets[0] : null;
+
+    if (!active) {
+      el.vTargetName.textContent = 'No Target';
+      el.vTargetHp.textContent = 'HP --%';
+      setSegmentGauge(el.vTargetHpSegs, 0, 'opponent');
+      return;
+    }
+
+    var targetName = String(active.name || 'Unknown');
+    var hpPct = Math.max(0, Math.min(100, numOr(active.hp_pct, 0)));
+    el.vTargetName.textContent = targetName;
+    el.vTargetHp.textContent = 'HP ' + hpPct + '%';
+    setSegmentGauge(el.vTargetHpSegs, hpPct, 'opponent');
   }
 
   function renderTargetsPanel() {
@@ -3535,7 +3600,6 @@
   }
 
   function updateVitalsPosition(rawPos) {
-    if (!el.vPos) return;
     var source = rawPos;
     if (source == null) {
       var cs = state.gmcp.charStatus || {};
@@ -3550,7 +3614,9 @@
       .trim()
       .toLowerCase();
     if (!out) out = 'standing';
-    el.vPos.textContent = out.charAt(0).toUpperCase() + out.slice(1);
+    var normalized = out.charAt(0).toUpperCase() + out.slice(1);
+    if (el.vIdentityPos) el.vIdentityPos.textContent = normalized;
+    if (el.vPos) el.vPos.textContent = normalized;
   }
 
   function renderLanguageUi() {
@@ -3863,6 +3929,33 @@
     } catch (_) {}
   }
 
+  var _cmdHistoryTimer = null;
+  function scheduleCommandHistorySave() {
+    if (_cmdHistoryTimer) return;
+    _cmdHistoryTimer = setTimeout(function () {
+      _cmdHistoryTimer = null;
+      try {
+        localStorage.setItem(CMD_HISTORY_KEY, JSON.stringify(state.cmdHistory));
+      } catch (_) {}
+    }, 250);
+  }
+
+  function loadCommandHistory() {
+    try {
+      var raw = localStorage.getItem(CMD_HISTORY_KEY);
+      if (!raw) return;
+      var items = JSON.parse(raw);
+      if (!Array.isArray(items)) return;
+      state.cmdHistory = items
+        .filter(function (item) { return typeof item === 'string'; })
+        .map(function (item) { return item.trim(); })
+        .filter(Boolean)
+        .slice(-200);
+      state.historyIdx = -1;
+      resetHistoryNav();
+    } catch (_) {}
+  }
+
   function isTerminalAtBottom() {
     if (!el.terminal) return true;
     return el.terminal.scrollTop + el.terminal.clientHeight >= el.terminal.scrollHeight - 40;
@@ -3932,8 +4025,31 @@
 
   function splitStacked(text) {
     var sep = sanitizeStackSep(state.settings && state.settings.stackSeparator);
-    if (!sep) return [String(text || '')];
-    return String(text || '').split(sep).map(function (p) { return p.trim(); }).filter(Boolean);
+    var raw = String(text || '');
+    if (!sep) return [raw];
+
+    // Leading separator means a literal first command (e.g. ";gtell hi").
+    if (raw.indexOf(sep) === 0) {
+      var tail = raw.slice(sep.length);
+      var nextSep = tail.indexOf(sep);
+
+      if (nextSep < 0) {
+        return raw.trim() ? [raw] : [];
+      }
+
+      var first = sep + tail.slice(0, nextSep);
+      var out = [];
+      if (first.trim()) out.push(first);
+
+      var rest = tail.slice(nextSep + sep.length);
+      rest.split(sep).forEach(function (part) {
+        var clean = part.trim();
+        if (clean) out.push(clean);
+      });
+      return out;
+    }
+
+    return raw.split(sep).map(function (p) { return p.trim(); }).filter(Boolean);
   }
 
   /* ═══════════════════════════════════════════════════════════════
@@ -3944,17 +4060,55 @@
     if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
     if (!state.cmdHistory.length) return;
     e.preventDefault();
+
+    if (!state.historyNavActive) {
+      state.historyPrefix = String(el.cmdInput.value || '').trim();
+      state.historyMatches = buildHistoryMatches(state.historyPrefix);
+      if (!state.historyMatches.length) return;
+      state.historyDraft = String(el.cmdInput.value || '');
+      state.historyNavActive = true;
+      state.historyMatchIdx = -1;
+    }
+
+    if (!state.historyMatches.length) return;
+
     if (e.key === 'ArrowUp') {
-      if (state.historyIdx < 0) state.historyIdx = state.cmdHistory.length;
-      state.historyIdx = Math.max(0, state.historyIdx - 1);
+      if (state.historyMatchIdx < state.historyMatches.length - 1) {
+        state.historyMatchIdx += 1;
+      }
     } else {
-      if (state.historyIdx < 0) return;
-      state.historyIdx = Math.min(state.cmdHistory.length, state.historyIdx + 1);
-      if (state.historyIdx === state.cmdHistory.length) {
-        state.historyIdx = -1; el.cmdInput.value = ''; return;
+      if (state.historyMatchIdx <= 0) {
+        el.cmdInput.value = state.historyDraft;
+        resetHistoryNav();
+        return;
+      }
+      state.historyMatchIdx -= 1;
+    }
+
+    var next = state.historyMatches[state.historyMatchIdx];
+    el.cmdInput.value = next != null ? next : '';
+    state.historyIdx = -1;
+  }
+
+  function resetHistoryNav() {
+    state.historyNavActive = false;
+    state.historyPrefix = '';
+    state.historyMatches = [];
+    state.historyMatchIdx = -1;
+    state.historyDraft = '';
+  }
+
+  function buildHistoryMatches(prefix) {
+    var rawPrefix = String(prefix || '');
+    var lowerPrefix = rawPrefix.toLowerCase();
+    var out = [];
+    for (var i = state.cmdHistory.length - 1; i >= 0; i--) {
+      var cmd = String(state.cmdHistory[i] || '');
+      if (!rawPrefix || cmd.toLowerCase().indexOf(lowerPrefix) === 0) {
+        out.push(cmd);
       }
     }
-    el.cmdInput.value = state.cmdHistory[state.historyIdx] || '';
+    return out;
   }
 
   function pushHistory(cmd) {
@@ -3964,6 +4118,8 @@
     state.cmdHistory.push(clean);
     if (state.cmdHistory.length > 200) state.cmdHistory.shift();
     state.historyIdx = -1;
+    resetHistoryNav();
+    scheduleCommandHistorySave();
   }
   /* ═══════════════════════════════════════════════════════════════
      SETTINGS IMPORT / EXPORT / RESET

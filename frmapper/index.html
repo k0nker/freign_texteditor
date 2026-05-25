@@ -11,6 +11,19 @@
     <button id="embed-toggle" class="embed-toggle" type="button" title="Show mapper controls" aria-label="Show mapper controls" aria-expanded="false" hidden>
       <span class="embed-toggle-icon" aria-hidden="true">&#9660;</span>
     </button>
+    <div id="embed-quick-controls" class="embed-quick-controls" hidden>
+      <div class="embed-quick-row">
+        <button id="embed-z-down" class="embed-quick-btn embed-z-chevron embed-z-down" type="button" aria-label="Previous z-layer"><span class="sr-only">Down</span></button>
+        <span id="embed-z-label" class="embed-z-label">z=0</span>
+        <button id="embed-z-up" class="embed-quick-btn embed-z-chevron embed-z-up" type="button" aria-label="Next z-layer"><span class="sr-only">Up</span></button>
+        <button id="embed-follow" class="embed-quick-btn embed-follow-btn active" type="button" aria-label="Follow player" aria-pressed="true">&#10003;</button>
+      </div>
+      <div id="embed-room-meta" class="embed-room-meta" hidden>
+        <span id="embed-room-nsid" class="embed-room-meta-token">NSID: --</span>
+        <span id="embed-room-eph" class="embed-room-meta-token">ephNum: --</span>
+      </div>
+    </div>
+    <div id="embed-quick-tooltip" class="room-hover-tooltip embed-quick-tooltip" hidden></div>
 
     <header class="topbar">
       <div class="brand">frmapper</div>
@@ -59,6 +72,12 @@
             <input id="toggle-fog" type="checkbox" checked />
             <span>Show</span>
           </div>
+          <div class="control-row control-row-check">
+            <label for="toggle-perf-stats">Perf Stats</label>
+            <input id="toggle-perf-stats" type="checkbox" />
+            <span>Show</span>
+          </div>
+          <pre id="perf-stats" class="perf-stats" hidden>Perf stats disabled.</pre>
           <p class="hint">Drag to pan. Scroll to zoom. Click a room to inspect it.</p>
         </section>
 
@@ -85,6 +104,7 @@
     </div>
   </div>
 
+  <script src="../site-themes.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>
