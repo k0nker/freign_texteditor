@@ -9,6 +9,18 @@
   var ACTIVE_PROFILE_KEY = 'freign.play2.active-profile.v1';
   var SCROLLBACK_KEY = 'freign.play2.scrollback';
   var CMD_HISTORY_KEY = 'freign.play2.cmdhistory';
+
+  function scrollbackKey() {
+    var p = normalizeProfileName(state ? state.activeProfileName : null) || DEFAULT_PROFILE_NAME;
+    if (p === DEFAULT_PROFILE_NAME) return SCROLLBACK_KEY;
+    return SCROLLBACK_KEY + '.' + p.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  }
+
+  function cmdHistoryKey() {
+    var p = normalizeProfileName(state ? state.activeProfileName : null) || DEFAULT_PROFILE_NAME;
+    if (p === DEFAULT_PROFILE_NAME) return CMD_HISTORY_KEY;
+    return CMD_HISTORY_KEY + '.' + p.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  }
   var SITE_THEME_KEY = 'freign.site.theme.v1';
   var DEFAULT_PROFILE_NAME = 'Default';
   var SINGLE_LEFT_PANEL_MODE = false;
@@ -282,6 +294,14 @@
     state.settings = ensureDefaultPanelLayout(mergeSettings(cloneDefaultSettings(), getProfileSettings(next)));
     state.settings.theme = getGlobalThemeName();
     rebuildPalette();
+    /* Swap per-profile scrollback and command history */
+    if (el.terminal) el.terminal.innerHTML = '';
+    state.scrollback = [];
+    loadScrollback();
+    state.cmdHistory = [];
+    state.historyIdx = -1;
+    resetHistoryNav();
+    loadCommandHistory();
     if (opts.render !== false) renderAll();
     if (opts.persist !== false) saveSettings();
   }
@@ -475,8 +495,6 @@
       mapRenderedRoomCardHtml: '',
       mapRenderedMarkerKey: '',
       mapCenterSeq: 0,
-      mapV2RoomsById: {},
-      mapV2SnapshotSent: false,
       worldTime: null,
       worldWeather: null,
       worldMoons: null,
@@ -641,6 +659,7 @@
     el.importSettingsConfig = document.getElementById('import-settings-config');
     el.resetSettingsConfig  = document.getElementById('reset-settings-config');
     el.importFileConfig     = document.getElementById('import-file-config');
+    el.btnRenegotiateGmcp   = document.getElementById('btn-renegotiate-gmcp');
 
     el.ansiPaletteCfg   = document.getElementById('ansi-palette-cfg');
     el.cfgTsSelectable  = document.getElementById('cfg-ts-selectable');
@@ -765,8 +784,6 @@
 
     if (el.mapV2Frame) {
       el.mapV2Frame.addEventListener('load', function () {
-        state.gmcp.mapV2SnapshotSent = false;
-        syncMapV2Snapshot(true);
         scheduleMapV2ResizeSync(true);
       });
     }
@@ -917,6 +934,11 @@
       state.scrollback = [];
       localStorage.removeItem(SCROLLBACK_KEY);
     });
+    if (el.btnRenegotiateGmcp) {
+      el.btnRenegotiateGmcp.addEventListener('click', function () {
+        sendWs({ type: 'input', data: 'gmcp webclient on\n' });
+      });
+    }
     el.cfgConsoleWidth.addEventListener('change', function () {
       state.settings.consoleWidth = Math.max(320, Math.min(1920, parseInt(el.cfgConsoleWidth.value, 10) || 1000));
       el.cfgConsoleWidth.value = state.settings.consoleWidth;
@@ -2156,7 +2178,6 @@
     state.userDisconnected = false;
     if (!isReconnect) state.reconnectAttempts = 0;
     state.selectedMudId = mudId;
-    if (!isReconnect) reloadMapV2Frame();
     setConnectionState('connecting');
     appendSystem('Connecting to ' + mud.name + ' (' + mud.host + ':' + mud.port + ')\u2026');
     var wsId = ++state.wsGeneration;
@@ -2297,6 +2318,7 @@
     if (canonicalPkg === 'char.combat') { updateCharCombat(data || {}); return; }
     if (canonicalPkg === 'char.inventory') { updateInventory(data || {}); return; }
     if (canonicalPkg === 'char.equipment') { updateEquipment(data || {}); return; }
+    if (canonicalPkg === 'play.session')   { loadFrmapperSession(data || {}); return; }
 
     state.settings.gmcpPanels.forEach(function (panel) {
       var expectedPath = canonicalGmcpPackageName(panel.gmcpPath || '');
@@ -2491,10 +2513,6 @@
 
   function updateRoomInfo(data) {
     state.gmcp.roomInfo = data;
-    updateMapV2FromRoomInfo(data || {});
-    if (state.gmcp.roomObjects || state.gmcp.roomScannedMobs) {
-      postStoredRoomSidePackets();
-    }
     renderMapPanel();
   }
 
@@ -2504,32 +2522,14 @@
 
   function updateRoomMobs(data) {
     state.gmcp.roomMobs = data;
-    postMapV2Message({
-      type: 'frmapper.roomMobs',
-      payload: data || {}
-    });
   }
 
   function updateRoomObjects(data) {
     state.gmcp.roomObjects = data;
-    postMapV2Message({
-      type: 'frmapper.roomObjects',
-      payload: {
-        roomId: currentRoomId(),
-        objects: Array.isArray(data.objects) ? data.objects : (Array.isArray(data.items) ? data.items : Array.isArray(data.obj_list) ? data.obj_list : []),
-      }
-    });
   }
 
   function updateRoomScannedMobs(data) {
     state.gmcp.roomScannedMobs = data;
-    postMapV2Message({
-      type: 'frmapper.roomScannedMobs',
-      payload: {
-        roomId: currentRoomId(),
-        scan_mobs: Array.isArray(data.scan_mobs) ? data.scan_mobs : (Array.isArray(data.scanned_mobs) ? data.scanned_mobs : (Array.isArray(data.mobs) ? data.mobs : [])),
-      }
-    });
   }
 
   function currentRoomId() {
@@ -2546,51 +2546,6 @@
     return '';
   }
 
-  function postStoredRoomSidePackets() {
-    var roomId = currentRoomId();
-    if (!roomId) return;
-    if (state.gmcp.roomObjects) {
-      postMapV2Message({
-        type: 'frmapper.roomObjects',
-        payload: {
-          roomId: roomId,
-          objects: Array.isArray(state.gmcp.roomObjects.objects) ? state.gmcp.roomObjects.objects : (Array.isArray(state.gmcp.roomObjects.items) ? state.gmcp.roomObjects.items : Array.isArray(state.gmcp.roomObjects.obj_list) ? state.gmcp.roomObjects.obj_list : [])
-        }
-      });
-    }
-    if (state.gmcp.roomScannedMobs) {
-      postMapV2Message({
-        type: 'frmapper.roomScannedMobs',
-        payload: {
-          roomId: roomId,
-          scan_mobs: Array.isArray(state.gmcp.roomScannedMobs.scan_mobs) ? state.gmcp.roomScannedMobs.scan_mobs : (Array.isArray(state.gmcp.roomScannedMobs.scanned_mobs) ? state.gmcp.roomScannedMobs.scanned_mobs : (Array.isArray(state.gmcp.roomScannedMobs.mobs) ? state.gmcp.roomScannedMobs.mobs : []))
-        }
-      });
-    }
-  }
-
-  function buildFrmapperIdentityPayload() {
-    var s = state.gmcp.charStatus || {};
-    var characterName = String(
-      s.name != null ? s.name
-      : (s.char_name != null ? s.char_name
-      : (s.characterName != null ? s.characterName : ''))
-    ).trim();
-    var realm = String(state.selectedMudId || 'public').trim().toLowerCase();
-    if (realm !== 'test') realm = 'public';
-    return {
-      characterName: characterName,
-      realm: realm,
-    };
-  }
-
-  function pushFrmapperIdentity() {
-    postMapV2Message({
-      type: 'frmapper.identity',
-      payload: buildFrmapperIdentityPayload(),
-    });
-  }
-
   function postMapV2Message(message) {
     if (!el.mapV2Frame || !el.mapV2Frame.contentWindow) return;
     try {
@@ -2598,10 +2553,19 @@
     } catch (_) {}
   }
 
+  function loadFrmapperSession(data) {
+    if (!data || !data.url || !el.mapV2Frame) return;
+    var url = String(data.url).trim();
+    if (!url) return;
+    if (url.indexOf('embed=') < 0) {
+      url += (url.indexOf('?') < 0 ? '?' : '&') + 'embed=1';
+    }
+    el.mapV2Frame.src = url;
+  }
+
   function reloadMapV2Frame() {
     if (!el.mapV2Frame) return;
     try {
-      state.gmcp.mapV2SnapshotSent = false;
       if (el.mapV2Frame.contentWindow) {
         el.mapV2Frame.contentWindow.location.reload();
         return;
@@ -2611,58 +2575,6 @@
     var src = el.mapV2Frame.getAttribute('src') || el.mapV2Frame.src;
     if (!src) return;
     el.mapV2Frame.src = src;
-  }
-
-  function syncMapV2Snapshot(force) {
-    if (!force && state.gmcp.mapV2SnapshotSent) return;
-    var rooms = Object.keys(state.gmcp.mapV2RoomsById).map(function (id) {
-      return state.gmcp.mapV2RoomsById[id];
-    });
-    pushFrmapperIdentity();
-    postMapV2Message({
-      type: 'frmapper.loadRoomInfoSnapshot',
-      payload: {
-        source: 'play.gmcp.room.info',
-        durationMs: 250,
-        rooms: rooms,
-      }
-    });
-    if (state.gmcp.groupInfo) {
-      postMapV2Message({ type: 'frmapper.groupInfo', payload: state.gmcp.groupInfo });
-    }
-    if (state.gmcp.roomMobs) {
-      postMapV2Message({ type: 'frmapper.roomMobs', payload: state.gmcp.roomMobs });
-    }
-    state.gmcp.mapV2SnapshotSent = true;
-  }
-
-  function updateMapV2FromRoomInfo(info) {
-    if (!info || typeof info !== 'object') return;
-    var roomId = String(info.id || '').trim();
-    if (!roomId && info.coord && typeof info.coord === 'object') {
-      var x = info.coord.x;
-      var y = info.coord.y;
-      var z = info.coord.z;
-      if (typeof x === 'number' && typeof y === 'number' && typeof z === 'number') {
-        roomId = x + ':' + y + ':' + z;
-      }
-    }
-    if (roomId) {
-      state.gmcp.mapV2RoomsById[roomId] = info;
-    }
-    pulsePkgBadge('map', 'Room.Info');
-
-    if (!state.gmcp.mapV2SnapshotSent) {
-      syncMapV2Snapshot(true);
-    } else {
-      postMapV2Message({
-        type: 'frmapper.ingestRoomInfo',
-        payload: {
-          roomInfo: info,
-          durationMs: 250,
-        }
-      });
-    }
   }
 
   function updateMapRender(data) {
@@ -3221,16 +3133,11 @@
   function updateGroupInfo(data) {
     state.gmcp.groupInfo = data;
     pulsePkgBadge('party', 'Group.Info');
-    postMapV2Message({
-      type: 'frmapper.groupInfo',
-      payload: data || {}
-    });
     renderPartyPanel();
   }
 
   function updateCharStatus(data) {
     state.gmcp.charStatus = data;
-    pushFrmapperIdentity();
     updateVitalsIdentity();
     updateVitalsPosition(data.position != null ? data.position : data.pos);
     pulsePkgBadge('status', 'Char.Info');
@@ -3461,7 +3368,7 @@
         'Cabal Pts: ' + numOr(w.cabal_points, 0),
         'Practice/Train: ' + numOr(s.practice, 0) + ' / ' + numOr(s.trains, 0),
         'Hit/Dam: ' + numOr(st.hitroll, 0) + ' / ' + numOr(st.damroll, 0),
-        'STR INT WIS DEX CON: ' + [numOr(st.str, 0), numOr(st.int, 0), numOr(st.wis, 0), numOr(st.dex, 0), numOr(st.con, 0)].join(' '),
+        '<span class="stat-row">STR: ' + numOr(st.str, 0) + '<span class="stat-div"> | </span>DEX: ' + numOr(st.dex, 0) + '<span class="stat-div"> | </span>WIS: ' + numOr(st.wis, 0) + '<span class="stat-div"> | </span>INT: ' + numOr(st.int, 0) + '<span class="stat-div"> | </span>CON: ' + numOr(st.con, 0) + '</span>',
         'Affects: ' + affectsCount + ' · Targets: ' + combatCount,
       ])
       + '</div>'
@@ -4227,14 +4134,14 @@
     _scrollbackTimer = setTimeout(function () {
       _scrollbackTimer = null;
       try {
-        localStorage.setItem(SCROLLBACK_KEY, JSON.stringify(state.scrollback));
+        localStorage.setItem(scrollbackKey(), JSON.stringify(state.scrollback));
       } catch (_) { /* storage full — silently skip */ }
     }, 500);
   }
 
   function loadScrollback() {
     try {
-      var raw = localStorage.getItem(SCROLLBACK_KEY);
+      var raw = localStorage.getItem(scrollbackKey());
       if (!raw) return;
       var items = JSON.parse(raw);
       if (!Array.isArray(items)) return;
@@ -4262,14 +4169,14 @@
     _cmdHistoryTimer = setTimeout(function () {
       _cmdHistoryTimer = null;
       try {
-        localStorage.setItem(CMD_HISTORY_KEY, JSON.stringify(state.cmdHistory));
+        localStorage.setItem(cmdHistoryKey(), JSON.stringify(state.cmdHistory));
       } catch (_) {}
     }, 250);
   }
 
   function loadCommandHistory() {
     try {
-      var raw = localStorage.getItem(CMD_HISTORY_KEY);
+      var raw = localStorage.getItem(cmdHistoryKey());
       if (!raw) return;
       var items = JSON.parse(raw);
       if (!Array.isArray(items)) return;

@@ -2475,6 +2475,15 @@ body:has(#workspace[data-layout="rounded"]) #settings-drawer {
   color: var(--text);
 }
 
+.stat-row {
+  display: inline;
+}
+
+.stat-div {
+  color: color-mix(in srgb, var(--text) 28%, transparent);
+  user-select: none;
+}
+
 .status-identity-name {
   font-size: 12px;
   line-height: 1.35;
