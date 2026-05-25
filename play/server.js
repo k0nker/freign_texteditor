@@ -479,6 +479,12 @@ function processPlainTelnet(ws, state, buf, allowMccpStart) {
 
 function maybeArmPlayGmcpProfile(state, text, ws) {
   if (!text || state.playGmcpProfileApplied) return;
+  if (state.playGmcpProfileArmed) {
+    // First text received after "about to <Enter>" — player is now in the world; fire after 500ms
+    state.playGmcpProfileArmed = false;
+    setTimeout(() => applyPlayGmcpProfile(state, ws, 'enter-world'), 500);
+    return;
+  }
   if (text.includes('about to <Enter> Forgotten Reign!')) {
     state.playGmcpProfileArmed = true;
     return;

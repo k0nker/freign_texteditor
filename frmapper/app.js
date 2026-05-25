@@ -286,8 +286,10 @@ const state = {
   playerBlob: null,
   roomMobs: [],
   roomMobsSeenAt: 0,
-  nearbyMobHintsSeenAt: 0,
-  mobKnownSeenAtByRoom: new Map(),
+  tempMobDotByRoom: new Map(),
+  trackedChars: new Map(),   // Map<name, { roomId }>
+  trackedMobs:  new Map(),   // Map<name, { roomId }>
+  trackedJellyFollowers: new Map(), // Map<name, jellyFollower> for move trails
   roomEdgeVariants: new Map(),
   roomEdgeVariantsDirty: true,
   sessionSocket: null,
@@ -1930,13 +1932,18 @@ function updateEmbedQuickControls() {
       el.embedRoomNsid.textContent = "NSID: --";
       el.embedRoomEph.textContent = "ephNum: --";
     } else {
-      const hasArea = Number.isFinite(Number(room.areaID));
-      const hasLocal = Number.isFinite(Number(room.localID));
-      const nsid = hasArea && hasLocal ? `${room.areaID}:${room.localID}` : "--";
-      const eph = room.ephNum != null && String(room.ephNum).trim() ? String(room.ephNum) : "--";
-      el.embedRoomNsid.textContent = `NSID: ${nsid}`;
-      el.embedRoomEph.textContent = `ephNum: ${eph}`;
-      el.embedRoomMeta.hidden = false;
+      const hasArea = room.areaID != null && Number.isFinite(Number(room.areaID));
+      const hasLocal = room.localID != null && Number.isFinite(Number(room.localID));
+      const nsidText = hasArea && hasLocal ? `${room.areaID}:${room.localID}` : "";
+      const nsidValid = nsidText && !nsidText.includes("null") && !nsidText.includes("undefined");
+      if (!nsidValid) {
+        el.embedRoomMeta.hidden = true;
+      } else {
+        const eph = room.ephNum != null && String(room.ephNum).trim() ? String(room.ephNum) : "--";
+        el.embedRoomNsid.textContent = `NSID: ${nsidText}`;
+        el.embedRoomEph.textContent = `ephNum: ${eph}`;
+        el.embedRoomMeta.hidden = false;
+      }
     }
   }
   if (el.embedLocalIdToggle) {
@@ -2350,8 +2357,7 @@ function resetToEmptyMap() {
   state.playerBlob = null;
   state.roomMobs = [];
   state.roomMobsSeenAt = 0;
-  state.nearbyMobHintsSeenAt = 0;
-  state.mobKnownSeenAtByRoom = new Map();
+  state.tempMobDotByRoom = new Map();
   state.selectedRoomId = null;
   markStaticLayerDirty();
   rebuildIndexes();
@@ -2489,8 +2495,7 @@ function applyMapObject(data) {
   state.playerBlob = null;
   state.roomMobs = [];
   state.roomMobsSeenAt = 0;
-  state.nearbyMobHintsSeenAt = 0;
-  state.mobKnownSeenAtByRoom = new Map();
+  state.tempMobDotByRoom = new Map();
   state.selectedRoomId = null;
   rebuildIndexes();
   syncZLevels();
@@ -2870,6 +2875,42 @@ function ingestRoomInfo(info, durationMs) {
 
   upsertRoom(room);
 
+  // Create dark-unknown stub rooms for exits leading to as-yet-unmapped rooms
+  // so they appear as unexplored squares on the map (same treatment as scan mobs).
+  if (room.discovered) {
+    for (const [dir, ex] of Object.entries(room.exits || {})) {
+      const vec = DIRECTION_VECTORS[dir];
+      if (!vec) continue;
+      const toId = String(ex && ex.to ? ex.to : "").trim();
+      if (!toId || state.roomsById.has(toId)) continue;
+      const nx = room.x + vec.dx;
+      const ny = room.y + vec.dy;
+      const ck = coordKey(nx, ny, room.z, room.gridId);
+      if (state.roomByCoord.has(ck)) continue;
+      upsertRoom({
+        id: toId,
+        name: "",
+        x: nx,
+        y: ny,
+        z: room.z,
+        gridId: room.gridId,
+        sector: "inside",
+        exits: {},
+        markers: {},
+        nearbyMobs: {},
+        knownMobs: [],
+        notes: "",
+        visibleNow: false,
+        discovered: false,
+        darkUnknown: true,
+        lastSeenAt: null,
+        ephNum: null,
+        areaID: null,
+        localID: null
+      });
+    }
+  }
+
   schedulePersistMap();
   setPlayerLocationPayload({
     roomId: room.id,
@@ -3064,10 +3105,24 @@ function clearKnownMobsForLayer(z, gridId) {
   for (const room of state.mapData.rooms) {
     if (room.z !== z) continue;
     if (normalizeGridId(room.gridId) !== normGrid) continue;
-    if (!Array.isArray(room.knownMobs) || room.knownMobs.length === 0) continue;
-    room.knownMobs = [];
-    state.mobKnownSeenAtByRoom.delete(String(room.id || ""));
+    if (Array.isArray(room.knownMobs) && room.knownMobs.length > 0) {
+      room.knownMobs = [];
+    }
+    // Only remove scan-derived dots; nearby-mob hint dots (source === 'nearby')
+    // have their own seenAt timestamps and should fade out naturally.
+    const id = String(room.id || "");
+    const entry = state.tempMobDotByRoom.get(id);
+    if (entry && entry.source !== "nearby") {
+      state.tempMobDotByRoom.delete(id);
+    }
   }
+}
+
+function showTempMobDot(roomId, count, source) {
+  const id = String(roomId || "");
+  if (!id || count <= 0) return;
+  state.tempMobDotByRoom.set(id, { count, seenAt: performance.now(), source: source || "scan" });
+  ensureEffectsLoop();
 }
 
 function applyScanMobSightings(scanSightings, seenAt) {
@@ -3090,7 +3145,7 @@ function applyScanMobSightings(scanSightings, seenAt) {
         name: existing.name || String(entry.room_name || entry.roomName || "")
       }));
       if (mobs.length > 0) {
-        state.mobKnownSeenAtByRoom.set(roomId, scanSeenAt);
+        showTempMobDot(roomId, mobs.length);
       }
       continue;
     }
@@ -3115,7 +3170,7 @@ function applyScanMobSightings(scanSightings, seenAt) {
       lastSeenAt: null
     });
     if (mobs.length > 0) {
-      state.mobKnownSeenAtByRoom.set(roomId, scanSeenAt);
+      showTempMobDot(roomId, mobs.length);
     }
   }
 }
@@ -4608,25 +4663,9 @@ function drawMobHints(visibleRooms) {
   const localMobs = Array.isArray(state.roomMobs) ? state.roomMobs.length : 0;
   mergeHint(currentRoom.id, localMobs, localMobs > 0 ? 1 : 0);
 
-  const nearby = currentRoom.nearbyMobs || {};
-  const nearbyAlpha = mobHintAlphaForTime(state.nearbyMobHintsSeenAt, now);
-  for (const dir of Object.keys(nearby)) {
-    const parsed = parseNearbyMobsEntry(nearby[dir]);
-    const count = Math.max(1, parsed.count || 1);
-    const normDir = normalizeDirectionToken(dir);
-    if (!normDir || !DIRECTION_VECTORS[normDir]) continue;
-    const distance = Math.max(1, parsed.distance || 1);
-    const targetId = findDirectionalScanRoomId(currentRoom, normDir, distance);
-    if (!targetId) continue;
-    mergeHint(targetId, count, nearbyAlpha);
-  }
-
   const visibleSet = new Set((visibleRooms || []).map((r) => r.id));
-  for (const room of visibleRooms || []) {
-    const knownCount = Array.isArray(room.knownMobs) ? room.knownMobs.length : 0;
-    if (knownCount <= 0) continue;
-    const knownSeenAt = state.mobKnownSeenAtByRoom.get(room.id) || 0;
-    mergeHint(room.id, knownCount, mobHintAlphaForTime(knownSeenAt, now));
+  for (const [roomId, entry] of state.tempMobDotByRoom.entries()) {
+    mergeHint(roomId, entry.count, mobHintAlphaForTime(entry.seenAt, now));
   }
 
   countsByRoom.forEach((entry, roomId) => {
@@ -4820,8 +4859,17 @@ function setPlayerLocationPayload(payload) {
   state.playerRoomId = targetRoom.id;
   state.scanDistance = resolveScanDistance(targetRoom);
   const hasNearby = currentRoomHasNearbyMobs(targetRoom);
-  state.nearbyMobHintsSeenAt = hasNearby ? performance.now() : 0;
-  if (hasNearby) ensureEffectsLoop();
+  if (hasNearby) {
+    for (const [dir, entry] of Object.entries(targetRoom.nearbyMobs || {})) {
+      const parsed = parseNearbyMobsEntry(entry);
+      if (parsed.count <= 0) continue;
+      const normDir = normalizeDirectionToken(dir);
+      if (!normDir) continue;
+      const targetId = findDirectionalScanRoomId(targetRoom, normDir, Math.max(1, parsed.distance || 1));
+      if (!targetId) continue;
+      showTempMobDot(targetId, parsed.count, "nearby");
+    }
+  }
   updateEmbedQuickControls();
 
   if (moved && priorWithRoom) {
@@ -6396,17 +6444,13 @@ function currentRoomHasNearbyMobs(room) {
 function pruneMobHintAges(now) {
   let knownChanged = false;
 
-  for (const [roomId, seenAt] of state.mobKnownSeenAtByRoom.entries()) {
-    if (mobHintAlphaForTime(seenAt, now) > 0) continue;
-    state.mobKnownSeenAtByRoom.delete(roomId);
+  for (const [roomId, entry] of state.tempMobDotByRoom.entries()) {
+    if (mobHintAlphaForTime(entry.seenAt, now) > 0) continue;
+    state.tempMobDotByRoom.delete(roomId);
     const room = state.roomsById.get(roomId);
     if (!room || !Array.isArray(room.knownMobs) || room.knownMobs.length === 0) continue;
     room.knownMobs = [];
     knownChanged = true;
-  }
-
-  if (mobHintAlphaForTime(state.nearbyMobHintsSeenAt, now) <= 0) {
-    state.nearbyMobHintsSeenAt = 0;
   }
 
   if (knownChanged) {
@@ -6416,9 +6460,8 @@ function pruneMobHintAges(now) {
 
 function hasActiveMobHintEffects(now) {
   if (mobHintAlphaForTime(state.roomMobsSeenAt, now) > 0) return true;
-  if (mobHintAlphaForTime(state.nearbyMobHintsSeenAt, now) > 0) return true;
-  for (const seenAt of state.mobKnownSeenAtByRoom.values()) {
-    if (mobHintAlphaForTime(seenAt, now) > 0) return true;
+  for (const entry of state.tempMobDotByRoom.values()) {
+    if (mobHintAlphaForTime(entry.seenAt, now) > 0) return true;
   }
   return false;
 }

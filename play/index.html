@@ -78,7 +78,7 @@
               </div>
               <div id="mapv2-weather" class="mapv2-info-weather">&nbsp;</div>
             </div>
-            <iframe id="map-frame" class="mapv2-frame" src="../frmapper/index.html?embed=1" title="frmapper map" loading="lazy"></iframe>
+            <iframe id="map-frame" class="mapv2-frame" title="frmapper map" loading="lazy"></iframe>
           </div>
         </div>
 
@@ -485,6 +485,14 @@
               </div>
               <button id="reset-settings-config" type="button" class="full-btn danger" style="margin-top:6px">Reset Active Profile</button>
               <input id="import-file-config" type="file" accept="application/json" hidden />
+            </div>
+
+            <div class="dpane-section">
+              <div class="dpane-label">GMCP</div>
+              <p class="hint-text">Re-send the webclient GMCP profile to refresh all panel data.</p>
+              <div class="field-row">
+                <button id="btn-renegotiate-gmcp" type="button">Renegotiate GMCP</button>
+              </div>
             </div>
 
           </div><!-- /dpane-config -->
