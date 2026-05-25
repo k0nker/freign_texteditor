@@ -360,11 +360,12 @@
             </div>
             <div class="dpane-section">
               <div class="dpane-label">Settings File</div>
+              <p class="hint-text">Export/import the active profile's play settings. The site theme remains shared across the browser.</p>
               <div class="row-btns">
                 <button id="export-settings" type="button">Export JSON</button>
                 <button id="import-settings" type="button">Import JSON</button>
               </div>
-              <button id="reset-settings" type="button" class="full-btn danger" style="margin-top:6px">Reset to Defaults</button>
+              <button id="reset-settings" type="button" class="full-btn danger" style="margin-top:6px">Reset Active Profile</button>
               <input id="import-file" type="file" accept="application/json" hidden />
             </div>
           </div>
@@ -452,13 +453,26 @@
             </div>
 
             <div class="dpane-section">
+              <div class="dpane-label">Profile</div>
+              <p class="hint-text">Profiles store only play settings. The site-wide theme stays shared.</p>
+              <div class="field-row">
+                <label for="cfg-profile">Active profile</label>
+                <select id="cfg-profile"></select>
+              </div>
+              <div class="row-btns">
+                <button id="cfg-profile-new" type="button">New profile</button>
+                <button id="cfg-profile-delete" type="button" class="danger">Delete profile</button>
+              </div>
+            </div>
+
+            <div class="dpane-section">
               <div class="dpane-label">Settings File</div>
-              <p class="hint-text">Export/import your panels, aliases, triggers, macros, colors, and other play settings.</p>
+              <p class="hint-text">Export/import the active profile's play settings. The site theme remains shared across the browser.</p>
               <div class="row-btns">
                 <button id="export-settings-config" type="button">Export JSON</button>
                 <button id="import-settings-config" type="button">Import JSON</button>
               </div>
-              <button id="reset-settings-config" type="button" class="full-btn danger" style="margin-top:6px">Reset to Defaults</button>
+              <button id="reset-settings-config" type="button" class="full-btn danger" style="margin-top:6px">Reset Active Profile</button>
               <input id="import-file-config" type="file" accept="application/json" hidden />
             </div>
 
@@ -512,7 +526,7 @@
           <div class="drawer-pane" id="dpane-macros">
             <div class="dpane-section">
               <div class="dpane-label">Macros</div>
-              <p class="hint-text">Macros appear as quick-access buttons above the input bar.</p>
+              <p class="hint-text">Macros appear as quick-access buttons above the input bar and can have hotkeys (for example, Shift+F2). Browser-reserved shortcuts (like F12) cannot be overridden.</p>
               <div id="macro-list" class="item-list"></div>
               <button id="add-macro" type="button" class="add-btn">+ Add Macro</button>
             </div>
@@ -537,6 +551,14 @@
     </div><!-- /right-settings-rail -->
 
   </div><!-- /workspace -->
+
+  <section id="startup-profile-picker" hidden aria-live="polite" aria-label="Profile selection">
+    <div class="startup-profile-card">
+      <h1>Choose Profile</h1>
+      <p>Select the /play profile to load for this tab.</p>
+      <div id="startup-profile-options" class="startup-profile-options" role="list"></div>
+    </div>
+  </section>
 
   <script src="../site-themes.js?v=1" defer></script>
   <script src="../site-shell.js?v=3" defer></script>

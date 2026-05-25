@@ -5,10 +5,12 @@
 (function () {
   'use strict';
 
-  var STORAGE_KEY    = 'freign.play2.settings.v1';
+  var PROFILE_STORE_KEY = 'freign.play2.profiles.v1';
+  var ACTIVE_PROFILE_KEY = 'freign.play2.active-profile.v1';
   var SCROLLBACK_KEY = 'freign.play2.scrollback';
   var CMD_HISTORY_KEY = 'freign.play2.cmdhistory';
   var SITE_THEME_KEY = 'freign.site.theme.v1';
+  var DEFAULT_PROFILE_NAME = 'Default';
   var SINGLE_LEFT_PANEL_MODE = false;
   var MAP_PANEL_ID = 'map';
   var LEGACY_MAP_PANEL_ID = 'mapv2';
@@ -128,6 +130,217 @@
     return id === LEGACY_MAP_PANEL_ID ? MAP_PANEL_ID : id;
   }
 
+  function normalizeProfileName(name) {
+    return String(name == null ? '' : name).trim();
+  }
+
+  function readActiveProfileName() {
+    try {
+      return normalizeProfileName(sessionStorage.getItem(ACTIVE_PROFILE_KEY));
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function writeActiveProfileName(name) {
+    try {
+      sessionStorage.setItem(ACTIVE_PROFILE_KEY, normalizeProfileName(name) || DEFAULT_PROFILE_NAME);
+    } catch (_) {}
+  }
+
+  function getGlobalThemeName() {
+    var siteTheme = themeApi ? themeApi.getThemeId() : localStorage.getItem(SITE_THEME_KEY);
+    return resolveTheme(siteTheme || DEFAULT_SETTINGS.theme);
+  }
+
+  function cloneProfileSettings(settings) {
+    var incoming = settings && typeof settings === 'object' ? clone(settings) : {};
+    delete incoming.theme;
+    var out = mergeSettings(cloneDefaultSettings(), incoming);
+    delete out.theme;
+    return out;
+  }
+
+  function loadProfileStore() {
+    var store = { profiles: {} };
+    store.profiles[DEFAULT_PROFILE_NAME] = cloneProfileSettings({});
+
+    try {
+      var raw = localStorage.getItem(PROFILE_STORE_KEY);
+      if (!raw) return store;
+      var parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return store;
+
+      var profiles = parsed.profiles && typeof parsed.profiles === 'object' ? parsed.profiles : null;
+      if (profiles) {
+        Object.keys(profiles).forEach(function (name) {
+          var profileName = normalizeProfileName(name);
+          if (!profileName) return;
+          store.profiles[profileName] = cloneProfileSettings(profiles[name]);
+        });
+      } else if (parsed.settings && typeof parsed.settings === 'object') {
+        store.profiles[DEFAULT_PROFILE_NAME] = cloneProfileSettings(parsed.settings);
+      }
+    } catch (_) {}
+
+    if (!store.profiles[DEFAULT_PROFILE_NAME]) {
+      store.profiles[DEFAULT_PROFILE_NAME] = cloneProfileSettings({});
+    }
+
+    return store;
+  }
+
+  function saveProfileStore() {
+    try {
+      localStorage.setItem(PROFILE_STORE_KEY, JSON.stringify({
+        version: 1,
+        profiles: state.profileStore ? state.profileStore.profiles : { Default: cloneProfileSettings({}) }
+      }));
+    } catch (_) {}
+  }
+
+  function getProfileNames() {
+    if (!state.profileStore || !state.profileStore.profiles) return [DEFAULT_PROFILE_NAME];
+    return Object.keys(state.profileStore.profiles).filter(function (name) {
+      return !!normalizeProfileName(name);
+    }).sort(function (a, b) {
+      if (a === DEFAULT_PROFILE_NAME) return -1;
+      if (b === DEFAULT_PROFILE_NAME) return 1;
+      return a.localeCompare(b);
+    });
+  }
+
+  function getProfileSettings(profileName) {
+    var name = normalizeProfileName(profileName) || DEFAULT_PROFILE_NAME;
+    if (!state.profileStore || !state.profileStore.profiles) return cloneProfileSettings({});
+    return cloneProfileSettings(state.profileStore.profiles[name] || {});
+  }
+
+  function chooseStartupProfileName(profileNames) {
+    var stored = readActiveProfileName();
+    var fallback = (stored && profileNames.indexOf(stored) >= 0)
+      ? stored
+      : (profileNames.indexOf(DEFAULT_PROFILE_NAME) >= 0 ? DEFAULT_PROFILE_NAME : profileNames[0]);
+    return fallback;
+  }
+
+  function needsStartupProfilePicker(profileNames) {
+    return (profileNames || []).some(function (name) { return name !== DEFAULT_PROFILE_NAME; });
+  }
+
+  function renderStartupProfilePicker() {
+    if (!el.startupProfilePicker || !el.startupProfileOptions) return;
+    var profileNames = state.startupProfileNames && state.startupProfileNames.length
+      ? state.startupProfileNames.slice()
+      : getProfileNames();
+    var activeName = normalizeProfileName(state.activeProfileName) || DEFAULT_PROFILE_NAME;
+
+    el.startupProfileOptions.innerHTML = '';
+    profileNames.forEach(function (name) {
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'startup-profile-btn';
+      if (name === activeName) button.classList.add('is-active');
+      button.setAttribute('data-profile-name', name);
+      button.textContent = name;
+      el.startupProfileOptions.appendChild(button);
+    });
+  }
+
+  function showStartupProfilePicker() {
+    if (!el.startupProfilePicker) return;
+    renderStartupProfilePicker();
+    document.body.classList.add('profile-picker-open');
+    el.startupProfilePicker.hidden = false;
+  }
+
+  function hideStartupProfilePicker() {
+    if (!el.startupProfilePicker) return;
+    document.body.classList.remove('profile-picker-open');
+    el.startupProfilePicker.hidden = true;
+  }
+
+  function handleStartupProfilePick(profileName) {
+    var picked = normalizeProfileName(profileName) || DEFAULT_PROFILE_NAME;
+    var names = getProfileNames();
+    if (names.indexOf(picked) < 0) picked = DEFAULT_PROFILE_NAME;
+
+    setActiveProfile(picked, { render: true, persist: true });
+    hideStartupProfilePicker();
+    appendSystem('Client ready — choose a server to connect.');
+  }
+
+  function setActiveProfile(profileName, options) {
+    var opts = options || {};
+    var names = getProfileNames();
+    var next = normalizeProfileName(profileName) || DEFAULT_PROFILE_NAME;
+    if (names.indexOf(next) < 0) next = DEFAULT_PROFILE_NAME;
+
+    writeActiveProfileName(next);
+    state.activeProfileName = next;
+    syncPlayTitle();
+    state.settings = ensureDefaultPanelLayout(mergeSettings(cloneDefaultSettings(), getProfileSettings(next)));
+    state.settings.theme = getGlobalThemeName();
+    rebuildPalette();
+    if (opts.render !== false) renderAll();
+    if (opts.persist !== false) saveSettings();
+  }
+
+  function syncPlayTitle() {
+    var activeName = normalizeProfileName(state.activeProfileName) || DEFAULT_PROFILE_NAME;
+    document.title = activeName === DEFAULT_PROFILE_NAME
+      ? 'FReign Play'
+      : (activeName + ' - FReign Play');
+  }
+
+  function renderProfileCfg() {
+    if (!el.profileSelect) return;
+    var names = getProfileNames();
+    var current = normalizeProfileName(state.activeProfileName) || DEFAULT_PROFILE_NAME;
+
+    el.profileSelect.innerHTML = '';
+    names.forEach(function (name) {
+      var option = document.createElement('option');
+      option.value = name;
+      option.textContent = name;
+      el.profileSelect.appendChild(option);
+    });
+    el.profileSelect.value = names.indexOf(current) >= 0 ? current : (names[0] || DEFAULT_PROFILE_NAME);
+    if (el.profileDelete) {
+      el.profileDelete.disabled = names.length <= 1 || el.profileSelect.value === DEFAULT_PROFILE_NAME;
+    }
+  }
+
+  function createProfileFromCurrent() {
+    var suggested = 'Profile ' + (getProfileNames().length + 1);
+    var rawName = window.prompt('New profile name:', suggested);
+    if (rawName == null) return;
+    var profileName = normalizeProfileName(rawName);
+    if (!profileName) return;
+
+    var profiles = state.profileStore.profiles;
+    if (profiles[profileName] && !window.confirm('Replace profile "' + profileName + '"?')) return;
+    profiles[profileName] = cloneProfileSettings(state.settings);
+    saveProfileStore();
+    setActiveProfile(profileName, { render: false, persist: false });
+    renderAll();
+  }
+
+  function deleteActiveProfile() {
+    var profileName = normalizeProfileName(state.activeProfileName) || DEFAULT_PROFILE_NAME;
+    if (profileName === DEFAULT_PROFILE_NAME) return;
+    var profiles = state.profileStore && state.profileStore.profiles;
+    if (!profiles || !profiles[profileName]) return;
+    if (!window.confirm('Delete profile "' + profileName + '"?')) return;
+
+    delete profiles[profileName];
+      appendSystem('Client ready — choose a server to connect.');
+    var names = getProfileNames();
+    var next = names.indexOf(DEFAULT_PROFILE_NAME) >= 0 ? DEFAULT_PROFILE_NAME : (names[0] || DEFAULT_PROFILE_NAME);
+    setActiveProfile(next, { render: false, persist: false });
+    renderAll();
+  }
+
   function ensureDefaultPanelLayout(settings) {
     if (!settings) return settings;
     if (!settings.panelSides || typeof settings.panelSides !== 'object') {
@@ -202,6 +415,10 @@
 
   var state = {
     settings:       null,
+    profileStore:   null,
+    activeProfileName: DEFAULT_PROFILE_NAME,
+    startupProfileNames: [],
+    startupProfileSelectionRequired: false,
     ws:             null,
     connected:      false,
     selectedMudId:  'public',
@@ -293,12 +510,19 @@
     bindEls();
     bindUi();
     loadSettings();
+    if (state.startupProfileSelectionRequired) {
+      document.body.classList.add('profile-picker-open');
+    }
     renderAll();
     initAtmosphereMotes();
     initResizeHandles();
     loadScrollback();
     loadCommandHistory();
-    appendSystem('Client ready \u2014 choose a server to connect.');
+    if (state.startupProfileSelectionRequired) {
+      showStartupProfilePicker();
+    } else {
+      appendSystem('Client ready — choose a server to connect.');
+    }
   }
 
   function bindEls() {
@@ -372,6 +596,11 @@
     el.spDisconnect   = document.getElementById('sp-disconnect');
 
     el.cfgFont        = document.getElementById('cfg-font');
+    el.profileSelect  = document.getElementById('cfg-profile');
+    el.profileNew     = document.getElementById('cfg-profile-new');
+    el.profileDelete  = document.getElementById('cfg-profile-delete');
+    el.startupProfilePicker = document.getElementById('startup-profile-picker');
+    el.startupProfileOptions = document.getElementById('startup-profile-options');
     el.cfgLayout      = document.getElementById('cfg-layout');
     el.cfgKeepInput   = document.getElementById('cfg-keep-input');
     el.resizeLeft     = document.getElementById('resize-left');
@@ -421,6 +650,7 @@
     });
 
     el.cmdInput.addEventListener('keydown', handleInputHistory);
+    document.addEventListener('keydown', handleMacroHotkeys, true);
     el.cmdInput.addEventListener('input', function () {
       resetHistoryNav();
     });
@@ -595,6 +825,30 @@
       saveSettings();
     });
 
+    if (el.profileSelect) {
+      el.profileSelect.addEventListener('change', function () {
+        setActiveProfile(el.profileSelect.value || DEFAULT_PROFILE_NAME, { render: true, persist: true });
+      });
+    }
+    if (el.profileNew) {
+      el.profileNew.addEventListener('click', function () {
+        createProfileFromCurrent();
+      });
+    }
+    if (el.profileDelete) {
+      el.profileDelete.addEventListener('click', function () {
+        deleteActiveProfile();
+      });
+    }
+
+    if (el.startupProfileOptions) {
+      el.startupProfileOptions.addEventListener('click', function (e) {
+        var button = e.target && e.target.closest ? e.target.closest('[data-profile-name]') : null;
+        if (!button) return;
+        handleStartupProfilePick(button.getAttribute('data-profile-name') || DEFAULT_PROFILE_NAME);
+      });
+    }
+
     /* Config: layout style */
     el.cfgLayout.addEventListener('change', function () {
       state.settings.layoutStyle = el.cfgLayout.value;
@@ -674,7 +928,7 @@
     }
     if (el.addMacro) {
       el.addMacro.addEventListener('click', function () {
-        state.settings.macros.push({ enabled: true, label: '', command: '' });
+        state.settings.macros.push({ enabled: true, label: '', command: '', hotkey: '' });
         saveAndRefresh();
       });
     }
@@ -1452,21 +1706,26 @@
      ═══════════════════════════════════════════════════════════════ */
 
   function loadSettings() {
-    try {
-      var raw    = localStorage.getItem(STORAGE_KEY);
-      var parsed = raw ? JSON.parse(raw) : {};
-      state.settings = ensureDefaultPanelLayout(mergeSettings(cloneDefaultSettings(), parsed));
-      var siteTheme  = themeApi ? themeApi.getThemeId() : localStorage.getItem(SITE_THEME_KEY);
-      state.settings.theme = resolveTheme(siteTheme || state.settings.theme);
-    } catch (_) {
-      state.settings = ensureDefaultPanelLayout(cloneDefaultSettings());
-    }
+    state.profileStore = loadProfileStore();
+    var profileNames = getProfileNames();
+    var activeName = chooseStartupProfileName(profileNames);
+    state.startupProfileNames = profileNames.slice();
+    state.startupProfileSelectionRequired = needsStartupProfilePicker(profileNames);
+    state.activeProfileName = activeName;
+    syncPlayTitle();
+    writeActiveProfileName(activeName);
+    state.settings = ensureDefaultPanelLayout(mergeSettings(cloneDefaultSettings(), getProfileSettings(activeName)));
+    state.settings.theme = getGlobalThemeName();
     rebuildPalette();
   }
 
   function saveSettings()    {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state.settings));
+      if (!state.profileStore || !state.profileStore.profiles) {
+        state.profileStore = loadProfileStore();
+      }
+      state.profileStore.profiles[normalizeProfileName(state.activeProfileName) || DEFAULT_PROFILE_NAME] = cloneProfileSettings(state.settings);
+      saveProfileStore();
     } catch (_) {
       // Storage may be unavailable or full; keep runtime settings functional.
     }
@@ -1487,6 +1746,8 @@
 
     applyFont();
     applyLayout();
+
+    renderProfileCfg();
 
     el.cfgFont.value         = state.settings.font || 'JetBrains Mono';
     el.cfgLayout.value       = state.settings.layoutStyle || 'block';
@@ -1793,6 +2054,7 @@
       var card = makeItemCard('macro', !!m.enabled, idx, state.settings.macros);
       card.appendChild(makeItemField('Label',   'text', m.label   || '', function (v) { m.label   = v; saveAndRefresh(); }));
       card.appendChild(makeItemField('Command', 'text', m.command || '', function (v) { m.command = v; saveAndRefresh(); }));
+      card.appendChild(makeItemField('Hotkey',  'text', m.hotkey  || '', function (v) { m.hotkey  = normalizeMacroHotkey(v); saveAndRefresh(); }));
       el.macroList.appendChild(card);
     });
   }
@@ -1805,6 +2067,7 @@
       btn.type = 'button';
       btn.className = 'macro-btn';
       btn.textContent = m.label || m.command;
+      if (m.hotkey) btn.title = 'Hotkey: ' + m.hotkey;
       btn.addEventListener('click', function () { sendCommand(m.command); });
       el.macroBar.appendChild(btn);
     });
@@ -1871,6 +2134,7 @@
     state.userDisconnected = false;
     if (!isReconnect) state.reconnectAttempts = 0;
     state.selectedMudId = mudId;
+    if (!isReconnect) reloadMapV2Frame();
     setConnectionState('connecting');
     appendSystem('Connecting to ' + mud.name + ' (' + mud.host + ':' + mud.port + ')\u2026');
     var wsId = ++state.wsGeneration;
@@ -2310,6 +2574,21 @@
     try {
       el.mapV2Frame.contentWindow.postMessage(message, '*');
     } catch (_) {}
+  }
+
+  function reloadMapV2Frame() {
+    if (!el.mapV2Frame) return;
+    try {
+      state.gmcp.mapV2SnapshotSent = false;
+      if (el.mapV2Frame.contentWindow) {
+        el.mapV2Frame.contentWindow.location.reload();
+        return;
+      }
+    } catch (_) {}
+
+    var src = el.mapV2Frame.getAttribute('src') || el.mapV2Frame.src;
+    if (!src) return;
+    el.mapV2Frame.src = src;
   }
 
   function syncMapV2Snapshot(force) {
@@ -3802,7 +4081,7 @@
      ═══════════════════════════════════════════════════════════════ */
 
   function ingestMudText(chunk) {
-    var text  = state.lineCarry + chunk;
+    var text  = normalizeInboundMudText(state.lineCarry + chunk);
     if (tryConsumeMapRenderBlob(text)) {
       state.lineCarry = '';
       if (state.partialRow) {
@@ -3820,11 +4099,14 @@
         renderRowContent(state.partialRow, first, runTriggers(first));
         state.partialRow = null;
       } else {
-        state.lineCarry = trailing; upsertPartialRow(state.lineCarry); return;
+        state.lineCarry = trailing;
+        upsertPartialRow(state.lineCarry);
+        return;
       }
     }
     lines.forEach(function (line) {
       if (tryConsumeMapRenderBlob(line)) return;
+      if (!hasRenderableMudContent(line)) return;
       appendAnsiLine(line, runTriggers(line));
     });
 
@@ -3834,6 +4116,20 @@
 
     state.lineCarry = trailing;
     if (state.lineCarry) upsertPartialRow(state.lineCarry);
+  }
+
+  function normalizeInboundMudText(text) {
+    if (text == null) return '';
+    return String(text)
+      .replace(/\u0000/g, '')
+      .replace(/\r\n|\n\r/g, '\n')
+      .replace(/\r/g, '');
+  }
+
+  function hasRenderableMudContent(line) {
+    if (line == null) return false;
+    // Keep true blank lines if they are actual newlines, but skip pure control-only fragments.
+    return /[^\u0000-\u001f\u007f]/.test(String(line)) || String(line) === '';
   }
 
   function runTriggers(line) {
@@ -3887,6 +4183,7 @@
 
   function upsertPartialRow(line) {
     if (!line) return;
+    if (!hasRenderableMudContent(line)) return;
     if (state.partialRow) { renderRowContent(state.partialRow, line, false); return; }
     var row = document.createElement('div');
     renderRowContent(row, line, false);
@@ -4028,6 +4325,148 @@
     });
   }
 
+  function handleMacroHotkeys(e) {
+    if (!state || !state.settings || !Array.isArray(state.settings.macros)) return;
+    if (state.startupProfileSelectionRequired && el.startupProfilePicker && !el.startupProfilePicker.hidden) return;
+    if (e.defaultPrevented || e.repeat || e.isComposing) return;
+
+    var hotkey = keyboardEventToHotkey(e);
+    if (!hotkey) return;
+    if (isReservedBrowserHotkey(hotkey)) return;
+    if (isEditableTarget(e.target) && !isFunctionHotkey(hotkey) && !(e.ctrlKey || e.metaKey || e.altKey)) return;
+
+    var macro = null;
+    for (var i = 0; i < state.settings.macros.length; i++) {
+      var m = state.settings.macros[i];
+      if (!m || m.enabled === false || !m.command) continue;
+      if (normalizeMacroHotkey(m.hotkey) === hotkey) {
+        macro = m;
+        break;
+      }
+    }
+    if (!macro) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    sendCommand(macro.command);
+  }
+
+  function isEditableTarget(target) {
+    var elTarget = target;
+    if (!elTarget || !elTarget.tagName) return false;
+    if (elTarget.isContentEditable) return true;
+    var tag = String(elTarget.tagName).toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select';
+  }
+
+  function keyboardEventToHotkey(e) {
+    var key = String(e && e.key || '').trim();
+    if (!key) return '';
+    var keyName = normalizeMacroHotkeyKey(key);
+    if (!keyName) return '';
+
+    var parts = [];
+    if (e.ctrlKey || e.metaKey) parts.push('Ctrl');
+    if (e.altKey) parts.push('Alt');
+    if (e.shiftKey) parts.push('Shift');
+    parts.push(keyName);
+    return parts.join('+');
+  }
+
+  function normalizeMacroHotkey(value) {
+    var raw = String(value == null ? '' : value).trim();
+    if (!raw) return '';
+
+    var tokens = raw.split('+').map(function (t) { return String(t || '').trim(); }).filter(Boolean);
+    if (!tokens.length) return '';
+
+    var keyToken = '';
+    var wantsCtrl = false;
+    var wantsAlt = false;
+    var wantsShift = false;
+
+    tokens.forEach(function (token) {
+      var lower = token.toLowerCase();
+      if (lower === 'ctrl' || lower === 'control' || lower === 'cmd' || lower === 'meta') {
+        wantsCtrl = true;
+        return;
+      }
+      if (lower === 'alt' || lower === 'option') {
+        wantsAlt = true;
+        return;
+      }
+      if (lower === 'shift') {
+        wantsShift = true;
+        return;
+      }
+      keyToken = token;
+    });
+
+    var keyName = normalizeMacroHotkeyKey(keyToken);
+    if (!keyName) return '';
+
+    var parts = [];
+    if (wantsCtrl) parts.push('Ctrl');
+    if (wantsAlt) parts.push('Alt');
+    if (wantsShift) parts.push('Shift');
+    parts.push(keyName);
+
+    var normalized = parts.join('+');
+    if (isReservedBrowserHotkey(normalized)) return '';
+    return normalized;
+  }
+
+  function normalizeMacroHotkeyKey(key) {
+    var raw = String(key == null ? '' : key).trim();
+    if (!raw) return '';
+    var lower = raw.toLowerCase();
+    if (lower === ' ') return 'Space';
+    if (lower === 'space' || lower === 'spacebar') return 'Space';
+    if (lower === 'esc') return 'Escape';
+    if (lower === 'return') return 'Enter';
+
+    if (/^f([1-9]|1[0-2])$/i.test(raw)) return raw.toUpperCase();
+    if (/^[a-z]$/i.test(raw)) return raw.toUpperCase();
+    if (/^[0-9]$/.test(raw)) return raw;
+
+    var specials = {
+      enter: 'Enter', tab: 'Tab', escape: 'Escape', backspace: 'Backspace', delete: 'Delete',
+      insert: 'Insert', home: 'Home', end: 'End', pageup: 'PageUp', pagedown: 'PageDown',
+      arrowup: 'ArrowUp', arrowdown: 'ArrowDown', arrowleft: 'ArrowLeft', arrowright: 'ArrowRight',
+      up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight',
+      space: 'Space'
+    };
+    return specials[lower] || '';
+  }
+
+  function isFunctionHotkey(hotkey) {
+    return /^([A-Za-z]+\+)*F([1-9]|1[0-2])$/.test(String(hotkey || ''));
+  }
+
+  function isReservedBrowserHotkey(hotkey) {
+    var normalized = String(hotkey || '');
+    var reserved = {
+      'F12': true,
+      'Ctrl+Shift+I': true,
+      'Ctrl+Shift+J': true,
+      'Ctrl+Shift+C': true,
+      'Ctrl+U': true,
+      'Ctrl+R': true,
+      'Ctrl+Shift+R': true,
+      'Ctrl+L': true,
+      'Ctrl+T': true,
+      'Ctrl+N': true,
+      'Ctrl+W': true,
+      'Ctrl+Tab': true,
+      'Ctrl+Shift+Tab': true,
+      'Ctrl+PageUp': true,
+      'Ctrl+PageDown': true,
+      'Alt+Left': true,
+      'Alt+Right': true
+    };
+    return !!reserved[normalized];
+  }
+
   function applyAliases(cmd) {
     var result = cmd;
     state.settings.aliases.forEach(function (a) {
@@ -4143,20 +4582,22 @@
      ═══════════════════════════════════════════════════════════════ */
 
   function exportSettings() {
+    var exportSettings = cloneProfileSettings(state.settings);
     var payload = {
       schema: 'freign.play2.settings.export',
       version: 1,
       exportedAt: new Date().toISOString(),
-      settings: clone(state.settings),
+      profile: normalizeProfileName(state.activeProfileName) || DEFAULT_PROFILE_NAME,
+      settings: exportSettings,
     };
     var json = JSON.stringify(payload, null, 2);
     var blob = new Blob([json], { type: 'application/json' });
     var url  = URL.createObjectURL(blob);
     var a    = document.createElement('a');
-    a.href = url; a.download = 'freign-play2-settings.json';
+    a.href = url; a.download = 'freign-play2-' + (normalizeProfileName(state.activeProfileName) || DEFAULT_PROFILE_NAME).toLowerCase().replace(/[^a-z0-9._-]+/g, '_') + '-settings.json';
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
-    appendSystem('Settings exported.');
+    appendSystem('Active profile exported.');
   }
 
   function importSettingsFile(e) {
@@ -4171,9 +4612,11 @@
           incoming = parsed.settings;
         }
         var defaults = cloneDefaultSettings();
+        delete incoming.theme;
         state.settings = ensureDefaultPanelLayout(mergeSettings(defaults, incoming || {}));
+        state.settings.theme = getGlobalThemeName();
         rebuildPalette(); saveAndRefresh();
-        appendSystem('Settings imported (defaults reset, then profile applied).');
+        appendSystem('Active profile imported.');
       } catch (_) { appendSystem('Settings import failed: invalid JSON.'); }
     };
     reader.readAsText(file);
@@ -4181,27 +4624,13 @@
   }
 
   function resetLocalSettings() {
-    if (!window.confirm('Reset all FREIGN Play 2 settings? This cannot be undone.')) return;
-    disconnect(); clearSavedKeys();
-    localStorage.removeItem(SCROLLBACK_KEY);
-    state.settings   = ensureDefaultPanelLayout(cloneDefaultSettings());
-    state.cmdHistory = []; state.historyIdx = -1;
-    state.lineCarry  = ''; state.lastCmd    = '';
-    if (state.partialRow && state.partialRow.parentNode) {
-      state.partialRow.parentNode.removeChild(state.partialRow);
-    }
-    state.partialRow = null;
-    rebuildPalette(); saveAndRefresh();
-    appendSystem('Settings reset to defaults.');
-  }
-
-  function clearSavedKeys() {
-    var keys = [];
-    for (var i = 0; i < localStorage.length; i++) {
-      var k = localStorage.key(i);
-      if (k && k.indexOf('freign.play2.') === 0) keys.push(k);
-    }
-    keys.forEach(function (k) { localStorage.removeItem(k); });
+    if (!window.confirm('Reset the active profile to defaults? This cannot be undone.')) return;
+    state.settings = ensureDefaultPanelLayout(cloneDefaultSettings());
+    state.settings.theme = getGlobalThemeName();
+    saveSettings();
+    rebuildPalette();
+    renderAll();
+    appendSystem('Active profile reset to defaults.');
   }
 
   /* ═══════════════════════════════════════════════════════════════
@@ -4285,7 +4714,12 @@
 
     out.macros = Array.isArray(incoming.macros)
       ? incoming.macros.map(function (m) {
-          return { enabled: m.enabled !== false, label: String(m.label || ''), command: String(m.command || '') };
+          return {
+            enabled: m.enabled !== false,
+            label: String(m.label || ''),
+            command: String(m.command || ''),
+            hotkey: normalizeMacroHotkey(m.hotkey || '')
+          };
         })
       : [];
 

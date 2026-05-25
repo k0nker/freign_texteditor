@@ -1,9 +1,10 @@
 "use strict";
 
 const TILE_SIZE = 48;
-const WALL_COLOR = "#5f4126";
+const WALL_COLOR = "#74442c";
 const OFF_LAYER_WALL_COLOR = "#3f6ca6";
-const WALL_BORDER_COLOR = "rgba(16, 12, 8, 0.96)";
+const WALL_BORDER_COLOR = "rgba(34, 17, 11, 0.96)";
+const WALL_LINE_WIDTH_BASE = 2.85;
 const STORAGE_KEY_PREFIX = "frmapper.savedMap.v2";
 const SITE_THEME_KEY = "freign.site.theme.v1";
 const FRMAPPER_THEME_DEFAULT = "onyx";
@@ -219,7 +220,8 @@ const DIRECTION_ALIASES = {
 const sessionParams = new URLSearchParams(window.location.search || "");
 const sessionToken = sessionParams.get("session") || "";
 const sessionRealm = sessionParams.get("realm") || "public";
-const sessionMode = sessionToken ? "ws" : "embed";
+const embedParam = String(sessionParams.get("embed") || "").toLowerCase();
+const sessionMode = sessionToken ? "ws" : ((embedParam === "1" || embedParam === "true" || embedParam === "yes") ? "embed" : "anon");
 const sessionWsUrl = buildSessionWsUrl(sessionToken, sessionRealm);
 
 const state = {
@@ -1715,6 +1717,7 @@ function storageKeyForNamespace(namespace) {
 }
 
 function activeStorageKey() {
+  if (state.sessionMode === "anon") return "";
   state.storageNamespace = buildStorageNamespace();
   state.storageKey = storageKeyForNamespace(state.storageNamespace);
   return state.storageKey;
@@ -1735,6 +1738,7 @@ function loadPersistedMapFromKey(key) {
 }
 
 function storageLoadCandidates() {
+  if (state.sessionMode === "anon") return [];
   const out = [];
   const seen = new Set();
   const push = (key) => {
@@ -2223,6 +2227,15 @@ function wireEvents() {
 
   window.addEventListener("storage", (event) => {
     if (!event || event.key !== SITE_THEME_KEY) return;
+    syncFrmapperThemeFromSitePreference();
+  });
+
+  window.addEventListener("freign-theme-changed", (event) => {
+    const detail = event && event.detail && typeof event.detail === "object" ? event.detail : null;
+    if (detail && detail.themeId) {
+      applyFrmapperTheme(detail.themeId);
+      return;
+    }
     syncFrmapperThemeFromSitePreference();
   });
 }
@@ -3557,17 +3570,17 @@ function drawActiveRoomPulse(room) {
   const tilePx = TILE_SIZE * state.zoom;
   const x = state.panX + room.x * tilePx;
   const y = state.panY + room.y * tilePx;
-  const pulse = (Math.sin(performance.now() / 680) + 1) * 0.5;
-  const glowAlpha = 0.06 + pulse * 0.06;
-  const strokeAlpha = 0.12 + pulse * 0.08;
+  const pulse = (Math.sin(performance.now() / 520) + 1) * 0.5;
+  const glowAlpha = 0.02 + pulse * 0.05;
+  const strokeAlpha = 0.06 + pulse * 0.38;
 
   ctx.save();
-  ctx.shadowColor = `rgba(217, 176, 95, ${Math.min(0.2, glowAlpha + 0.06)})`;
-  ctx.shadowBlur = Math.max(6, tilePx * 0.22);
-  ctx.fillStyle = `rgba(217, 176, 95, ${glowAlpha})`;
+  ctx.shadowColor = `rgba(255, 244, 220, ${Math.min(0.42, 0.08 + pulse * 0.34)})`;
+  ctx.shadowBlur = Math.max(7, tilePx * 0.26);
+  ctx.fillStyle = `rgba(255, 243, 214, ${glowAlpha})`;
   ctx.fillRect(x + 1, y + 1, tilePx - 2, tilePx - 2);
   ctx.shadowBlur = 0;
-  ctx.strokeStyle = `rgba(237, 205, 138, ${strokeAlpha})`;
+  ctx.strokeStyle = `rgba(255, 237, 190, ${strokeAlpha})`;
   ctx.lineWidth = Math.max(1, state.zoom * 1.1);
   ctx.strokeRect(x + 0.5, y + 0.5, tilePx - 1, tilePx - 1);
   ctx.restore();
@@ -4605,10 +4618,6 @@ function setPlayerLocationPayload(payload) {
   state.nearbyMobHintsSeenAt = hasNearby ? performance.now() : 0;
   if (hasNearby) ensureEffectsLoop();
   updateEmbedQuickControls();
-  if (!state.selectedRoomId) {
-    state.selectedRoomId = targetRoom.id;
-    updateInspector();
-  }
 
   if (moved && priorWithRoom) {
     addMovementTrail(priorWithRoom, next);
@@ -5047,7 +5056,7 @@ function renderRoomWallSprite(g, tilePx, pad, mask, zoomBucket, variant) {
   const opacity = wallOpacityForZoomValue(zoomBucket);
   if (opacity <= 0) return;
 
-  const lineWidth = Math.max(2.6, 2.6 * zoomBucket) * (tilePx / TILE_SIZE);
+  const lineWidth = Math.max(WALL_LINE_WIDTH_BASE, WALL_LINE_WIDTH_BASE * zoomBucket) * (tilePx / TILE_SIZE);
   const half = lineWidth * 0.5;
   const x0 = pad;
   const y0 = pad;
@@ -5350,7 +5359,9 @@ function drawDoorMark(segment, stateLabel, lineWidth) {
   ctx.lineWidth = Math.max(1.4, lineWidth * 0.55);
 
   if (stateLabel === "open") {
-    ctx.lineWidth = Math.max(0.7, lineWidth * 0.22);
+    ctx.lineWidth = Math.max(0.95, lineWidth * 0.34);
+    ctx.shadowColor = "rgba(248, 213, 110, 0.9)";
+    ctx.shadowBlur = Math.max(3, lineWidth * 0.9);
     ctx.lineCap = "butt";
     ctx.beginPath();
     ctx.moveTo(segment.x1, segment.y1);
@@ -5455,7 +5466,9 @@ function drawOpenExitMark(segment, lineWidth) {
   ctx.save();
   ctx.globalAlpha *= opacity;
   ctx.strokeStyle = "rgba(248, 213, 110, 0.96)";
-  ctx.lineWidth = Math.max(0.7, lineWidth * 0.22);
+  ctx.lineWidth = Math.max(0.95, lineWidth * 0.34);
+  ctx.shadowColor = "rgba(248, 213, 110, 0.9)";
+  ctx.shadowBlur = Math.max(3, lineWidth * 0.9);
   ctx.lineCap = "butt";
   ctx.beginPath();
   ctx.moveTo(segment.x1, segment.y1);
@@ -5541,7 +5554,7 @@ function getWaterDropSprite(size, reduceGlow) {
   const cached = WATER_DROP_SPRITE_CACHE.get(cacheKey);
   if (cached) return cached;
 
-  const glow = sizeBucket * (reduceGlow ? 0.65 : 1.05);
+  const glow = sizeBucket * (reduceGlow ? 0.7 : 1.15);
   const center = Math.ceil(sizeBucket + glow + 2);
   const canvasSize = Math.max(12, center * 2);
   const canvas = document.createElement("canvas");
@@ -5554,28 +5567,45 @@ function getWaterDropSprite(size, reduceGlow) {
     return fallback;
   }
 
+  const width = sizeBucket * 1.45;
+  const lineGap = Math.max(1.8, sizeBucket * 0.42);
+  const amplitude = Math.max(1.2, sizeBucket * 0.2);
+  const strokeW = Math.max(1.1, sizeBucket * 0.2);
+
   g.save();
-  g.shadowColor = "rgba(80, 180, 255, 0.95)";
-  g.shadowBlur = Math.max(3, sizeBucket * (reduceGlow ? 0.95 : 1.35));
-  g.beginPath();
-  g.moveTo(center, center - sizeBucket * 0.6);
-  g.bezierCurveTo(
-    center + sizeBucket * 0.55, center - sizeBucket * 0.05,
-    center + sizeBucket * 0.55, center + sizeBucket * 0.55,
-    center, center + sizeBucket * 0.65
-  );
-  g.bezierCurveTo(
-    center - sizeBucket * 0.55, center + sizeBucket * 0.55,
-    center - sizeBucket * 0.55, center - sizeBucket * 0.05,
-    center, center - sizeBucket * 0.6
-  );
-  g.closePath();
-  g.fillStyle = "rgba(40, 155, 255, 0.9)";
-  g.fill();
-  g.beginPath();
-  g.arc(center - sizeBucket * 0.18, center - sizeBucket * 0.1, sizeBucket * 0.17, 0, Math.PI * 2);
-  g.fillStyle = "rgba(180, 230, 255, 0.65)";
-  g.fill();
+  g.shadowColor = "rgba(96, 222, 255, 0.95)";
+  g.shadowBlur = Math.max(4, sizeBucket * (reduceGlow ? 1.0 : 1.6));
+  g.lineCap = "round";
+  g.lineJoin = "round";
+  g.lineWidth = strokeW;
+
+  function drawWave(offsetY) {
+    const left = center - width * 0.5;
+    const right = center + width * 0.5;
+    g.beginPath();
+    g.moveTo(left, center + offsetY);
+    g.bezierCurveTo(
+      left + width * 0.2, center + offsetY - amplitude,
+      left + width * 0.3, center + offsetY - amplitude,
+      center, center + offsetY
+    );
+    g.bezierCurveTo(
+      left + width * 0.7, center + offsetY + amplitude,
+      left + width * 0.8, center + offsetY + amplitude,
+      right, center + offsetY
+    );
+    g.stroke();
+  }
+
+  g.strokeStyle = "rgba(80, 231, 255, 0.92)";
+  drawWave(-lineGap * 0.5);
+  drawWave(lineGap * 0.5);
+
+  g.shadowBlur = 0;
+  g.lineWidth = Math.max(0.7, strokeW * 0.45);
+  g.strokeStyle = "rgba(204, 255, 255, 0.86)";
+  drawWave(-lineGap * 0.5);
+  drawWave(lineGap * 0.5);
   g.restore();
 
   const sprite = { canvas, center };
@@ -5658,7 +5688,7 @@ function renderEdgeSprite(g, size, dir, variant, zoomBucket) {
   const opacity = wallOpacityForZoomValue(zoomBucket);
   g.save();
   g.globalAlpha = opacity;
-  const lineWidth = Math.max(2.6, 2.6 * zoomBucket) * (size / TILE_SIZE);
+  const lineWidth = Math.max(WALL_LINE_WIDTH_BASE, WALL_LINE_WIDTH_BASE * zoomBucket) * (size / TILE_SIZE);
   const segment = getLocalEdgeSegment(size, dir);
   if (variant === "wall" || variant === "closed" || variant === "locked") {
     renderLocalWall(g, segment, lineWidth, 1);
@@ -5713,6 +5743,12 @@ function renderLocalDoorMark(g, segment, stateLabel, lineWidth) {
 
   g.strokeStyle = stateLabel === "locked" ? "#e06a62" : stateLabel === "closed" ? "#e08830" : "#f8d56e";
   g.lineWidth = Math.max(1.8, lineWidth * 0.9);
+
+  if (stateLabel === "open") {
+    g.lineWidth = Math.max(0.95, lineWidth * 0.34);
+    g.shadowColor = "rgba(248, 213, 110, 0.9)";
+    g.shadowBlur = Math.max(3, lineWidth * 0.95);
+  }
 
   if (isHorizontal) {
     g.beginPath();
@@ -5821,30 +5857,34 @@ function getExtraExitSprite(room, zoomBucket) {
 
   if (hasUp) {
     g.fillStyle = "#7ff0b0";
-    const ux = size * 0.88;
-    const uy = size * 0.12;
-    const halfW = size * 0.11;
-    const h = size * 0.16;
-    g.beginPath();
-    g.moveTo(ux, uy - h);
-    g.lineTo(ux - halfW, uy + h);
-    g.lineTo(ux + halfW, uy + h);
-    g.closePath();
-    g.fill();
+    g.strokeStyle = "rgba(127, 240, 176, 0.95)";
+    g.lineWidth = Math.max(0.9, size * 0.032);
+    g.shadowColor = "rgba(127, 240, 176, 0.9)";
+    g.shadowBlur = Math.max(2, size * 0.16);
+    const ux = size * 0.84;
+    const uy = size * 0.24;
+    g.font = `${Math.max(9, Math.round(size * 0.3))}px "Segoe UI Symbol", "Noto Sans Symbols 2", sans-serif`;
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.strokeText("⌃", ux, uy);
+    g.fillText("⌃", ux, uy);
+    g.shadowBlur = 0;
   }
 
   if (hasDown) {
     g.fillStyle = "#6fb8ff";
-    const dx = size * 0.12;
-    const dy = size * 0.88;
-    const halfW = size * 0.11;
-    const h = size * 0.16;
-    g.beginPath();
-    g.moveTo(dx, dy);
-    g.lineTo(dx - halfW, dy - h);
-    g.lineTo(dx + halfW, dy - h);
-    g.closePath();
-    g.fill();
+    g.strokeStyle = "rgba(111, 184, 255, 0.95)";
+    g.lineWidth = Math.max(0.9, size * 0.032);
+    g.shadowColor = "rgba(111, 184, 255, 0.9)";
+    g.shadowBlur = Math.max(2, size * 0.16);
+    const dx = size * 0.16;
+    const dy = size * 0.74;
+    g.font = `${Math.max(9, Math.round(size * 0.3))}px "Segoe UI Symbol", "Noto Sans Symbols 2", sans-serif`;
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.strokeText("⌄", dx, dy);
+    g.fillText("⌄", dx, dy);
+    g.shadowBlur = 0;
   }
 
   setCappedCache(EXTRA_EXIT_SPRITE_CACHE, cacheKey, canvas, MAX_EXTRA_EXIT_SPRITE_CACHE);
@@ -5999,6 +6039,7 @@ function exportMap() {
 }
 
 function persistMap() {
+  if (state.sessionMode === "anon") return;
   if (state.persistTimer) {
     window.clearTimeout(state.persistTimer);
     state.persistTimer = 0;
@@ -6053,6 +6094,10 @@ function scheduleRender() {
 }
 
 function loadPersistedMap() {
+  if (state.sessionMode === "anon") {
+    activeStorageKey();
+    return false;
+  }
   const candidates = storageLoadCandidates();
   for (const key of candidates) {
     if (loadPersistedMapFromKey(key)) {
@@ -6153,6 +6198,15 @@ function hasActiveMobHintEffects(now) {
   return false;
 }
 
+function hasActiveRoomPulseEffect() {
+  const activeRoomId = state.playerRoomId ? String(state.playerRoomId) : "";
+  if (!activeRoomId) return false;
+  const activeRoom = state.roomsById.get(activeRoomId);
+  if (!activeRoom) return false;
+  return activeRoom.z === state.activeZ
+    && normalizeGridId(activeRoom.gridId) === normalizeGridId(state.activeGridId);
+}
+
 function prunePartyJellyTrail(now) {
   if (!(state.partyJellyFollowers instanceof Map)) return;
   for (const [key, follower] of state.partyJellyFollowers.entries()) {
@@ -6244,7 +6298,7 @@ function ensureEffectsLoop() {
       anim.lastRenderTs = now;
     }
 
-    if (state.animation.active || state.movementTrail.length > 0 || hasActivePartyJellyFollowers() || hasActivePlayerBlobFollower() || hasActiveMobHintEffects(now)) {
+    if (state.animation.active || state.movementTrail.length > 0 || hasActivePartyJellyFollowers() || hasActivePlayerBlobFollower() || hasActiveMobHintEffects(now) || hasActiveRoomPulseEffect()) {
       anim.effectRafId = requestAnimationFrame(tick);
       return;
     }
