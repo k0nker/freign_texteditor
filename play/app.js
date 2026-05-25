@@ -2128,7 +2128,7 @@
     };
 
     var hpPct = pct(hp, maxHp);
-    el.vHp.textContent = 'HP ' + hpPct + '%';
+    el.vHp.textContent = 'HP ' + hp + '/' + maxHp;
     el.vMp.textContent = 'MP ' + mana + '/' + maxMana;
     el.vMv.textContent = 'MV ' + move + '/' + maxMove;
     setSegmentGauge(el.vHpSegs, hpPct, 'hp');

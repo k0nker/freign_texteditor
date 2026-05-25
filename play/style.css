@@ -759,21 +759,22 @@ body:has(#workspace[data-layout="rounded"]) #settings-drawer {
 
 #vitals-strip {
   display: flex;
-  align-items: flex-end;
+  align-items: stretch;
   justify-content: flex-start;
   gap: 8px;
   flex-wrap: wrap;
   flex-shrink: 0;
   border-top: 1px solid var(--panel-border);
   background: color-mix(in srgb, var(--panel) 50%, var(--terminal-bg));
-  padding: 9px 16px;
+  padding: 11px 16px 12px;
+  min-height: 64px;
 }
 
 #vitals-strip[hidden] { display: none; }
 
 .vbar-vital {
   display: flex;
-  align-items: flex-end;
+  align-items: stretch;
   gap: 6px;
   padding: 0 4px;
 }
@@ -916,6 +917,54 @@ body:has(#workspace[data-layout="rounded"]) #settings-drawer {
   z-index: 5;
   max-width: calc(100% - 8px);
   white-space: nowrap;
+}
+
+#vitals-strip .condition-badge {
+  display: grid;
+  grid-template-rows: 14px 14px 16px;
+  row-gap: 2px;
+  align-items: end;
+  padding-top: 0;
+}
+
+#vitals-strip .vbar-identity,
+#vitals-strip .vbar-target-name {
+  position: static;
+  left: auto;
+  top: auto;
+  right: auto;
+  max-width: 100%;
+  grid-row: 1;
+}
+
+#vitals-strip .status-text {
+  position: static;
+  left: auto;
+  top: auto;
+  display: block;
+  max-width: 100%;
+  grid-row: 2;
+}
+
+#vitals-strip .status-bar-segment {
+  grid-row: 3;
+}
+
+#vitals-strip .vbar-identity {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+#vitals-strip .vbar-identity-pos {
+  margin-top: 0;
+}
+
+#vitals-strip .vbar-identity-pos::before {
+  content: "•";
+  display: inline-block;
+  margin-right: 6px;
+  color: color-mix(in srgb, #ffffff 80%, #a3b2c7);
 }
 
 .vbar-label {

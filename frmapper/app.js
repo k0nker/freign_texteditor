@@ -96,7 +96,11 @@ const TRAIL_DOT_PALETTE = {
 };
 const PARTY_NEON_COLOR = "rgba(150, 166, 255, 0.94)";
 const PARTY_NEON_GLOW = "rgba(164, 150, 255, 0.97)";
-const PARTY_JELLY_FADE_MS = 1000;
+const PARTY_JELLY_FADE_MS = 1500;
+const PARTY_JELLY_SPRING = 26;
+const PARTY_JELLY_DAMPING = 0.84;
+const MOB_HINT_FADE_START_MS = 5000;
+const MOB_HINT_FADE_END_MS = 10000;
 const SECTOR_ORDER = [
   "inside",
   "dungeon",
@@ -263,8 +267,11 @@ const state = {
   playerRoomId: null,
   partyMembers: [],
   partyMemberLastPos: new Map(),
-  partyJellyTrail: [],
+  partyJellyFollowers: new Map(),
   roomMobs: [],
+  roomMobsSeenAt: 0,
+  nearbyMobHintsSeenAt: 0,
+  mobKnownSeenAtByRoom: new Map(),
   roomEdgeVariants: new Map(),
   roomEdgeVariantsDirty: true,
   sessionSocket: null,
@@ -286,6 +293,7 @@ const state = {
     toPanY: 0,
     effectRafId: 0,
     lastRenderTs: 0,
+    lastEffectTs: 0,
     fromCoord: null,
     toCoord: null
   },
@@ -741,7 +749,6 @@ function drawFieldTexture(g, size, variant, rng) {
   drawInteriorGrain(g, size, rng, palette.grainB, 24 + variant, 0.6, 1.8, size * 0.11);
 
   g.strokeStyle = "rgba(178, 202, 120, 0.28)";
-  g.fillStyle = colorToStyle(palette.base, 0.8);
   for (let i = 0; i < 5; i += 1) {
     const y = size * (0.16 + i * 0.17) + (variant - 2.5) * 0.2;
     g.beginPath();
@@ -2257,7 +2264,11 @@ function resetToEmptyMap() {
   state.playerLocation = null;
   state.movementTrail = [];
   state.partyMemberLastPos = new Map();
-  state.partyJellyTrail = [];
+  state.partyJellyFollowers = new Map();
+  state.roomMobs = [];
+  state.roomMobsSeenAt = 0;
+  state.nearbyMobHintsSeenAt = 0;
+  state.mobKnownSeenAtByRoom = new Map();
   state.selectedRoomId = null;
   markStaticLayerDirty();
   rebuildIndexes();
@@ -2391,7 +2402,11 @@ function applyMapObject(data) {
   state.playerLocation = null;
   state.movementTrail = [];
   state.partyMemberLastPos = new Map();
-  state.partyJellyTrail = [];
+  state.partyJellyFollowers = new Map();
+  state.roomMobs = [];
+  state.roomMobsSeenAt = 0;
+  state.nearbyMobHintsSeenAt = 0;
+  state.mobKnownSeenAtByRoom = new Map();
   state.selectedRoomId = null;
   rebuildIndexes();
   syncZLevels();
@@ -2797,11 +2812,14 @@ function ingestRoomScannedMobs(payload) {
     ? payload.scan_mobs
     : (Array.isArray(payload && payload.scanned_mobs) ? payload.scanned_mobs : (Array.isArray(payload && payload.mobs) ? payload.mobs : []));
   if (!scanSightings.length) return;
+  const now = performance.now();
   const existing = roomId ? state.roomsById.get(roomId) : null;
   const layerZ = existing ? existing.z : (state.playerLocation ? state.playerLocation.z : 0);
   const gridId = existing ? existing.gridId : (state.playerLocation ? state.playerLocation.gridId : "");
   clearKnownMobsForLayer(layerZ, gridId);
-  applyScanMobSightings(scanSightings);
+  applyScanMobSightings(scanSightings, now);
+  ensureEffectsLoop();
+  scheduleRender();
   schedulePersistMap();
 }
 
@@ -2819,21 +2837,28 @@ function updatePartyFromGroupInfo(payload) {
   });
 
   const nextLastPos = new Map();
+  const activeFollowerKeys = new Set();
   for (let i = 0; i < nextMembers.length; i++) {
     const member = nextMembers[i];
+    if (isLocalPlayerPartyMember(member)) continue;
     const memberKey = partyMemberKey(member, i);
     const nextPos = resolvePartyMemberPosition(member);
     if (!nextPos) continue;
+    activeFollowerKeys.add(memberKey);
 
     const priorPos = state.partyMemberLastPos.get(memberKey);
-    if (didPartyMemberMove(priorPos, nextPos)) {
-      addPartyJellyTrail(priorPos, nextPos);
-    }
+    addPartyJellyTrail(memberKey, priorPos || nextPos, nextPos);
     nextLastPos.set(memberKey, nextPos);
+  }
+
+  for (const key of state.partyJellyFollowers.keys()) {
+    if (activeFollowerKeys.has(key)) continue;
+    state.partyJellyFollowers.delete(key);
   }
 
   state.partyMemberLastPos = nextLastPos;
   state.partyMembers = nextMembers;
+  if (state.partyJellyFollowers.size > 0) ensureEffectsLoop();
   scheduleRender();
 }
 
@@ -2843,26 +2868,24 @@ function partyMemberKey(member, index) {
   return `member-${index}`;
 }
 
+function isLocalPlayerPartyMember(member) {
+  const memberName = sanitizeStorageToken(member && member.name ? member.name : "");
+  const playerName = sanitizeStorageToken(state.storageCharacterName || "");
+  return !!memberName && !!playerName && memberName === playerName;
+}
+
 function resolvePartyMemberPosition(member) {
   if (!member || typeof member !== "object") return null;
   const roomId = String(member.roomId || "").trim();
-  if (roomId) {
-    const room = state.roomsById.get(roomId);
-    if (room) {
-      return {
-        x: room.x,
-        y: room.y,
-        z: room.z,
-        gridId: normalizeGridId(room.gridId)
-      };
-    }
-  }
-  if (!member.coord) return null;
+  if (!roomId) return null;
+  const room = state.roomsById.get(roomId);
+  if (!room) return null;
   return {
-    x: member.coord.x,
-    y: member.coord.y,
-    z: member.coord.z,
-    gridId: normalizeGridId(member.coord.gridId)
+    x: room.x,
+    y: room.y,
+    z: room.z,
+    gridId: normalizeGridId(room.gridId),
+    roomId: room.id
   };
 }
 
@@ -2878,6 +2901,8 @@ function didPartyMemberMove(from, to) {
 
 function updateRoomMobs(payload) {
   state.roomMobs = Array.isArray(payload && payload.mobs) ? payload.mobs : [];
+  state.roomMobsSeenAt = state.roomMobs.length > 0 ? performance.now() : 0;
+  if (state.roomMobsSeenAt > 0) ensureEffectsLoop();
   scheduleRender();
 }
 
@@ -2955,10 +2980,12 @@ function clearKnownMobsForLayer(z, gridId) {
     if (normalizeGridId(room.gridId) !== normGrid) continue;
     if (!Array.isArray(room.knownMobs) || room.knownMobs.length === 0) continue;
     room.knownMobs = [];
+    state.mobKnownSeenAtByRoom.delete(String(room.id || ""));
   }
 }
 
-function applyScanMobSightings(scanSightings) {
+function applyScanMobSightings(scanSightings, seenAt) {
+  const scanSeenAt = Number.isFinite(seenAt) ? seenAt : performance.now();
   for (const entry of scanSightings) {
     if (!entry || typeof entry !== "object") continue;
     const coord = normalizeCoord(entry.coord);
@@ -2976,6 +3003,9 @@ function applyScanMobSightings(scanSightings) {
         area: existing.area || String(entry.area || ""),
         name: existing.name || String(entry.room_name || entry.roomName || "")
       }));
+      if (mobs.length > 0) {
+        state.mobKnownSeenAtByRoom.set(roomId, scanSeenAt);
+      }
       continue;
     }
 
@@ -2998,6 +3028,9 @@ function applyScanMobSightings(scanSightings) {
       visibleNow: false,
       lastSeenAt: null
     });
+    if (mobs.length > 0) {
+      state.mobKnownSeenAtByRoom.set(roomId, scanSeenAt);
+    }
   }
 }
 
@@ -3322,13 +3355,18 @@ function drawStaticLayer(layerCtx, visibleFadedRooms, visibleRooms) {
 
   for (const room of visibleFadedRooms) {
     drawRoomStaticSprite(room, { ghost: true }, layerCtx);
-    drawRoomWallBase(room, layerCtx, { offLayer: true });
   }
   for (const room of visibleRooms) {
     drawRoomStaticSprite(room, undefined, layerCtx);
   }
+}
+
+function drawVisibleRoomWalls(visibleFadedRooms, visibleRooms) {
+  for (const room of visibleFadedRooms) {
+    drawRoomWallBase(room, undefined, { offLayer: true });
+  }
   for (const room of visibleRooms) {
-    drawRoomWallBase(room, layerCtx);
+    drawRoomWallBase(room);
   }
 }
 
@@ -3413,6 +3451,12 @@ function render() {
       drawFogOfWarHaze(room, now);
     }
   }
+
+  if (quality.drawParty) {
+    drawPartyJellyTrails();
+  }
+
+  drawVisibleRoomWalls(visibleFadedRooms, visibleRooms);
 
   for (const room of visibleRooms) {
     drawRoomDoorOverlays(room);
@@ -3802,9 +3846,8 @@ function drawPartyOverlays(visibleRooms) {
   if (!state.showParty || !state.partyMembers.length) return;
   const visibleById = new Set(visibleRooms.map((r) => r.id));
 
-  drawPartyJellyTrails();
-
   for (const member of state.partyMembers) {
+    if (isLocalPlayerPartyMember(member)) continue;
     if (!member.roomId || member.roomId === state.playerRoomId) continue;
     const room = state.roomsById.get(member.roomId);
     if (!room) continue;
@@ -3827,8 +3870,10 @@ function drawPartyOverlays(visibleRooms) {
   }
 }
 
-function addPartyJellyTrail(from, to) {
-  if (!from || !to) return;
+function addPartyJellyTrail(memberKey, from, to) {
+  if (!memberKey || !from || !to) return;
+  if (!to.roomId || !state.roomsById.has(String(to.roomId))) return;
+  if (!from.roomId || !state.roomsById.has(String(from.roomId))) return;
   const fromGrid = normalizeGridId(from.gridId);
   const toGrid = normalizeGridId(to.gridId);
   const gridId = toGrid || fromGrid;
@@ -3838,76 +3883,114 @@ function addPartyJellyTrail(from, to) {
   const dx = to.x - from.x;
   const dy = to.y - from.y;
   const dist = Math.hypot(dx, dy);
-  const steps = Math.max(2, Math.min(5, Math.ceil(dist * 1.5)));
+  if (dist <= 0.0001) return;
+  const vx = dx / dist;
+  const vy = dy / dist;
 
-  for (let i = 0; i < steps; i++) {
-    const t = steps <= 1 ? 0 : i / (steps - 1);
-    const px = from.x + dx * t;
-    const py = from.y + dy * t;
-    state.partyJellyTrail.push({
-      x: px,
-      y: py,
+  const existing = state.partyJellyFollowers.get(memberKey);
+  if (!existing) {
+    state.partyJellyFollowers.set(memberKey, {
+      x: from.x,
+      y: from.y,
+      vx: 0,
+      vy: 0,
       z: to.z,
       gridId,
+      fromRoomId: String(from.roomId),
+      toRoomId: String(to.roomId),
       targetX: to.x,
       targetY: to.y,
-      createdAt: now - i * 70,
+      targetVx: vx,
+      targetVy: vy,
+      createdAt: now,
       durationMs: PARTY_JELLY_FADE_MS
     });
+    ensureEffectsLoop();
+    return;
   }
 
-  if (state.partyJellyTrail.length > 640) {
-    state.partyJellyTrail.splice(0, state.partyJellyTrail.length - 640);
-  }
+  existing.z = to.z;
+  existing.gridId = gridId;
+  existing.fromRoomId = String(from.roomId);
+  existing.toRoomId = String(to.roomId);
+  existing.targetX = to.x;
+  existing.targetY = to.y;
+  existing.targetVx = vx;
+  existing.targetVy = vy;
+  existing.durationMs = PARTY_JELLY_FADE_MS;
+  existing.createdAt = now;
   ensureEffectsLoop();
 }
 
 function drawPartyJellyTrails() {
-  if (!Array.isArray(state.partyJellyTrail) || state.partyJellyTrail.length === 0) return;
+  if (!(state.partyJellyFollowers instanceof Map) || state.partyJellyFollowers.size === 0) return;
 
   const tilePx = TILE_SIZE * state.zoom;
-  const now = performance.now();
   const reduceGlow = shouldReduceGlowEffects();
+  const tailOffset = Math.max(6, state.zoom * 6);
 
-  for (const trail of state.partyJellyTrail) {
-    if (!trail) continue;
-    if (trail.z !== state.activeZ) continue;
-    if (normalizeGridId(trail.gridId) !== normalizeGridId(state.activeGridId)) continue;
+  for (const follower of state.partyJellyFollowers.values()) {
+    if (!follower) continue;
+    if (follower.z !== state.activeZ) continue;
+    if (normalizeGridId(follower.gridId) !== normalizeGridId(state.activeGridId)) continue;
+    if (!follower.fromRoomId || !state.roomsById.has(String(follower.fromRoomId))) continue;
+    if (!follower.toRoomId || !state.roomsById.has(String(follower.toRoomId))) continue;
 
-    const age = now - trail.createdAt;
-    if (age < 0 || age > trail.durationMs) continue;
+    const lagDx = follower.targetX - follower.x;
+    const lagDy = follower.targetY - follower.y;
+    const lag = Math.hypot(lagDx, lagDy);
+    const speed = Math.hypot(follower.vx || 0, follower.vy || 0);
+    if (lag < 0.012 && speed < 0.01) continue;
+    const lagT = Math.min(1, lag / 1.6);
+    const sx = state.panX + (follower.x + 0.5) * tilePx;
+    const sy = state.panY + follower.y * tilePx + tilePx - tailOffset;
 
-    const t = Math.max(0, Math.min(1, age / trail.durationMs));
-    const eased = 1 - Math.pow(1 - t, 3);
-    const xPos = trail.x + (trail.targetX - trail.x) * eased;
-    const yPos = trail.y + (trail.targetY - trail.y) * eased;
-    const sx = state.panX + (xPos + 0.5) * tilePx;
-    const sy = state.panY + (yPos + 0.5) * tilePx;
-
-    const side = Math.max(2.4, tilePx * (0.35 - 0.23 * eased));
-    const alpha = (1 - t) * (1 - t) * 0.62;
+    const alpha = Math.max(0, Math.min(0.78, lagT * 0.88));
     if (alpha <= 0.015) continue;
+
+    const baseR = Math.max(2.8, tilePx * 0.105);
+    const stretch = 1 + lagT * 1.8;
+    const rx = baseR * stretch;
+    const ry = Math.max(2.1, baseR * (0.95 - lagT * 0.22));
+    const ang = Math.atan2(lagDy || follower.targetVy || 0, lagDx || follower.targetVx || 0);
+    const shadowBlur = Math.max(5, rx * (reduceGlow ? 0.7 : 1.7));
 
     ctx.save();
     ctx.globalAlpha *= alpha;
-    ctx.shadowColor = "rgba(182, 132, 255, 0.95)";
-    ctx.shadowBlur = Math.max(4, side * (reduceGlow ? 0.6 : 1.6));
-    ctx.fillStyle = "rgba(152, 102, 246, 0.82)";
-    ctx.fillRect(sx - side * 0.5, sy - side * 0.5, side, side);
+    ctx.translate(sx, sy);
+    ctx.rotate(ang);
+    ctx.shadowColor = PARTY_DOT_PALETTE.glowInner;
+    ctx.shadowBlur = shadowBlur;
+
+    const grad = ctx.createRadialGradient(-rx * 0.38, -ry * 0.04, Math.max(0.8, ry * 0.32), 0, 0, Math.max(rx, ry) * 1.42);
+    grad.addColorStop(0, PARTY_DOT_PALETTE.coreHighlight);
+    grad.addColorStop(0.62, PARTY_DOT_PALETTE.coreMid);
+    grad.addColorStop(1, PARTY_DOT_PALETTE.glowOuter);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fill();
     ctx.restore();
   }
 }
 
 function drawPartyDot(room) {
-  const tilePx = TILE_SIZE * state.zoom;
-  const x = state.panX + room.x * tilePx + tilePx * 0.5;
-  // Bottom of tile — avoids overlapping mob dots which sit at the top.
-  const y = state.panY + room.y * tilePx + tilePx - Math.max(6, state.zoom * 6);
+  const pos = getPartyDotScreenPos(room.x, room.y);
+  const x = pos.x;
+  const y = pos.y;
   const r = Math.max(3.5, state.zoom * 3.5);
   const sprite = getDotSprite(r, shouldReduceGlowEffects(), PARTY_DOT_PALETTE);
   ctx.save();
   ctx.drawImage(sprite.canvas, x - sprite.center, y - sprite.center);
   ctx.restore();
+}
+
+function getPartyDotScreenPos(roomX, roomY) {
+  const tilePx = TILE_SIZE * state.zoom;
+  return {
+    x: state.panX + roomX * tilePx + tilePx * 0.5,
+    y: state.panY + roomY * tilePx + tilePx - Math.max(6, state.zoom * 6)
+  };
 }
 
 function findVisibleExitAnchorToRoom(visibleRooms, targetRoomId) {
@@ -3989,11 +4072,29 @@ function drawMobHints(visibleRooms) {
   if (!currentRoom || currentRoom.z !== state.activeZ) return;
   if (normalizeGridId(currentRoom.gridId) !== normalizeGridId(state.activeGridId)) return;
 
+  const now = performance.now();
   const countsByRoom = new Map();
+  const mergeHint = (roomId, count, alpha) => {
+    if (!roomId) return;
+    if (!Number.isFinite(count) || count <= 0) return;
+    if (!Number.isFinite(alpha) || alpha <= 0) return;
+
+    const existing = countsByRoom.get(roomId);
+    if (!existing) {
+      countsByRoom.set(roomId, { count, alpha });
+      return;
+    }
+    countsByRoom.set(roomId, {
+      count: Math.max(existing.count, count),
+      alpha: Math.max(existing.alpha, alpha)
+    });
+  };
+
   const localMobs = Array.isArray(state.roomMobs) ? state.roomMobs.length : 0;
-  if (localMobs > 0) countsByRoom.set(currentRoom.id, localMobs);
+  mergeHint(currentRoom.id, localMobs, mobHintAlphaForTime(state.roomMobsSeenAt, now));
 
   const nearby = currentRoom.nearbyMobs || {};
+  const nearbyAlpha = mobHintAlphaForTime(state.nearbyMobHintsSeenAt, now);
   for (const dir of Object.keys(nearby)) {
     const parsed = parseNearbyMobsEntry(nearby[dir]);
     const count = Math.max(1, parsed.count || 1);
@@ -4002,22 +4103,33 @@ function drawMobHints(visibleRooms) {
     const distance = Math.max(1, parsed.distance || 1);
     const targetId = findDirectionalScanRoomId(currentRoom, normDir, distance);
     if (!targetId) continue;
-    countsByRoom.set(targetId, (countsByRoom.get(targetId) || 0) + count);
+    mergeHint(targetId, count, nearbyAlpha);
   }
 
   const visibleSet = new Set((visibleRooms || []).map((r) => r.id));
   for (const room of visibleRooms || []) {
     const knownCount = Array.isArray(room.knownMobs) ? room.knownMobs.length : 0;
     if (knownCount <= 0) continue;
-    countsByRoom.set(room.id, Math.max(countsByRoom.get(room.id) || 0, knownCount));
+    const knownSeenAt = state.mobKnownSeenAtByRoom.get(room.id) || 0;
+    mergeHint(room.id, knownCount, mobHintAlphaForTime(knownSeenAt, now));
   }
 
-  countsByRoom.forEach((count, roomId) => {
+  countsByRoom.forEach((entry, roomId) => {
     if (!visibleSet.has(roomId)) return;
     const room = state.roomsById.get(roomId);
     if (!room) return;
-    drawMobDotsOnRoom(room, count);
+    drawMobDotsOnRoom(room, entry.count, entry.alpha);
   });
+}
+
+function mobHintAlphaForTime(seenAt, now) {
+  if (!Number.isFinite(seenAt) || seenAt <= 0) return 0;
+  const age = now - seenAt;
+  if (age <= MOB_HINT_FADE_START_MS) return 1;
+  if (age >= MOB_HINT_FADE_END_MS) return 0;
+  const span = Math.max(1, MOB_HINT_FADE_END_MS - MOB_HINT_FADE_START_MS);
+  const t = (age - MOB_HINT_FADE_START_MS) / span;
+  return Math.max(0, 1 - t);
 }
 
 function resolveScanDistance(room) {
@@ -4057,8 +4169,10 @@ function findDirectionalScanRoomId(originRoom, dir, distance) {
   return lastId;
 }
 
-function drawMobDotsOnRoom(room, mobCount) {
+function drawMobDotsOnRoom(room, mobCount, alpha) {
   const count = Math.max(1, Number.parseInt(mobCount, 10) || 1);
+  const dotAlpha = Number.isFinite(alpha) ? alpha : 1;
+  if (dotAlpha <= 0) return;
   const dots = Math.min(5, count);
   const tilePx = TILE_SIZE * state.zoom;
   const x = state.panX + room.x * tilePx;
@@ -4071,6 +4185,7 @@ function drawMobDotsOnRoom(room, mobCount) {
   const sprite = getDotSprite(r, reduceGlow, MOB_DOT_PALETTE);
 
   ctx.save();
+  ctx.globalAlpha *= dotAlpha;
   for (let i = 0; i < dots; i++) {
     const cx = startX + i * step;
     ctx.drawImage(sprite.canvas, cx - sprite.center, dotY - sprite.center);
@@ -4078,10 +4193,13 @@ function drawMobDotsOnRoom(room, mobCount) {
   ctx.restore();
 
   if (count > dots) {
+    ctx.save();
+    ctx.globalAlpha *= dotAlpha;
     ctx.fillStyle = "rgba(245, 225, 225, 0.95)";
     ctx.font = `${Math.max(8, Math.round(8 * state.zoom))}px monospace`;
     ctx.textBaseline = "middle";
     ctx.fillText(`+${count - dots}`, startX + (dots - 1) * step + r + 2, dotY);
+    ctx.restore();
   }
 }
 
@@ -4179,6 +4297,9 @@ function setPlayerLocationPayload(payload) {
   state.playerLocation = next;
   state.playerRoomId = targetRoom.id;
   state.scanDistance = resolveScanDistance(targetRoom);
+  const hasNearby = currentRoomHasNearbyMobs(targetRoom);
+  state.nearbyMobHintsSeenAt = hasNearby ? performance.now() : 0;
+  if (hasNearby) ensureEffectsLoop();
   updateEmbedQuickControls();
   if (!state.selectedRoomId) {
     state.selectedRoomId = targetRoom.id;
@@ -5602,11 +5723,108 @@ function pruneMovementTrail(now) {
   });
 }
 
+function currentRoomHasNearbyMobs(room) {
+  if (!room || !room.nearbyMobs || typeof room.nearbyMobs !== "object") return false;
+  for (const dir of Object.keys(room.nearbyMobs)) {
+    const parsed = parseNearbyMobsEntry(room.nearbyMobs[dir]);
+    if ((parsed.count || 0) > 0) return true;
+  }
+  return false;
+}
+
+function pruneMobHintAges(now) {
+  let knownChanged = false;
+
+  for (const [roomId, seenAt] of state.mobKnownSeenAtByRoom.entries()) {
+    if (mobHintAlphaForTime(seenAt, now) > 0) continue;
+    state.mobKnownSeenAtByRoom.delete(roomId);
+    const room = state.roomsById.get(roomId);
+    if (!room || !Array.isArray(room.knownMobs) || room.knownMobs.length === 0) continue;
+    room.knownMobs = [];
+    knownChanged = true;
+  }
+
+  if (mobHintAlphaForTime(state.roomMobsSeenAt, now) <= 0 && state.roomMobs.length > 0) {
+    state.roomMobs = [];
+    state.roomMobsSeenAt = 0;
+  }
+
+  if (mobHintAlphaForTime(state.nearbyMobHintsSeenAt, now) <= 0) {
+    state.nearbyMobHintsSeenAt = 0;
+  }
+
+  if (knownChanged) {
+    schedulePersistMap();
+  }
+}
+
+function hasActiveMobHintEffects(now) {
+  if (mobHintAlphaForTime(state.roomMobsSeenAt, now) > 0) return true;
+  if (mobHintAlphaForTime(state.nearbyMobHintsSeenAt, now) > 0) return true;
+  for (const seenAt of state.mobKnownSeenAtByRoom.values()) {
+    if (mobHintAlphaForTime(seenAt, now) > 0) return true;
+  }
+  return false;
+}
+
 function prunePartyJellyTrail(now) {
-  state.partyJellyTrail = state.partyJellyTrail.filter((segment) => {
-    const durationMs = Number.isFinite(segment.durationMs) ? segment.durationMs : PARTY_JELLY_FADE_MS;
-    return (now - segment.createdAt) < durationMs;
-  });
+  if (!(state.partyJellyFollowers instanceof Map)) return;
+  for (const [key, follower] of state.partyJellyFollowers.entries()) {
+    if (!follower) {
+      state.partyJellyFollowers.delete(key);
+      continue;
+    }
+    if (!follower.toRoomId || !state.roomsById.has(String(follower.toRoomId))) {
+      state.partyJellyFollowers.delete(key);
+      continue;
+    }
+    if (follower.z !== state.activeZ || normalizeGridId(follower.gridId) !== normalizeGridId(state.activeGridId)) {
+      continue;
+    }
+    const dx = follower.targetX - follower.x;
+    const dy = follower.targetY - follower.y;
+    const speed = Math.hypot(follower.vx || 0, follower.vy || 0);
+    if (Math.hypot(dx, dy) < 0.004 && speed < 0.003) {
+      follower.x = follower.targetX;
+      follower.y = follower.targetY;
+      follower.vx = 0;
+      follower.vy = 0;
+    }
+  }
+}
+
+function updatePartyJellyFollowers(now) {
+  if (!(state.partyJellyFollowers instanceof Map) || state.partyJellyFollowers.size === 0) return;
+  const anim = state.animation;
+  const prevTs = Number.isFinite(anim.lastEffectTs) && anim.lastEffectTs > 0 ? anim.lastEffectTs : now;
+  const dt = Math.max(1 / 240, Math.min(0.07, (now - prevTs) / 1000));
+  anim.lastEffectTs = now;
+
+  for (const follower of state.partyJellyFollowers.values()) {
+    if (!follower) continue;
+    const dx = follower.targetX - follower.x;
+    const dy = follower.targetY - follower.y;
+    follower.vx = (follower.vx || 0) + dx * PARTY_JELLY_SPRING * dt;
+    follower.vy = (follower.vy || 0) + dy * PARTY_JELLY_SPRING * dt;
+    const damping = Math.pow(PARTY_JELLY_DAMPING, dt * 60);
+    follower.vx *= damping;
+    follower.vy *= damping;
+    follower.x += follower.vx * dt;
+    follower.y += follower.vy * dt;
+  }
+}
+
+function hasActivePartyJellyFollowers() {
+  if (!(state.partyJellyFollowers instanceof Map) || state.partyJellyFollowers.size === 0) return false;
+  for (const follower of state.partyJellyFollowers.values()) {
+    if (!follower) continue;
+    if (follower.z !== state.activeZ) continue;
+    if (normalizeGridId(follower.gridId) !== normalizeGridId(state.activeGridId)) continue;
+    const lag = Math.hypot(follower.targetX - follower.x, follower.targetY - follower.y);
+    const speed = Math.hypot(follower.vx || 0, follower.vy || 0);
+    if (lag > 0.004 || speed > 0.003) return true;
+  }
+  return false;
 }
 
 function ensureEffectsLoop() {
@@ -5614,16 +5832,19 @@ function ensureEffectsLoop() {
   if (anim.effectRafId) return;
 
   const tick = (now) => {
+    state.animation.lastEffectTs = state.animation.lastEffectTs || now;
     updatePanAnimation(now);
+    updatePartyJellyFollowers(now);
     pruneMovementTrail(now);
     prunePartyJellyTrail(now);
+    pruneMobHintAges(now);
     const targetFrameMs = state.animation.active ? 33 : 16;
     if ((now - anim.lastRenderTs) >= targetFrameMs) {
       render();
       anim.lastRenderTs = now;
     }
 
-    if (state.animation.active || state.movementTrail.length > 0 || state.partyJellyTrail.length > 0) {
+    if (state.animation.active || state.movementTrail.length > 0 || hasActivePartyJellyFollowers() || hasActiveMobHintEffects(now)) {
       anim.effectRafId = requestAnimationFrame(tick);
       return;
     }
@@ -5632,6 +5853,7 @@ function ensureEffectsLoop() {
       anim.lastRenderTs = performance.now();
     }
     anim.effectRafId = 0;
+    anim.lastEffectTs = 0;
   };
 
   anim.effectRafId = requestAnimationFrame(tick);

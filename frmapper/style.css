@@ -26,10 +26,16 @@ body {
   font-family: "Consolas", "Monaco", monospace;
 }
 
+body {
+  display: flex;
+  flex-direction: column;
+}
+
 .app {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   position: relative;
 }
 
@@ -464,6 +470,20 @@ body.embed-mode .topbar {
   pointer-events: none;
 }
 
+body.embed-mode {
+  background: transparent;
+}
+
+body.embed-mode #fr-shellbar-mount {
+  display: none;
+}
+
+body.embed-mode .app,
+body.embed-mode .layout,
+body.embed-mode .canvas-wrap {
+  background: transparent;
+}
+
 body.embed-mode .embed-quick-controls {
   display: inline-flex;
 }
@@ -504,6 +524,10 @@ body.embed-mode.controls-expanded .topbar {
 
 body.embed-mode.controls-expanded .layout {
   grid-template-columns: 1fr;
+}
+
+body.embed-mode.controls-expanded .embed-quick-controls {
+  top: 84px;
 }
 
 body.embed-mode.controls-expanded .sidebar {

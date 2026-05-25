@@ -4,9 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>frmapper</title>
+  <link rel="stylesheet" href="../site-shell.css?v=3" />
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
+  <div id="fr-shellbar-mount" data-active-nav="map"></div>
   <div class="app">
     <button id="embed-toggle" class="embed-toggle" type="button" title="Show mapper controls" aria-label="Show mapper controls" aria-expanded="false" hidden>
       <span class="embed-toggle-icon" aria-hidden="true">&#9660;</span>
@@ -104,7 +106,8 @@
     </div>
   </div>
 
-  <script src="../site-themes.js"></script>
+  <script src="../site-themes.js?v=1"></script>
+  <script src="../site-shell.js?v=3" defer></script>
   <script src="./app.js"></script>
 </body>
 </html>

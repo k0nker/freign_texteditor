@@ -8,7 +8,7 @@
     if (!path || path === '/') {
       return 'home';
     }
-    if (path.indexOf('/map/') === 0) {
+    if (path.indexOf('/map/') === 0 || path.indexOf('/frmapper/') === 0) {
       return 'map';
     }
     if (path.indexOf('/play/') === 0) {
