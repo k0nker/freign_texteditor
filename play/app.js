@@ -30,12 +30,12 @@
   }
 
   function saveCommHistory() {
-    try { localStorage.setItem(commHistoryKey(), JSON.stringify(state.gmcp.channels)); } catch (_) {}
+    store_set(commHistoryKey(), JSON.stringify(state.gmcp.channels));
   }
 
   function loadCommHistory() {
     try {
-      var raw = localStorage.getItem(commHistoryKey());
+      var raw = store_get(commHistoryKey());
       if (!raw) return;
       var parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return;
@@ -45,6 +45,81 @@
       });
     } catch (_) {}
   }
+  // ── IndexedDB key-value store (replaces localStorage for game data) ────────
+  var _idbDb    = null;
+  var _idbCache = null; // null until loaded; Map<string,string> after init
+  var _IDB_NAME  = 'freign-play';
+  var _IDB_STORE = 'kv';
+
+  function _openIdb(callback) {
+    if (!window.indexedDB) { callback(new Error('no-idb')); return; }
+    var req = indexedDB.open(_IDB_NAME, 1);
+    req.onupgradeneeded = function (e) { e.target.result.createObjectStore(_IDB_STORE); };
+    req.onsuccess = function (e) { _idbDb = e.target.result; callback(null); };
+    req.onerror   = function ()  { callback(new Error('idb-open-failed')); };
+  }
+
+  function idbLoadAll(callback) {
+    _idbCache = new Map();
+    _openIdb(function (err) {
+      if (err || !_idbDb) { callback(); return; }
+      var tx  = _idbDb.transaction(_IDB_STORE, 'readonly');
+      var req = tx.objectStore(_IDB_STORE).openCursor();
+      req.onsuccess = function (e) {
+        var c = e.target.result;
+        if (c) { _idbCache.set(c.key, c.value); c.continue(); }
+      };
+      tx.oncomplete = function () { callback(); };
+      tx.onerror    = function () { callback(); };
+    });
+  }
+
+  function store_get(key) {
+    if (_idbCache && _idbCache.has(key)) return _idbCache.get(key);
+    try { return localStorage.getItem(key); } catch (_) { return null; }
+  }
+
+  function store_set(key, value) {
+    if (_idbCache) _idbCache.set(key, value);
+    if (_idbDb) {
+      try { _idbDb.transaction(_IDB_STORE, 'readwrite').objectStore(_IDB_STORE).put(value, key); } catch (_) {}
+    } else {
+      try { localStorage.setItem(key, value); } catch (_) {}
+    }
+  }
+
+  function store_remove(key) {
+    if (_idbCache) _idbCache.delete(key);
+    if (_idbDb) {
+      try { _idbDb.transaction(_IDB_STORE, 'readwrite').objectStore(_IDB_STORE).delete(key); } catch (_) {}
+    } else {
+      try { localStorage.removeItem(key); } catch (_) {}
+    }
+  }
+
+  function store_keys() {
+    if (_idbCache) return Array.from(_idbCache.keys());
+    try {
+      var ks = [];
+      for (var i = 0; i < localStorage.length; i++) ks.push(localStorage.key(i));
+      return ks;
+    } catch (_) { return []; }
+  }
+
+  function _migrateLocalStorageToIdb() {
+    if (!_idbCache || !_idbDb) return;
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k && k.indexOf('freign.play2.') === 0 && !_idbCache.has(k)) {
+          var v = localStorage.getItem(k);
+          if (v != null) { store_set(k, v); }
+        }
+      }
+    } catch (_) {}
+  }
+  // ── End IDB abstraction ────────────────────────────────────────────────────
+
   var SITE_THEME_KEY = 'freign.site.theme.v1';
   var DEFAULT_PROFILE_NAME = 'Default';
   var SINGLE_LEFT_PANEL_MODE = false;
@@ -204,7 +279,7 @@
     store.profiles[DEFAULT_PROFILE_NAME] = cloneProfileSettings({});
 
     try {
-      var raw = localStorage.getItem(PROFILE_STORE_KEY);
+      var raw = store_get(PROFILE_STORE_KEY);
       if (!raw) return store;
       var parsed = JSON.parse(raw);
       if (!parsed || typeof parsed !== 'object') return store;
@@ -240,28 +315,16 @@
     var activeKey = scrollbackKey();
     try {
       var toRemove = [];
-      for (var i = 0; i < localStorage.length; i++) {
-        var k = localStorage.key(i);
+      store_keys().forEach(function (k) {
         if (k && k !== activeKey && k.indexOf(SCROLLBACK_KEY) === 0) toRemove.push(k);
-      }
-      toRemove.forEach(function (k) { try { localStorage.removeItem(k); } catch (_) {} });
+      });
+      toRemove.forEach(function (k) { store_remove(k); });
     } catch (_) {}
   }
 
   function saveProfileStore() {
-    try {
-      localStorage.setItem(PROFILE_STORE_KEY, _profileStorePayload());
-      return true;
-    } catch (_) {
-      // Likely QuotaExceededError — evict stale scrollback buffers and retry once.
-      _evictStaleScrollback();
-      try {
-        localStorage.setItem(PROFILE_STORE_KEY, _profileStorePayload());
-        return true;
-      } catch (_2) {
-        return false;
-      }
-    }
+    store_set(PROFILE_STORE_KEY, _profileStorePayload());
+    return true;
   }
 
   function getProfileNames() {
@@ -576,7 +639,12 @@
 
   var el = {};
 
-  document.addEventListener('DOMContentLoaded', init);
+  document.addEventListener('DOMContentLoaded', function () {
+    idbLoadAll(function () {
+      _migrateLocalStorageToIdb();
+      init();
+    });
+  });
 
   /* ═══════════════════════════════════════════════════════════════
      INIT
@@ -993,7 +1061,7 @@
     el.cfgClearHistory.addEventListener('click', function () {
       el.terminal.innerHTML = '';
       state.scrollback = [];
-      localStorage.removeItem(SCROLLBACK_KEY);
+      store_remove(SCROLLBACK_KEY);
     });
     if (el.btnRenegotiateGmcp) {
       el.btnRenegotiateGmcp.addEventListener('click', function () {
@@ -4342,15 +4410,13 @@
     if (_scrollbackTimer) return;
     _scrollbackTimer = setTimeout(function () {
       _scrollbackTimer = null;
-      try {
-        localStorage.setItem(scrollbackKey(), JSON.stringify(state.scrollback));
-      } catch (_) { /* storage full — silently skip */ }
+      store_set(scrollbackKey(), JSON.stringify(state.scrollback));
     }, 500);
   }
 
   function loadScrollback() {
     try {
-      var raw = localStorage.getItem(scrollbackKey());
+      var raw = store_get(scrollbackKey());
       if (!raw) return;
       var items = JSON.parse(raw);
       if (!Array.isArray(items)) return;
@@ -4377,15 +4443,13 @@
     if (_cmdHistoryTimer) return;
     _cmdHistoryTimer = setTimeout(function () {
       _cmdHistoryTimer = null;
-      try {
-        localStorage.setItem(cmdHistoryKey(), JSON.stringify(state.cmdHistory));
-      } catch (_) {}
+      store_set(cmdHistoryKey(), JSON.stringify(state.cmdHistory));
     }, 250);
   }
 
   function loadCommandHistory() {
     try {
-      var raw = localStorage.getItem(cmdHistoryKey());
+      var raw = store_get(cmdHistoryKey());
       if (!raw) return;
       var items = JSON.parse(raw);
       if (!Array.isArray(items)) return;

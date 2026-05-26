@@ -353,6 +353,65 @@ const state = {
   }
 };
 
+// ── IndexedDB key-value store (replaces localStorage for map data) ──────────
+let _fmIdbDb    = null;
+let _fmIdbCache = null; // null until loaded; Map<string,string> after init
+const _FM_IDB_NAME  = 'freign-frmapper';
+const _FM_IDB_STORE = 'kv';
+
+function _fmOpenIdb(callback) {
+  if (!window.indexedDB) { callback(new Error('no-idb')); return; }
+  const req = indexedDB.open(_FM_IDB_NAME, 1);
+  req.onupgradeneeded = (e) => { e.target.result.createObjectStore(_FM_IDB_STORE); };
+  req.onsuccess = (e)  => { _fmIdbDb = e.target.result; callback(null); };
+  req.onerror   = ()   => { callback(new Error('idb-open-failed')); };
+}
+
+function fmIdbLoadAll() {
+  return new Promise((resolve) => {
+    _fmIdbCache = new Map();
+    _fmOpenIdb((err) => {
+      if (err || !_fmIdbDb) { resolve(); return; }
+      const tx  = _fmIdbDb.transaction(_FM_IDB_STORE, 'readonly');
+      const req = tx.objectStore(_FM_IDB_STORE).openCursor();
+      req.onsuccess = (e) => {
+        const c = e.target.result;
+        if (c) { _fmIdbCache.set(c.key, c.value); c.continue(); }
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror    = () => resolve();
+    });
+  });
+}
+
+function fm_store_get(key) {
+  if (_fmIdbCache && _fmIdbCache.has(key)) return _fmIdbCache.get(key);
+  try { return localStorage.getItem(key); } catch (_) { return null; }
+}
+
+function fm_store_set(key, value) {
+  if (_fmIdbCache) _fmIdbCache.set(key, value);
+  if (_fmIdbDb) {
+    try { _fmIdbDb.transaction(_FM_IDB_STORE, 'readwrite').objectStore(_FM_IDB_STORE).put(value, key); } catch (_) {}
+  } else {
+    try { localStorage.setItem(key, value); } catch (_) {}
+  }
+}
+
+function _fmMigrateLocalStorageToIdb() {
+  if (!_fmIdbCache || !_fmIdbDb) return;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.indexOf('frmapper.savedMap.') === 0 && !_fmIdbCache.has(k)) {
+        const v = localStorage.getItem(k);
+        if (v != null) { fm_store_set(k, v); }
+      }
+    }
+  } catch (_) {}
+}
+// ── End IDB abstraction ────────────────────────────────────────────────────
+
 function resolveFrmapperThemeId(rawThemeId) {
   const raw = String(rawThemeId || "").trim().toLowerCase();
   if (window.FreignThemes && typeof window.FreignThemes.resolveThemeId === "function") {
@@ -1787,7 +1846,7 @@ function activeStorageKey() {
 
 function loadPersistedMapFromKey(key) {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = fm_store_get(key);
     if (!raw) return false;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.rooms)) return false;
@@ -1883,6 +1942,8 @@ const el = {
 const ctx = el.canvas.getContext("2d");
 
 async function init() {
+  await fmIdbLoadAll();
+  _fmMigrateLocalStorageToIdb();
   syncFrmapperThemeFromSitePreference();
   setupEmbedMode();
   await loadSectorIcons();
@@ -6925,7 +6986,7 @@ function persistMap() {
       syncZLevels();
       updateInspector();
     }
-    localStorage.setItem(activeStorageKey(), JSON.stringify({
+    fm_store_set(activeStorageKey(), JSON.stringify({
       ...state.mapData,
       rooms
     }));
