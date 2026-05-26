@@ -2950,6 +2950,8 @@
       text: String(data.text || ''),
       direction: String(data.direction || ''),
       language: String(data.language || ''),
+      recipient: data.recipient ? String(data.recipient) : '',
+      timestamp: data.timestamp ? new Date(data.timestamp * 1000) : new Date(),
     };
 
     state.gmcp.channels.push(entry);
@@ -2982,6 +2984,9 @@
       var card = document.createElement('div');
       card.className = 'channel-entry';
       var dir = msg.direction ? (' · ' + msg.direction) : '';
+      var recipientHtml = (msg.direction === 'sent' && msg.recipient)
+        ? (' <span class="channel-recipient">→ ' + escHtml(msg.recipient) + '</span>')
+        : '';
       var lang = msg.language ? msg.language : '';
       var styleClass = channelToneClass(msg.channel);
       var utteranceColor = channelUtteranceColor(msg.channel);
@@ -2989,9 +2994,22 @@
       var speakerHtml = showSpeaker
         ? ('<span class="channel-speaker">' + escHtml(msg.talker) + ':</span> ')
         : '';
+      var tsHtml = '';
+      if (msg.timestamp) {
+        var d = msg.timestamp;
+        var yr = d.getFullYear();
+        var mo = String(d.getMonth() + 1).padStart(2, '0');
+        var dy = String(d.getDate()).padStart(2, '0');
+        var hr = d.getHours();
+        var mn = String(d.getMinutes()).padStart(2, '0');
+        var sc = String(d.getSeconds()).padStart(2, '0');
+        var ampm = hr >= 12 ? 'PM' : 'AM';
+        var hr12 = hr % 12 || 12;
+        tsHtml = '<span class="channel-ts"> | ' + yr + '-' + mo + '-' + dy + ' @ ' + hr12 + ':' + mn + ':' + sc + ' ' + ampm + '</span>';
+      }
       card.innerHTML =
         '<div class="channel-head">' +
-          '<span class="channel-name">' + escHtml(msg.channel) + dir + '</span>' +
+          '<span class="channel-name">' + escHtml(msg.channel) + dir + recipientHtml + tsHtml + '</span>' +
           '<span class="channel-lang">' + escHtml(lang) + '</span>' +
         '</div>' +
         '<div class="channel-body">' + speakerHtml + '<span class="channel-utterance ' + styleClass + '" style="color:' + escHtml(utteranceColor) + '">' + escHtml(msg.text) + '</span></div>';

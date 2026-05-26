@@ -2322,6 +2322,21 @@ body:has(#workspace[data-layout="rounded"]) #settings-drawer {
   opacity: 0.9;
 }
 
+.channel-ts {
+  color: color-mix(in srgb, var(--muted) 70%, white 10%);
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.03em;
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
+.channel-recipient {
+  color: var(--accent);
+  font-weight: 600;
+  opacity: 0.85;
+}
+
 .channel-body {
   font-size: 12px;
   line-height: 1.35;

@@ -96,6 +96,20 @@ const TRAIL_DOT_PALETTE = {
   coreMid: "rgba(226, 199, 108, 0.9)",
   coreOuter: "rgba(136, 109, 36, 0.86)"
 };
+const TRACKED_CHAR_PALETTE = {
+  glowInner: "rgba(255, 130, 200, 0.55)",
+  glowOuter: "rgba(255, 100, 180, 0)",
+  coreHighlight: "rgba(255, 210, 235, 0.99)",
+  coreMid: "rgba(240, 90, 170, 0.99)",
+  coreOuter: "rgba(170, 30, 110, 0.99)"
+};
+const TRACKED_MOB_PALETTE = {
+  glowInner: "rgba(255, 150, 50, 0.55)",
+  glowOuter: "rgba(255, 110, 20, 0)",
+  coreHighlight: "rgba(255, 220, 160, 0.99)",
+  coreMid: "rgba(240, 140, 30, 0.99)",
+  coreOuter: "rgba(160, 70, 0, 0.99)"
+};
 const PARTY_NEON_COLOR = "rgba(150, 166, 255, 0.94)";
 const PARTY_NEON_GLOW = "rgba(164, 150, 255, 0.97)";
 const PARTY_JELLY_FADE_MS = 1500;
@@ -288,7 +302,8 @@ const state = {
   roomMobsSeenAt: 0,
   tempMobDotByRoom: new Map(),
   trackedChars: new Map(),   // Map<name, { roomId }>
-  trackedMobs:  new Map(),   // Map<name, { roomId }>
+  trackedMobs:  new Map(),   // Map<name, { roomId, uid }>
+  partyMobUids: new Set(),   // Set<number> of mob instance IDs that are party members
   trackedJellyFollowers: new Map(), // Map<name, jellyFollower> for move trails
   roomEdgeVariants: new Map(),
   roomEdgeVariantsDirty: true,
@@ -1648,6 +1663,12 @@ function handleSessionMessage(msg) {
   if (msg.type === "frmapper.roomMobs" && msg.payload) {
     updateRoomMobs(msg.payload);
   }
+  if (msg.type === "frmapper.trackedChars" && msg.payload) {
+    ingestTrackedDelta("chars", msg.payload);
+  }
+  if (msg.type === "frmapper.trackedMobs" && msg.payload) {
+    ingestTrackedDelta("mobs", msg.payload);
+  }
   if (msg.type === "frmapper.centerOn" && msg.payload) {
     centerOnPayload(msg.payload);
   }
@@ -2358,6 +2379,10 @@ function resetToEmptyMap() {
   state.roomMobs = [];
   state.roomMobsSeenAt = 0;
   state.tempMobDotByRoom = new Map();
+  state.trackedChars = new Map();
+  state.trackedMobs = new Map();
+  state.partyMobUids = new Set();
+  state.trackedJellyFollowers = new Map();
   state.selectedRoomId = null;
   markStaticLayerDirty();
   rebuildIndexes();
@@ -2496,6 +2521,10 @@ function applyMapObject(data) {
   state.roomMobs = [];
   state.roomMobsSeenAt = 0;
   state.tempMobDotByRoom = new Map();
+  state.trackedChars = new Map();
+  state.trackedMobs = new Map();
+  state.partyMobUids = new Set();
+  state.trackedJellyFollowers = new Map();
   state.selectedRoomId = null;
   rebuildIndexes();
   syncZLevels();
@@ -2957,9 +2986,17 @@ function updatePartyFromGroupInfo(payload) {
       name: String(m && m.name ? m.name : ""),
       roomId,
       coord: normalizeCoord(coord),
-      isLeader: !!(m && m.is_leader)
+      isLeader: !!(m && m.is_leader),
+      isNpc: !!(m && m.is_npc),
+      uid: m && m.uid != null ? Number(m.uid) : null
     };
   });
+
+  const nextPartyMobUids = new Set();
+  for (const member of nextMembers) {
+    if (member.isNpc && member.uid != null) nextPartyMobUids.add(member.uid);
+  }
+  state.partyMobUids = nextPartyMobUids;
 
   const nextLastPos = new Map();
   const activeFollowerKeys = new Set();
@@ -3031,6 +3068,97 @@ function updateRoomMobs(payload) {
   state.roomMobsSeenAt = state.roomMobs.length > 0 ? performance.now() : 0;
   if (state.roomMobsSeenAt > 0) ensureEffectsLoop();
   scheduleRender();
+}
+
+function ingestTrackedDelta(type, payload) {
+  const isMobs = type === "mobs";
+  const map = isMobs ? state.trackedMobs : state.trackedChars;
+  const action = String((payload && payload.action) || "");
+  if (action === "clear") { map.clear(); scheduleRender(); return; }
+  const name = String((payload && payload.name) || "").trim();
+  const uid = payload && payload.uid != null ? Number(payload.uid) : null;
+  // Mobs are keyed by UID string to avoid name-collision overwrites. Chars keep name as key.
+  const key = (isMobs && uid != null) ? String(uid) : name;
+  if (!key) return;
+  if (action === "remove") {
+    map.delete(key);
+    state.trackedJellyFollowers.delete(key);
+    scheduleRender();
+    return;
+  }
+  if (action === "add") {
+    map.set(key, { roomId: String((payload && payload.roomId) || ""), uid, name });
+    scheduleRender();
+    return;
+  }
+  if (action === "move") {
+    const fromRoomId = String((payload && payload.fromRoomId) || "");
+    const toRoomId   = String((payload && payload.toRoomId)   || "");
+    map.set(key, { roomId: toRoomId, uid, name });
+    const fromRoom = fromRoomId ? state.roomsById.get(fromRoomId) : null;
+    const toRoom   = toRoomId   ? state.roomsById.get(toRoomId)   : null;
+    if (fromRoom && toRoom && fromRoom.discovered && toRoom.discovered) {
+      const fromPos = { x: fromRoom.x, y: fromRoom.y, z: fromRoom.z, gridId: fromRoom.gridId, roomId: fromRoomId };
+      const toPos   = { x: toRoom.x,   y: toRoom.y,   z: toRoom.z,   gridId: toRoom.gridId,   roomId: toRoomId   };
+      addTrackedJellyTrail(key, fromPos, toPos, type);
+    }
+    scheduleRender();
+  }
+}
+
+function addTrackedJellyTrail(name, from, to, type) {
+  if (!name || !from || !to) return;
+  if (!to.roomId || !state.roomsById.has(String(to.roomId))) return;
+  const fromGrid = normalizeGridId(from.gridId);
+  const toGrid = normalizeGridId(to.gridId);
+  const gridId = toGrid || fromGrid;
+  if (!gridId) return;
+
+  const palette = type === "chars" ? TRACKED_CHAR_PALETTE : TRACKED_MOB_PALETTE;
+  const dotAnchorY = type === "chars" ? "bottom" : "top";
+  const now = performance.now();
+  const existing = state.trackedJellyFollowers.get(name);
+  if (!existing) {
+    const follower = {
+      x: from.x,
+      y: from.y,
+      vx: 0,
+      vy: 0,
+      z: to.z,
+      gridId,
+      fromRoomId: String(from.roomId || ""),
+      toRoomId: String(to.roomId || ""),
+      headX: to.x,
+      headY: to.y,
+      headRoomId: String(to.roomId || ""),
+      roomId: String(to.roomId || ""),
+      targetX: to.x,
+      targetY: to.y,
+      waypoints: [],
+      createdAt: now,
+      durationMs: PARTY_JELLY_FADE_MS,
+      palette,
+      anchorY: dotAnchorY,
+      wobbleT:   Math.random() * 20,
+      wobbleAmp: 0,
+      blobSeed:  Math.random() * 100
+    };
+    applyFollowerPathUpdate(follower, from, to);
+    state.trackedJellyFollowers.set(name, follower);
+    ensureEffectsLoop();
+    return;
+  }
+
+  existing.fromRoomId = String(from.roomId || "");
+  existing.toRoomId = String(to.roomId || "");
+  existing.palette = palette;
+  existing.anchorY = dotAnchorY;
+  // Reset waypoints before updating so moves don't accumulate into a huge trail.
+  existing.waypoints = [];
+  applyFollowerPathUpdate(existing, from, to);
+  existing.durationMs = PARTY_JELLY_FADE_MS;
+  existing.createdAt = now;
+  ensureEffectsLoop();
 }
 
 function upsertRoom(rawRoom) {
@@ -3740,6 +3868,7 @@ function render() {
 
   if (quality.drawParty) {
     drawPartyJellyTrails();
+    drawTrackedJellyTrails();
   }
 
   drawVisibleRoomWalls(visibleFadedRooms, visibleRooms);
@@ -3768,6 +3897,7 @@ function render() {
     if (quality.drawMobHints) {
       drawMobHints(visibleRooms);
     }
+    drawTrackedDots(visibleRooms);
   }
 
   if (quality.drawOneWayOverlays) {
@@ -4402,6 +4532,195 @@ function advanceBlobFollower(follower, dt, speedRoomsPerSec) {
   }
 }
 
+// ── Jelly blob trail helpers ────────────────────────────────────────────────
+
+// Lightweight pseudo-noise: sum of sines gives smooth, non-repeating values.
+// Returns a value roughly in [-1, 1].
+function simpleNoise(t, seed) {
+  const s = seed || 0;
+  return Math.sin(t * 1.7321 + s)        * 0.50
+       + Math.sin(t * 3.1415 + s * 1.41) * 0.30
+       + Math.sin(t * 7.2380 + s * 2.72) * 0.20;
+}
+
+// Draw a smooth Catmull-Rom curve through pts on ctx.
+// continuing=true uses lineTo to the first point instead of moveTo (for closing shapes).
+function _catmullRomPath(ctx, pts, continuing) {
+  if (!pts || pts.length === 0) return;
+  if (pts.length === 1) {
+    if (!continuing) ctx.moveTo(pts[0].x, pts[0].y);
+    else             ctx.lineTo(pts[0].x, pts[0].y);
+    return;
+  }
+  // Pad endpoints so the spline reaches first and last points.
+  const ext = [
+    { x: pts[0].x * 2 - pts[1].x, y: pts[0].y * 2 - pts[1].y },
+    ...pts,
+    { x: pts[pts.length-1].x * 2 - pts[pts.length-2].x,
+      y: pts[pts.length-1].y * 2 - pts[pts.length-2].y }
+  ];
+  if (!continuing) ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < ext.length - 2; i++) {
+    const p0 = ext[i-1], p1 = ext[i], p2 = ext[i+1], p3 = ext[i+2];
+    // Catmull-Rom → cubic Bézier control points
+    ctx.bezierCurveTo(
+      p1.x + (p2.x - p0.x) / 6, p1.y + (p2.y - p0.y) / 6,
+      p2.x - (p3.x - p1.x) / 6, p2.y - (p3.y - p1.y) / 6,
+      p2.x, p2.y
+    );
+  }
+}
+
+// Draws a wobbly circular blob (the "settled" jelly blob) at a screen position.
+function _drawSettledJellyBlob(palette, center, baseR, amp, wobbleT, seed, reduceGlow) {
+  const NUM_PTS = 9;
+  const pts = [];
+  for (let i = 0; i < NUM_PTS; i++) {
+    const angle = (i / NUM_PTS) * Math.PI * 2;
+    const n = simpleNoise(wobbleT * 3.8 + i * 1.23, seed + i * 0.67);
+    const r = baseR * (1 + amp * n * 0.48);
+    pts.push({ x: center.x + Math.cos(angle) * r, y: center.y + Math.sin(angle) * r });
+  }
+  ctx.save();
+  ctx.globalAlpha *= Math.min(0.9, amp * 1.15);
+  ctx.shadowColor = palette.glowInner;
+  ctx.shadowBlur = Math.max(5, baseR * (reduceGlow ? 1.5 : 2.6));
+  ctx.fillStyle = palette.coreMid;
+  ctx.beginPath();
+  // Close the Catmull-Rom loop by appending the first two points
+  _catmullRomPath(ctx, [...pts, pts[0], pts[1]], false);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+// Draws an animated jelly-blob trail for a tracked follower.
+// The trail is a filled, tapered, noise-wobbled shape (wider at head, narrower at tail).
+// When the follower has settled at its destination, draws a wobbly blob instead.
+function drawJellyBlobTrail(follower, palette, options) {
+  if (!follower || !palette) return;
+  const opts = options || {};
+  const tilePx = TILE_SIZE * state.zoom;
+  const reduceGlow = shouldReduceGlowEffects();
+  const tailOffset = Number.isFinite(opts.tailOffset) ? opts.tailOffset : Math.max(6, state.zoom * 6);
+
+  const getScreenY = opts.anchorY === "center"
+    ? (cy) => state.panY + (cy + 0.5) * tilePx
+    : opts.anchorY === "top"
+    ? (cy) => state.panY + cy * tilePx + tailOffset
+    : (cy) => state.panY + cy * tilePx + tilePx - tailOffset;
+
+  const headScreen = {
+    x: state.panX + (follower.headX + 0.5) * tilePx,
+    y: getScreenY(follower.headY)
+  };
+  const tailScreen = {
+    x: state.panX + (follower.x + 0.5) * tilePx,
+    y: getScreenY(follower.y)
+  };
+
+  // Build screen-space path: head → reversed waypoints → tail
+  const points = [headScreen];
+  const waypoints = Array.isArray(follower.waypoints) ? follower.waypoints : [];
+  for (let i = waypoints.length - 1; i >= 0; i--) {
+    const wp = waypoints[i];
+    if (!wp) continue;
+    const sp = { x: state.panX + (wp.x + 0.5) * tilePx, y: getScreenY(wp.y) };
+    const prev = points[points.length - 1];
+    if (Math.hypot(sp.x - prev.x, sp.y - prev.y) <= 0.5) continue;
+    points.push(sp);
+  }
+  const lastPt = points[points.length - 1];
+  if (Math.hypot(tailScreen.x - lastPt.x, tailScreen.y - lastPt.y) > 0.5) {
+    points.push(tailScreen);
+  }
+
+  let pathLen = 0;
+  for (let i = 1; i < points.length; i++) {
+    pathLen += Math.hypot(points[i].x - points[i-1].x, points[i].y - points[i-1].y);
+  }
+
+  const wobbleAmp = follower.wobbleAmp || 0;
+  const wobbleT   = follower.wobbleT   || 0;
+  const seed      = follower.blobSeed  || 0;
+  const maxR = Math.max(3.5, tilePx * 0.135); // head radius
+
+  // Blob has arrived — only draw settled wobble
+  if (pathLen < tilePx * 0.25) {
+    if (wobbleAmp > 0.015) {
+      _drawSettledJellyBlob(palette, headScreen, maxR, wobbleAmp, wobbleT, seed, reduceGlow);
+    }
+    return;
+  }
+
+  const alpha = Math.min(0.88, pathLen / Math.max(14, tilePx * 1.2));
+  if (alpha <= 0.015) return;
+
+  // Build left/right jelly edge points
+  const n = points.length;
+  const minR = Math.max(0.5, tilePx * 0.022); // tail radius
+  const leftEdge  = [];
+  const rightEdge = [];
+
+  for (let i = 0; i < n; i++) {
+    const tNorm = i / Math.max(1, n - 1); // 0=head 1=tail
+    const r = maxR * (1 - tNorm) + minR * tNorm;
+
+    // Tangent direction at this point
+    let dx, dy;
+    if (n === 1)      { dx = 1; dy = 0; }
+    else if (i === 0) { dx = points[1].x - points[0].x; dy = points[1].y - points[0].y; }
+    else if (i === n-1) { dx = points[n-1].x - points[n-2].x; dy = points[n-1].y - points[n-2].y; }
+    else              { dx = points[i+1].x - points[i-1].x; dy = points[i+1].y - points[i-1].y; }
+
+    const len = Math.hypot(dx, dy) || 1;
+    const px = -dy / len; // perpendicular left
+    const py =  dx / len;
+
+    // Noise wobble (stronger at head, fades toward tail)
+    const wobbleScale = 1 - tNorm * 0.55;
+    const nL = simpleNoise(wobbleT * 2.6 + i * 1.13, seed)       * r * 0.4 * wobbleScale;
+    const nR = simpleNoise(wobbleT * 2.6 + i * 1.13, seed + 6.1) * r * 0.4 * wobbleScale;
+
+    leftEdge.push({ x: points[i].x + px * (r + nL), y: points[i].y + py * (r + nL) });
+    rightEdge.push({ x: points[i].x - px * (r + nR), y: points[i].y - py * (r + nR) });
+  }
+
+  // ── Filled jelly shape ──────────────────────────────────────────────────
+  ctx.save();
+  ctx.globalAlpha *= alpha;
+  ctx.shadowColor = palette.glowInner;
+  ctx.shadowBlur  = Math.max(7, maxR * (reduceGlow ? 1.7 : 3.1));
+  ctx.fillStyle   = palette.coreMid;
+  ctx.beginPath();
+  _catmullRomPath(ctx, leftEdge, false);
+  _catmullRomPath(ctx, [...rightEdge].reverse(), true);
+  ctx.closePath();
+  ctx.fill();
+
+  // Inner highlight strip (center is brighter)
+  ctx.shadowBlur  = 0;
+  ctx.globalAlpha *= 0.40;
+  ctx.fillStyle   = palette.coreHighlight || palette.coreMid;
+  const s = 0.42;
+  const innerL = leftEdge.map((p, i) => ({ x: p.x * (1-s) + rightEdge[i].x * s, y: p.y * (1-s) + rightEdge[i].y * s }));
+  const innerR = rightEdge.map((p, i) => ({ x: p.x * (1-s) + leftEdge[i].x * s, y: p.y * (1-s) + leftEdge[i].y * s }));
+  ctx.beginPath();
+  _catmullRomPath(ctx, innerL, false);
+  _catmullRomPath(ctx, [...innerR].reverse(), true);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.restore();
+
+  // If settling, also render the wobble blob at the head
+  if (wobbleAmp > 0.015) {
+    _drawSettledJellyBlob(palette, headScreen, maxR, wobbleAmp * Math.min(1, alpha * 1.4), wobbleT, seed, reduceGlow);
+  }
+}
+
+// ── End jelly blob trail helpers ────────────────────────────────────────────
+
 function drawBlobTrail(follower, palette, options) {
   if (!follower || !palette) return;
   const opts = options || {};
@@ -4410,6 +4729,8 @@ function drawBlobTrail(follower, palette, options) {
   const tailOffset = Number.isFinite(opts.tailOffset) ? opts.tailOffset : Math.max(6, state.zoom * 6);
   const anchorY = opts.anchorY === "center"
     ? (coordY) => state.panY + (coordY + 0.5) * tilePx
+    : opts.anchorY === "top"
+    ? (coordY) => state.panY + coordY * tilePx + tailOffset
     : (coordY) => state.panY + coordY * tilePx + tilePx - tailOffset;
   const headScreen = {
     x: state.panX + (follower.headX + 0.5) * tilePx,
@@ -4523,36 +4844,58 @@ function drawPartyJellyTrails() {
   }
 }
 
+function drawTrackedJellyTrails() {
+  if (!(state.trackedJellyFollowers instanceof Map) || state.trackedJellyFollowers.size === 0) return;
+
+  for (const follower of state.trackedJellyFollowers.values()) {
+    if (!follower) continue;
+    if (follower.z !== state.activeZ) continue;
+    if (normalizeGridId(follower.gridId) !== normalizeGridId(state.activeGridId)) continue;
+    if (!follower.toRoomId || !state.roomsById.has(String(follower.toRoomId))) continue;
+    drawJellyBlobTrail(follower, follower.palette || TRACKED_CHAR_PALETTE, { anchorY: follower.anchorY || "bottom" });
+  }
+}
+
+function drawTrackedDots(visibleRooms) {
+  if (!visibleRooms || visibleRooms.length === 0) return;
+  if (state.trackedChars.size === 0 && state.trackedMobs.size === 0) return;
+
+  // Accumulate counts per room
+  const charCounts = new Map();
+  const mobCounts = new Map();
+  for (const [, v] of state.trackedChars) {
+    if (v && v.roomId) charCounts.set(v.roomId, (charCounts.get(v.roomId) || 0) + 1);
+  }
+  for (const [, v] of state.trackedMobs) {
+    if (!v || !v.roomId) continue;
+    if (v.uid != null && state.partyMobUids.has(v.uid)) continue;
+    mobCounts.set(v.roomId, (mobCounts.get(v.roomId) || 0) + 1);
+  }
+
+  const visibleSet = new Set(visibleRooms.map((r) => r.id));
+
+  const drawCounts = (countMap, palette, anchorY) => {
+    for (const [roomId, count] of countMap) {
+      if (!visibleSet.has(roomId)) continue;
+      const room = state.roomsById.get(roomId);
+      if (!room) continue;
+      if (room.z !== state.activeZ) continue;
+      if (normalizeGridId(room.gridId) !== normalizeGridId(state.activeGridId)) continue;
+      drawDotsOnRoom(room, count, palette, anchorY);
+    }
+  };
+
+  // Tracked mobs share the top row with mob hints; tracked chars share the bottom row with party.
+  drawCounts(mobCounts, TRACKED_MOB_PALETTE, "top");
+  drawCounts(charCounts, TRACKED_CHAR_PALETTE, "bottom");
+}
+
 function drawPartyDot(room) {
   drawPartyDotsOnRoom(room, 1);
 }
 
 function drawPartyDotsOnRoom(room, memberCount) {
-  const count = Math.max(0, Number.parseInt(memberCount, 10) || 0);
-  if (!room || count <= 0) return;
-
-  const tilePx = TILE_SIZE * state.zoom;
-  const x = state.panX + room.x * tilePx;
-  const y = state.panY + room.y * tilePx;
-  const dots = Math.min(5, count);
-  const r = Math.max(3.2, state.zoom * 3.3);
-  const sprite = getDotSprite(r, shouldReduceGlowEffects(), PARTY_DOT_PALETTE);
-  const step = Math.max(r * 2.15, state.zoom * 5.4);
-  const startX = x + tilePx * 0.5 - ((dots - 1) * step) * 0.5;
-  const dotY = y + tilePx - Math.max(6, state.zoom * 6);
-
-  ctx.save();
-  for (let i = 0; i < dots; i++) {
-    const cx = startX + i * step;
-    ctx.drawImage(sprite.canvas, cx - sprite.center, dotY - sprite.center);
-  }
-  if (count > dots) {
-    ctx.fillStyle = "rgba(228, 235, 255, 0.95)";
-    ctx.font = `${Math.max(8, Math.round(8 * state.zoom))}px monospace`;
-    ctx.textBaseline = "middle";
-    ctx.fillText(`+${count - dots}`, startX + (dots - 1) * step + r + 2, dotY);
-  }
-  ctx.restore();
+  drawDotsOnRoom(room, Math.max(0, Number.parseInt(memberCount, 10) || 0), PARTY_DOT_PALETTE, "bottom");
 }
 
 function getPartyDotScreenPos(roomX, roomY) {
@@ -4723,38 +5066,38 @@ function findDirectionalScanRoomId(originRoom, dir, distance) {
   return lastId;
 }
 
-function drawMobDotsOnRoom(room, mobCount, alpha) {
-  const count = Math.max(1, Number.parseInt(mobCount, 10) || 1);
+// Unified dot renderer. anchorY: "top" | "bottom".
+function drawDotsOnRoom(room, count, palette, anchorY, alpha) {
+  if (!room || count <= 0) return;
   const dotAlpha = Number.isFinite(alpha) ? alpha : 1;
   if (dotAlpha <= 0) return;
   const dots = Math.min(5, count);
   const tilePx = TILE_SIZE * state.zoom;
   const x = state.panX + room.x * tilePx;
   const y = state.panY + room.y * tilePx;
-  const r = Math.max(3.5, state.zoom * 3.5);
-  const step = r * 2 + Math.max(2, state.zoom * 2);
+  const r = Math.max(3.2, state.zoom * 3.3);
+  const step = Math.max(r * 2.1, state.zoom * 5.0);
+  const sprite = getDotSprite(r, shouldReduceGlowEffects(), palette);
   const startX = x + tilePx * 0.5 - ((dots - 1) * step) * 0.5;
-  const dotY = y + Math.max(6, state.zoom * 6);
-  const reduceGlow = shouldReduceGlowEffects();
-  const sprite = getDotSprite(r, reduceGlow, MOB_DOT_PALETTE);
-
+  const margin = Math.max(6, state.zoom * 6);
+  const dotY = anchorY === "bottom" ? y + tilePx - margin : y + margin;
   ctx.save();
   ctx.globalAlpha *= dotAlpha;
   for (let i = 0; i < dots; i++) {
     const cx = startX + i * step;
     ctx.drawImage(sprite.canvas, cx - sprite.center, dotY - sprite.center);
   }
-  ctx.restore();
-
   if (count > dots) {
-    ctx.save();
-    ctx.globalAlpha *= dotAlpha;
-    ctx.fillStyle = "rgba(245, 225, 225, 0.95)";
+    ctx.fillStyle = "rgba(228, 235, 255, 0.95)";
     ctx.font = `${Math.max(8, Math.round(8 * state.zoom))}px monospace`;
     ctx.textBaseline = "middle";
     ctx.fillText(`+${count - dots}`, startX + (dots - 1) * step + r + 2, dotY);
-    ctx.restore();
   }
+  ctx.restore();
+}
+
+function drawMobDotsOnRoom(room, mobCount, alpha) {
+  drawDotsOnRoom(room, Math.max(1, Number.parseInt(mobCount, 10) || 1), MOB_DOT_PALETTE, "top", alpha);
 }
 
 function getDotSprite(radius, reduceGlow, palette) {
@@ -6247,6 +6590,11 @@ function formatRoomHoverTooltip(room) {
   const nsidText = room.areaID != null && room.localID != null ? `${room.areaID}:${room.localID}` : "";
   const ephText = room.ephNum != null ? String(room.ephNum) : "";
 
+  const trackedCharsHere = [...state.trackedChars.entries()]
+    .filter(([, v]) => v && v.roomId === room.id).map(([n]) => n);
+  const trackedMobsHere = [...state.trackedMobs.entries()]
+    .filter(([, v]) => v && v.roomId === room.id).map(([, v]) => v.name || String(v.uid || "(unknown)"));
+
   return [
     `Area: ${room.area || "Unknown"}`,
     `Room: ${room.name || "Unknown"}`,
@@ -6255,7 +6603,9 @@ function formatRoomHoverTooltip(room) {
     `XYZ: ${room.x}, ${room.y}, ${room.z}`,
     `Sector: ${room.sector || "unknown"}`,
     `Mobs: ${mobs.length ? `\n- ${mobText}` : mobText}`,
-    `Exits: ${exitsText}`
+    `Exits: ${exitsText}`,
+    trackedCharsHere.length ? `Tracking (chars): ${trackedCharsHere.join(", ")}` : null,
+    trackedMobsHere.length ? `Tracking (mobs): ${trackedMobsHere.join(", ")}` : null,
   ].filter(Boolean).join("\n");
 }
 
@@ -6544,6 +6894,70 @@ function hasActivePlayerBlobFollower() {
   return hasWaypoints || lag > 0.004 || speed > 0.003;
 }
 
+function updateTrackedJellyFollowers(dt) {
+  if (!(state.trackedJellyFollowers instanceof Map) || state.trackedJellyFollowers.size === 0) return;
+  for (const follower of state.trackedJellyFollowers.values()) {
+    if (!follower) continue;
+    // Measure lag before advancing so we can detect the arrival moment
+    const headX = follower.headX != null ? follower.headX : follower.targetX;
+    const headY = follower.headY != null ? follower.headY : follower.targetY;
+    const prevLag = Math.hypot(headX - follower.x, headY - follower.y);
+    advanceBlobFollower(follower, dt, PARTY_BLOB_SLURP_SPEED);
+    const newLag  = Math.hypot(headX - follower.x, headY - follower.y);
+    // Trigger settling jiggle the frame the blob crosses the arrival threshold
+    if (prevLag > 0.12 && newLag <= 0.12) {
+      follower.wobbleAmp = 1.0;
+    }
+    // Advance wobble time (drives the noise sampling)
+    follower.wobbleT = (follower.wobbleT || 0) + dt * 3.2;
+    // Decay wobble amplitude (~half-life 0.32 s)
+    if ((follower.wobbleAmp || 0) > 0.001) {
+      follower.wobbleAmp = (follower.wobbleAmp || 0) * Math.exp(-dt * 2.15);
+    } else {
+      follower.wobbleAmp = 0;
+    }
+  }
+}
+
+function pruneTrackedJellyTrails(now) {
+  if (!(state.trackedJellyFollowers instanceof Map)) return;
+  for (const [key, follower] of state.trackedJellyFollowers.entries()) {
+    if (!follower) { state.trackedJellyFollowers.delete(key); continue; }
+    if (!follower.toRoomId || !state.roomsById.has(String(follower.toRoomId))) {
+      state.trackedJellyFollowers.delete(key); continue;
+    }
+    if (follower.z !== state.activeZ || normalizeGridId(follower.gridId) !== normalizeGridId(state.activeGridId)) continue;
+    const dx = (follower.headX != null ? follower.headX : follower.targetX) - follower.x;
+    const dy = (follower.headY != null ? follower.headY : follower.targetY) - follower.y;
+    const speed = Math.hypot(follower.vx || 0, follower.vy || 0);
+    const waypoints = Array.isArray(follower.waypoints) ? follower.waypoints : [];
+    if (waypoints.length === 0 && Math.hypot(dx, dy) < 0.004 && speed < 0.003) {
+      follower.x = follower.headX != null ? follower.headX : follower.targetX;
+      follower.y = follower.headY != null ? follower.headY : follower.targetY;
+      follower.vx = 0;
+      follower.vy = 0;
+    }
+  }
+}
+
+function hasActiveTrackedJellyFollowers() {
+  if (!(state.trackedJellyFollowers instanceof Map) || state.trackedJellyFollowers.size === 0) return false;
+  for (const follower of state.trackedJellyFollowers.values()) {
+    if (!follower) continue;
+    if (follower.z !== state.activeZ) continue;
+    if (normalizeGridId(follower.gridId) !== normalizeGridId(state.activeGridId)) continue;
+    // Keep effects loop alive while jelly is moving OR settling
+    if ((follower.wobbleAmp || 0) > 0.015) return true;
+    const headX = follower.headX != null ? follower.headX : follower.targetX;
+    const headY = follower.headY != null ? follower.headY : follower.targetY;
+    const lag = Math.hypot(headX - follower.x, headY - follower.y);
+    const speed = Math.hypot(follower.vx || 0, follower.vy || 0);
+    const hasWaypoints = Array.isArray(follower.waypoints) && follower.waypoints.length > 0;
+    if (hasWaypoints || lag > 0.004 || speed > 0.003) return true;
+  }
+  return false;
+}
+
 function ensureEffectsLoop() {
   const anim = state.animation;
   if (anim.effectRafId) return;
@@ -6556,9 +6970,11 @@ function ensureEffectsLoop() {
     state.animation.lastEffectTs = now;
     updatePanAnimation(now);
     updatePartyJellyFollowers(dt);
+    updateTrackedJellyFollowers(dt);
     updatePlayerBlobFollower(dt);
     pruneMovementTrail(now);
     prunePartyJellyTrail(now);
+    pruneTrackedJellyTrails(now);
     pruneMobHintAges(now);
     const targetFrameMs = state.animation.active ? 33 : 16;
     if ((now - anim.lastRenderTs) >= targetFrameMs) {
@@ -6566,7 +6982,7 @@ function ensureEffectsLoop() {
       anim.lastRenderTs = now;
     }
 
-    if (state.animation.active || state.movementTrail.length > 0 || hasActivePartyJellyFollowers() || hasActivePlayerBlobFollower() || hasActiveMobHintEffects(now) || hasActiveRoomPulseEffect()) {
+    if (state.animation.active || state.movementTrail.length > 0 || hasActivePartyJellyFollowers() || hasActiveTrackedJellyFollowers() || hasActivePlayerBlobFollower() || hasActiveMobHintEffects(now) || hasActiveRoomPulseEffect()) {
       anim.effectRafId = requestAnimationFrame(tick);
       return;
     }
