@@ -300,6 +300,8 @@ const state = {
   jellyFollowers: new Map(),
   roomMobs: [],
   roomMobsSeenAt: 0,
+  roomStatus: null,
+  roomMobHint: null,
   tempMobDotByRoom: new Map(),
   trackedChars: new Map(),   // Map<name, { roomId }>
   trackedMobs:  new Map(),   // Map<name, { roomId, uid }>
@@ -1668,6 +1670,14 @@ function handleSessionMessage(msg) {
   }
   if (msg.type === "frmapper.roomMobs" && msg.payload) {
     updateRoomMobs(msg.payload);
+  }
+  if (msg.type === "frmapper.roomStatus" && msg.payload) {
+    // Room.Status carries dynamic light data; frmapper stores it for overlay use.
+    state.roomStatus = msg.payload;
+  }
+  if (msg.type === "frmapper.roomMobHint" && msg.payload) {
+    // Room.MobHint carries nearby_mobs and scan_range for minimap overlays.
+    ingestRoomMobHint(msg.payload);
   }
   if (msg.type === "frmapper.trackedChars" && msg.payload) {
     ingestTrackedDelta("chars", msg.payload);
@@ -3168,6 +3178,36 @@ function updateRoomMobs(payload) {
   state.roomMobs = Array.isArray(payload && payload.mobs) ? payload.mobs : [];
   state.roomMobsSeenAt = state.roomMobs.length > 0 ? performance.now() : 0;
   if (state.roomMobsSeenAt > 0) ensureEffectsLoop();
+  scheduleRender();
+}
+
+function ingestRoomMobHint(payload) {
+  state.roomMobHint = payload || {};
+  const roomId = state.playerLocation && state.playerLocation.roomId
+    ? String(state.playerLocation.roomId)
+    : null;
+  if (!roomId) return;
+  const room = state.roomsById.get(roomId);
+  if (!room) return;
+
+  // Mirror what the old Room.Info path did: store on the room then fire showTempMobDot
+  // for every adjacent room that has mobs, so the minimap dots appear.
+  const nearbyMobs = normalizeNearbyMobs(payload.nearby_mobs || payload.nearbyMobs || {});
+  room.nearbyMobs = nearbyMobs;
+  const sr = payload.scan_range ?? payload.scanRange ?? null;
+  room.scanRange = Number.isFinite(Number(sr)) && Number(sr) > 0 ? Number(sr) : null;
+
+  for (const [dir, entry] of Object.entries(nearbyMobs)) {
+    const parsed = parseNearbyMobsEntry(entry);
+    if (parsed.count <= 0) continue;
+    const normDir = normalizeDirectionToken(dir);
+    if (!normDir) continue;
+    const targetId = findDirectionalScanRoomId(room, normDir, Math.max(1, parsed.distance || 1));
+    if (!targetId) continue;
+    showTempMobDot(targetId, parsed.count, "nearby");
+  }
+
+  ensureEffectsLoop();
   scheduleRender();
 }
 

@@ -2425,7 +2425,19 @@ body:has(#workspace[data-layout="rounded"]) #settings-drawer {
 }
 
 .party-gauge .condition-badge {
-  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 0;
+}
+
+.party-gauge .status-text {
+  position: static;
+  left: auto;
+  top: auto;
+  display: block;
+  max-width: 100%;
+  padding: 0;
 }
 
 .party-gauge-label {

@@ -9,6 +9,7 @@
   var ACTIVE_PROFILE_KEY = 'freign.play2.active-profile.v1';
   var SCROLLBACK_KEY = 'freign.play2.scrollback';
   var CMD_HISTORY_KEY = 'freign.play2.cmdhistory';
+  var COMM_HISTORY_KEY = 'freign.play2.commhistory';
 
   function scrollbackKey() {
     var p = normalizeProfileName(state ? state.activeProfileName : null) || DEFAULT_PROFILE_NAME;
@@ -20,6 +21,29 @@
     var p = normalizeProfileName(state ? state.activeProfileName : null) || DEFAULT_PROFILE_NAME;
     if (p === DEFAULT_PROFILE_NAME) return CMD_HISTORY_KEY;
     return CMD_HISTORY_KEY + '.' + p.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  }
+
+  function commHistoryKey() {
+    var p = normalizeProfileName(state ? state.activeProfileName : null) || DEFAULT_PROFILE_NAME;
+    if (p === DEFAULT_PROFILE_NAME) return COMM_HISTORY_KEY;
+    return COMM_HISTORY_KEY + '.' + p.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  }
+
+  function saveCommHistory() {
+    try { localStorage.setItem(commHistoryKey(), JSON.stringify(state.gmcp.channels)); } catch (_) {}
+  }
+
+  function loadCommHistory() {
+    try {
+      var raw = localStorage.getItem(commHistoryKey());
+      if (!raw) return;
+      var parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return;
+      // Re-hydrate timestamp strings back to Date objects.
+      state.gmcp.channels = parsed.map(function (m) {
+        return Object.assign({}, m, { timestamp: m.timestamp ? new Date(m.timestamp) : new Date() });
+      });
+    } catch (_) {}
   }
   var SITE_THEME_KEY = 'freign.site.theme.v1';
   var DEFAULT_PROFILE_NAME = 'Default';
@@ -64,6 +88,8 @@
     'room.mobs': ['room.mobs'],
     'room.objects': ['room.objects', 'room.items'],
     'room.scannedmobs': ['room.scannedmobs', 'room.scanned.mobs', 'room.scan.mobs'],
+    'room.status': ['room.status'],
+    'room.mobhint': ['room.mobhint', 'room.mob_hint'],
     'char.info': ['char.info', 'char.status'],
     'char.vitals': ['char.vitals'],
     'char.affects': ['char.affects'],
@@ -202,13 +228,40 @@
     return store;
   }
 
+  function _profileStorePayload() {
+    return JSON.stringify({
+      version: 1,
+      profiles: state.profileStore ? state.profileStore.profiles : { Default: cloneProfileSettings({}) }
+    });
+  }
+
+  function _evictStaleScrollback() {
+    // Remove scrollback for every profile except the currently active one to free quota.
+    var activeKey = scrollbackKey();
+    try {
+      var toRemove = [];
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k && k !== activeKey && k.indexOf(SCROLLBACK_KEY) === 0) toRemove.push(k);
+      }
+      toRemove.forEach(function (k) { try { localStorage.removeItem(k); } catch (_) {} });
+    } catch (_) {}
+  }
+
   function saveProfileStore() {
     try {
-      localStorage.setItem(PROFILE_STORE_KEY, JSON.stringify({
-        version: 1,
-        profiles: state.profileStore ? state.profileStore.profiles : { Default: cloneProfileSettings({}) }
-      }));
-    } catch (_) {}
+      localStorage.setItem(PROFILE_STORE_KEY, _profileStorePayload());
+      return true;
+    } catch (_) {
+      // Likely QuotaExceededError — evict stale scrollback buffers and retry once.
+      _evictStaleScrollback();
+      try {
+        localStorage.setItem(PROFILE_STORE_KEY, _profileStorePayload());
+        return true;
+      } catch (_2) {
+        return false;
+      }
+    }
   }
 
   function getProfileNames() {
@@ -294,7 +347,7 @@
     state.settings = ensureDefaultPanelLayout(mergeSettings(cloneDefaultSettings(), getProfileSettings(next)));
     state.settings.theme = getGlobalThemeName();
     rebuildPalette();
-    /* Swap per-profile scrollback and command history */
+    /* Swap per-profile scrollback, command history, and comms history */
     if (el.terminal) el.terminal.innerHTML = '';
     state.scrollback = [];
     loadScrollback();
@@ -302,6 +355,9 @@
     state.historyIdx = -1;
     resetHistoryNav();
     loadCommandHistory();
+    state.gmcp.channels = [];
+    state.gmcp.channelTab = 'all';
+    loadCommHistory();
     if (opts.render !== false) renderAll();
     if (opts.persist !== false) saveSettings();
   }
@@ -486,6 +542,8 @@
     gmcp: {
       vitals: null,
       roomInfo: null,
+      roomStatus: null,
+      roomMobHint: null,
       mapRender: '',
       mapRenderMeta: null,
       mapRenderSeq: 0,
@@ -536,6 +594,7 @@
     initResizeHandles();
     loadScrollback();
     loadCommandHistory();
+    loadCommHistory();
     if (state.startupProfileSelectionRequired) {
       showStartupProfilePicker();
     } else {
@@ -661,6 +720,7 @@
     el.resetSettingsConfig  = document.getElementById('reset-settings-config');
     el.importFileConfig     = document.getElementById('import-file-config');
     el.btnRenegotiateGmcp   = document.getElementById('btn-renegotiate-gmcp');
+    el.btnSaveSettingsConfig = document.getElementById('save-settings-config');
 
     el.ansiPaletteCfg   = document.getElementById('ansi-palette-cfg');
     el.cfgTsSelectable  = document.getElementById('cfg-ts-selectable');
@@ -990,6 +1050,22 @@
       el.resetSettingsConfig,
       el.importFileConfig
     );
+
+    if (el.btnSaveSettingsConfig) {
+      el.btnSaveSettingsConfig.addEventListener('click', function () {
+        var ok = saveSettings();
+        var btn = el.btnSaveSettingsConfig;
+        var orig = btn.textContent;
+        btn.textContent = ok ? 'Saved \u2713' : 'Save failed \u2014 storage full!';
+        btn.style.color = ok ? '' : '#f44';
+        btn.disabled = true;
+        setTimeout(function () {
+          btn.textContent = orig;
+          btn.style.color = '';
+          btn.disabled = false;
+        }, ok ? 1800 : 4000);
+      });
+    }
 
     el.cfgTsSelectable.addEventListener('change', function () {
       state.settings.tsSelectable = !!el.cfgTsSelectable.checked;
@@ -1770,10 +1846,8 @@
         state.profileStore = loadProfileStore();
       }
       state.profileStore.profiles[normalizeProfileName(state.activeProfileName) || DEFAULT_PROFILE_NAME] = cloneProfileSettings(state.settings);
-      saveProfileStore();
-    } catch (_) {
-      // Storage may be unavailable or full; keep runtime settings functional.
-    }
+    } catch (_) {}
+    return saveProfileStore();
   }
   function saveAndRefresh()  { saveSettings(); renderAll(); }
 
@@ -2306,6 +2380,8 @@
     if (canonicalPkg === 'room.mobs')   { updateRoomMobs(data || {}); return; }
     if (canonicalPkg === 'room.objects') { updateRoomObjects(data || {}); return; }
     if (canonicalPkg === 'room.scannedmobs') { updateRoomScannedMobs(data || {}); return; }
+    if (canonicalPkg === 'room.status')  { updateRoomStatus(data || {}); return; }
+    if (canonicalPkg === 'room.mobhint') { updateRoomMobHint(data || {}); return; }
     if (canonicalPkg === 'map.render')  { updateMapRender(data || {}); return; }
     if (canonicalPkg === 'world.time')  { updateWorldTime(data || {}); return; }
     if (canonicalPkg === 'world.weather') { updateWorldWeather(data || {}); return; }
@@ -2535,6 +2611,15 @@
     state.gmcp.roomScannedMobs = data;
   }
 
+  function updateRoomStatus(data) {
+    state.gmcp.roomStatus = data;
+    renderMapPanel();
+  }
+
+  function updateRoomMobHint(data) {
+    state.gmcp.roomMobHint = data;
+  }
+
   function currentRoomId() {
     var info = state.gmcp.roomInfo || {};
     if (info.id) return String(info.id);
@@ -2657,7 +2742,7 @@
     var area = preferredValue(info, ['area', 'areaName']) || 'Unknown Area';
     var roomName = preferredValue(info, ['name', 'roomName']) || 'Unknown Room';
     var timeText = formatHourForMapCard(wt);
-    var lightText = formatLightLevelForMapCard(info);
+    var lightText = formatLightLevelForMapCard(state.gmcp.roomStatus || info);
     var weatherText = formatWeatherForMapCard(ww);
 
     if (el.mapV2AreaName) el.mapV2AreaName.textContent = area;
@@ -2973,6 +3058,7 @@
     if (state.gmcp.channels.length > 120) {
       state.gmcp.channels = state.gmcp.channels.slice(state.gmcp.channels.length - 120);
     }
+    saveCommHistory();
     pulsePkgBadge('channels', 'Comm.Channel.Text');
     renderChannelsPanel();
   }
@@ -3170,7 +3256,7 @@
     state.gmcp.groupInfo = data;
     if (prev && Array.isArray(prev.members) && Array.isArray(data.members)) {
       var CARRY = ['hp','maxhp','mana','maxmana','move','maxmove',
-                   'hp_pct','mana_pct','mv_pct','tnl',
+                   'hp_pct','mana_pct','mv_pct','tnl','wimpy_pct',
                    'room_id','room_name','area','room_coord'];
       data.members.forEach(function (m) {
         var old = prev.members.find(function (p) {
@@ -3218,12 +3304,12 @@
       if (item.mana_pct != null) m.mana_pct = item.mana_pct;
       if (item.mv_pct   != null) m.mv_pct   = item.mv_pct;
       if (item.hp       != null) m.hp       = item.hp;
-      if (item.maxhp    != null) m.maxhp    = item.maxhp;
       if (item.mana     != null) m.mana     = item.mana;
       if (item.maxmana  != null) m.maxmana  = item.maxmana;
       if (item.move     != null) m.move     = item.move;
       if (item.maxmove  != null) m.maxmove  = item.maxmove;
       if (item.tnl      != null) m.tnl      = item.tnl;
+      if (item.wimpy_pct != null) m.wimpy_pct = item.wimpy_pct;
     }
     pulsePkgBadge('party', 'Group.Vitals');
     renderPartyPanel();
@@ -3403,8 +3489,6 @@
       var area = String(m.area || 'Unknown Area');
       var roomName = String(m.room_name || m.room_id || 'Unknown Room');
       var leadMark = (leader && leader === name) ? ' ★' : '';
-      var wimpy = Math.max(0, numOr(m.wimpy, 0));
-
       var hpPct   = m.hp_pct   != null ? pct(numOr(m.hp_pct,   0), 100)
                                         : pct(numOr(m.hp,   0), Math.max(1, numOr(m.maxhp,   1)));
       var mpPct   = m.mana_pct != null ? pct(numOr(m.mana_pct, 0), 100)
@@ -3412,8 +3496,7 @@
       var mvPct   = m.mv_pct   != null ? pct(numOr(m.mv_pct,   0), 100)
                                         : pct(numOr(m.move, 0), Math.max(1, numOr(m.maxmove, 1)));
 
-      var maxHp = Math.max(1, numOr(m.maxhp, 1));
-      var wimpyPct = maxHp > 0 ? Math.max(0, Math.min(100, Math.floor((wimpy * 100) / maxHp))) : 0;
+      var wimpyPct = Math.max(0, Math.min(100, numOr(m.wimpy_pct, 0)));
 
       var card = document.createElement('div');
       card.className = 'party-card';
@@ -3425,7 +3508,7 @@
         '<div class="party-substats">TNL ' + tnl + ' · ' + escHtml(align) + ' · ' + escHtml(ethos) + '</div>' +
         '<div class="party-loc">' + escHtml(area) + ' · ' + escHtml(roomName) + '</div>' +
         '<div class="party-bars">' +
-          gaugeHtml('HP', hpPct, 'hp', { markerPct: wimpyPct, markerLabel: wimpy > 0 ? ('W ' + wimpy) : '' }) +
+          gaugeHtml('HP', hpPct, 'hp', { markerPct: wimpyPct, markerLabel: wimpyPct > 0 ? ('W ' + wimpyPct + '%') : '' }) +
           gaugeHtml('MP', mpPct, 'mp') +
           gaugeHtml('MV', mvPct, 'mv') +
         '</div>';
@@ -4530,7 +4613,7 @@
     var raw = String(text || '');
     if (!sep) return [raw];
 
-    // Leading separator means a literal first command (e.g. ";gtell hi").
+    // Leading separator means a literal first command (e.g. ";gtell hi;n;;w").
     if (raw.indexOf(sep) === 0) {
       var tail = raw.slice(sep.length);
       var nextSep = tail.indexOf(sep);
@@ -4544,14 +4627,19 @@
       if (first.trim()) out.push(first);
 
       var rest = tail.slice(nextSep + sep.length);
-      rest.split(sep).forEach(function (part) {
-        var clean = part.trim();
-        if (clean) out.push(clean);
-      });
+      var restParts = rest.split(sep).map(function (p) { return p.trim(); });
+      // Drop trailing empties; preserve interior empties (double-sep = bare CR).
+      while (restParts.length && restParts[restParts.length - 1] === '') restParts.pop();
+      restParts.forEach(function (part) { out.push(part); });
       return out;
     }
 
-    return raw.split(sep).map(function (p) { return p.trim(); }).filter(Boolean);
+    // Interior empty strings from a double-sep (e.g. "n;;n") become bare CRs.
+    // Only strip leading/trailing empties caused by a stray single sep at the edges.
+    var parts = raw.split(sep).map(function (p) { return p.trim(); });
+    while (parts.length && parts[0] === '') parts.shift();
+    while (parts.length && parts[parts.length - 1] === '') parts.pop();
+    return parts;
   }
 
   /* ═══════════════════════════════════════════════════════════════
