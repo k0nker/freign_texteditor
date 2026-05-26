@@ -68,7 +68,7 @@
           </div>
           <div class="panel-body mapv2-panel" id="map-panel-body">
             <div class="mapv2-info-card" id="mapv2-info-card" aria-live="polite">
-              <div class="mapv2-info-row mapv2-info-row-top">
+              <div class="mapv2-info-row">
                 <span id="mapv2-area-name" class="mapv2-info-area">Unknown Area</span>
                 <span id="mapv2-time" class="mapv2-info-time">--</span>
               </div>
@@ -76,7 +76,10 @@
                 <span id="mapv2-room-name" class="mapv2-info-room">Unknown Room</span>
                 <span id="mapv2-light" class="mapv2-info-light">--</span>
               </div>
-              <div id="mapv2-weather" class="mapv2-info-weather">&nbsp;</div>
+              <div class="mapv2-info-row mapv2-info-row-meta">
+                <span id="mapv2-coords" class="mapv2-info-coords"></span>
+                <div id="mapv2-weather" class="mapv2-info-weather">&nbsp;</div>
+              </div>
             </div>
             <iframe id="map-frame" class="mapv2-frame" title="frmapper map" loading="lazy"></iframe>
           </div>
@@ -108,7 +111,7 @@
         <div class="panel" id="panel-party">
           <div class="panel-head">
             <span>Party</span>
-            <span class="pkg-badge" id="pkg-party">&#128230; Group.Info</span>
+            <span class="pkg-badge" id="pkg-party">&#128230; Group</span>
             <button class="panel-close" data-panel="party" type="button" title="Close">&#x2715;</button>
           </div>
           <div class="panel-body ph-centered" id="party-list">

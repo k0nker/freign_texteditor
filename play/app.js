@@ -583,6 +583,7 @@
     el.mapV2AreaName  = document.getElementById('mapv2-area-name');
     el.mapV2Time      = document.getElementById('mapv2-time');
     el.mapV2RoomName  = document.getElementById('mapv2-room-name');
+    el.mapV2Coords    = document.getElementById('mapv2-coords');
     el.mapV2Light     = document.getElementById('mapv2-light');
     el.mapV2Weather   = document.getElementById('mapv2-weather');
     el.channelsPane   = document.getElementById('channels-pane');
@@ -2311,6 +2312,8 @@
     if (canonicalPkg === 'world.moons') { updateWorldMoons(data || {}); return; }
     if (canonicalPkg === 'comm.channel.text') { pushChannelMessage(data || {}); return; }
     if (canonicalPkg === 'group.info')  { updateGroupInfo(data || {}); return; }
+    if (canonicalPkg === 'group.vitals')   { updateGroupVitals(data || {}); return; }
+    if (canonicalPkg === 'group.position') { updateGroupPosition(data || {}); return; }
     if (canonicalPkg === 'char.info') { updateCharStatus(data || {}); return; }
     if (canonicalPkg === 'char.stats')  { updateCharStats(data || {}); return; }
     if (canonicalPkg === 'char.worth')  { updateCharWorth(data || {}); return; }
@@ -2629,13 +2632,9 @@
     return String(hour12) + period;
   }
 
-  function formatLightLevelForMapCard(info, worldTime) {
+  function formatLightLevelForMapCard(info) {
     var roomInfo = info && typeof info === 'object' ? info : {};
-    var wt = worldTime && typeof worldTime === 'object' ? worldTime : {};
-    var roomLight = preferredValue(roomInfo, ['lightLevel', 'light_level', 'sunlight', 'light']);
-    if (roomLight) return roomLight;
-    var worldLight = preferredValue(wt, ['sunlight', 'light', 'lightLevel', 'sun_state', 'sunState']);
-    return worldLight || '--';
+    return preferredValue(roomInfo, ['lightLevel', 'light_level']) || '--';
   }
 
   function formatWeatherForMapCard(worldWeather) {
@@ -2644,7 +2643,7 @@
     if (visibleRaw === false || String(visibleRaw).toLowerCase() === 'false' || String(visibleRaw) === '0') {
       return '';
     }
-    var weather = preferredValue(ww, ['weather', 'description', 'desc', 'summary', 'condition', 'sky']);
+    var weather = preferredValue(ww, ['weather', 'description', 'desc', 'summary', 'condition', 'sky_name']);
     return weather;
   }
 
@@ -2658,11 +2657,27 @@
     var area = preferredValue(info, ['area', 'areaName']) || 'Unknown Area';
     var roomName = preferredValue(info, ['name', 'roomName']) || 'Unknown Room';
     var timeText = formatHourForMapCard(wt);
-    var lightText = formatLightLevelForMapCard(info, wt);
+    var lightText = formatLightLevelForMapCard(info);
     var weatherText = formatWeatherForMapCard(ww);
 
     if (el.mapV2AreaName) el.mapV2AreaName.textContent = area;
     if (el.mapV2RoomName) el.mapV2RoomName.textContent = roomName;
+    if (el.mapV2Coords) {
+      var coord = info.coord && typeof info.coord === 'object' ? info.coord : null;
+      var cx = coord && typeof coord.x === 'number' ? coord.x : null;
+      var cy = coord && typeof coord.y === 'number' ? coord.y : null;
+      var cz = coord && typeof coord.z === 'number' ? coord.z : null;
+      var gridId = coord && typeof coord.gridId === 'string' && coord.gridId ? coord.gridId : null;
+      if (cx !== null && cy !== null && cz !== null) {
+        var coordStr = 'X: ' + cx + ' | Y: ' + cy + ' | Z: ' + cz;
+        if (gridId) coordStr += ' | ' + gridId;
+        el.mapV2Coords.textContent = coordStr;
+        el.mapV2Coords.style.display = '';
+      } else {
+        el.mapV2Coords.textContent = '';
+        el.mapV2Coords.style.display = 'none';
+      }
+    }
     if (el.mapV2Time) el.mapV2Time.textContent = timeText;
     if (el.mapV2Light) el.mapV2Light.textContent = lightText;
     if (el.mapV2Weather) {
@@ -3149,8 +3164,91 @@
   }
 
   function updateGroupInfo(data) {
+    // Preserve vitals / position fields merged by Group.Vitals and Group.Position
+    // so that a Group.Info re-send (e.g. on join/leave) doesn't wipe them.
+    var prev = state.gmcp.groupInfo;
     state.gmcp.groupInfo = data;
+    if (prev && Array.isArray(prev.members) && Array.isArray(data.members)) {
+      var CARRY = ['hp','maxhp','mana','maxmana','move','maxmove',
+                   'hp_pct','mana_pct','mv_pct','tnl',
+                   'room_id','room_name','area','room_coord'];
+      data.members.forEach(function (m) {
+        var old = prev.members.find(function (p) {
+          return (m.uid != null && p.uid != null && m.uid === p.uid) ||
+                 String(m.name || '').toLowerCase() === String(p.name || '').toLowerCase();
+        });
+        if (!old) return;
+        CARRY.forEach(function (k) { if (m[k] == null && old[k] != null) m[k] = old[k]; });
+      });
+    }
     pulsePkgBadge('party', 'Group.Info');
+    renderPartyPanel();
+  }
+
+  /** Find a group member in state.gmcp.groupInfo.members by uid (preferred) or name. */
+  function findGroupMember(uid, name) {
+    var grp = state.gmcp.groupInfo;
+    if (!grp || !Array.isArray(grp.members)) return null;
+    if (uid != null) {
+      var byUid = grp.members.find(function (m) { return m.uid != null && m.uid === uid; });
+      if (byUid) return byUid;
+    }
+    var lname = String(name || '').trim().toLowerCase();
+    if (!lname) return null;
+    return grp.members.find(function (m) { return String(m.name || '').trim().toLowerCase() === lname; }) || null;
+  }
+
+  /**
+   * Merge Group.Vitals into state.gmcp.groupInfo — updates hp/mana/mv numbers and
+   * percentages per member without replacing structural fields.  Creates a minimal
+   * groupInfo stub if Group.Info has not arrived yet so vitals are not lost.
+   */
+  function updateGroupVitals(data) {
+    if (!state.gmcp.groupInfo) state.gmcp.groupInfo = { leader: '', members: [] };
+    var items = Array.isArray(data.members) ? data.members : [];
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i];
+      var m = findGroupMember(item.uid != null ? Number(item.uid) : null, item.name);
+      if (!m) {
+        // Member not yet in groupInfo — insert a stub so vitals render immediately.
+        m = { name: String(item.name || ''), uid: item.uid != null ? Number(item.uid) : null };
+        state.gmcp.groupInfo.members.push(m);
+      }
+      if (item.hp_pct   != null) m.hp_pct   = item.hp_pct;
+      if (item.mana_pct != null) m.mana_pct = item.mana_pct;
+      if (item.mv_pct   != null) m.mv_pct   = item.mv_pct;
+      if (item.hp       != null) m.hp       = item.hp;
+      if (item.maxhp    != null) m.maxhp    = item.maxhp;
+      if (item.mana     != null) m.mana     = item.mana;
+      if (item.maxmana  != null) m.maxmana  = item.maxmana;
+      if (item.move     != null) m.move     = item.move;
+      if (item.maxmove  != null) m.maxmove  = item.maxmove;
+      if (item.tnl      != null) m.tnl      = item.tnl;
+    }
+    pulsePkgBadge('party', 'Group.Vitals');
+    renderPartyPanel();
+  }
+
+  /**
+   * Merge Group.Position into state.gmcp.groupInfo — updates room_id, room_name,
+   * area, room_coord per member without replacing structural or vitals fields.
+   */
+  function updateGroupPosition(data) {
+    if (!state.gmcp.groupInfo) state.gmcp.groupInfo = { leader: '', members: [] };
+    var items = Array.isArray(data.members) ? data.members : [];
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i];
+      var m = findGroupMember(item.uid != null ? Number(item.uid) : null, item.name);
+      if (!m) {
+        m = { name: String(item.name || ''), uid: item.uid != null ? Number(item.uid) : null };
+        state.gmcp.groupInfo.members.push(m);
+      }
+      if (item.room_id   != null) m.room_id   = item.room_id;
+      if (item.room_name != null) m.room_name = item.room_name;
+      if (item.area      != null) m.area      = item.area;
+      if (item.room_coord != null) m.room_coord = item.room_coord;
+    }
+    pulsePkgBadge('party', 'Group.Position');
     renderPartyPanel();
   }
 
@@ -3287,7 +3385,14 @@
     el.partyList.className = 'panel-body party-list';
     el.partyList.innerHTML = '';
 
-    grp.members.forEach(function (m) {
+    // Leader always first, otherwise preserve server order.
+    var members = grp.members.slice().sort(function (a, b) {
+      var aL = leader && String(a.name || '') === leader ? 1 : 0;
+      var bL = leader && String(b.name || '') === leader ? 1 : 0;
+      return bL - aL;
+    });
+
+    members.forEach(function (m) {
       var name = String(m.name || 'Unknown');
       var lvl = numOr(m.level, 0);
       var cls = String(m.class || (m.is_npc ? 'mob' : ''));
@@ -3300,9 +3405,12 @@
       var leadMark = (leader && leader === name) ? ' ★' : '';
       var wimpy = Math.max(0, numOr(m.wimpy, 0));
 
-      var hpPct = pct(numOr(m.hp_pct, 0), 100);
-      var mpPct = pct(numOr(m.mana_pct, 0), 100);
-      var mvPct = pct(numOr(m.mv_pct, 0), 100);
+      var hpPct   = m.hp_pct   != null ? pct(numOr(m.hp_pct,   0), 100)
+                                        : pct(numOr(m.hp,   0), Math.max(1, numOr(m.maxhp,   1)));
+      var mpPct   = m.mana_pct != null ? pct(numOr(m.mana_pct, 0), 100)
+                                        : pct(numOr(m.mana, 0), Math.max(1, numOr(m.maxmana, 1)));
+      var mvPct   = m.mv_pct   != null ? pct(numOr(m.mv_pct,   0), 100)
+                                        : pct(numOr(m.move, 0), Math.max(1, numOr(m.maxmove, 1)));
 
       var maxHp = Math.max(1, numOr(m.maxhp, 1));
       var wimpyPct = maxHp > 0 ? Math.max(0, Math.min(100, Math.floor((wimpy * 100) / maxHp))) : 0;

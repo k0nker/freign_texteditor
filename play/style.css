@@ -2040,21 +2040,12 @@ body:has(#workspace[data-layout="rounded"]) #settings-drawer {
   gap: 10px;
 }
 
-.mapv2-info-row-top {
-  color: color-mix(in srgb, var(--text) 94%, white 6%);
-}
-
 .mapv2-info-area,
 .mapv2-info-room,
-.mapv2-info-weather {
+.mapv2-info-coords {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.mapv2-info-area,
-.mapv2-info-room {
-  max-width: 100%;
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -2074,9 +2065,21 @@ body:has(#workspace[data-layout="rounded"]) #settings-drawer {
   font-weight: 700;
 }
 
+.mapv2-info-coords {
+  font-size: 10px;
+  color: color-mix(in srgb, var(--muted) 74%, white 10%);
+  letter-spacing: 0.03em;
+  margin-top: 1px;
+}
+
 .mapv2-info-weather {
-  margin-top: 3px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  margin-top: 1px;
   color: color-mix(in srgb, var(--muted) 82%, white 16%);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .mapv2-frame {

@@ -289,6 +289,7 @@ const state = {
   showPerfStats: false,
   showLocalIds: false,
   followPlayer: true,
+  pendingInitialSnap: false,
   themeHighlightColor: "#d9b05f",
   scanDistance: DEFAULT_SCAN_DISTANCE,
   sectorIcons: new Map(),
@@ -1659,6 +1660,12 @@ function handleSessionMessage(msg) {
   if (msg.type === "frmapper.groupInfo" && msg.payload) {
     updatePartyFromGroupInfo(msg.payload);
   }
+  if (msg.type === "frmapper.groupVitals" && msg.payload) {
+    mergePartyVitals(msg.payload);
+  }
+  if (msg.type === "frmapper.groupPosition" && msg.payload) {
+    mergePartyPosition(msg.payload);
+  }
   if (msg.type === "frmapper.roomMobs" && msg.payload) {
     updateRoomMobs(msg.payload);
   }
@@ -1676,7 +1683,8 @@ function handleSessionMessage(msg) {
   }
   if (msg.type === "frmapper.clearArea" && msg.payload) {
     const gridId = String(msg.payload.gridId || msg.payload.grid_id || "");
-    if (gridId) clearAreaByGridId(gridId);
+    const areaID = msg.payload.areaID ?? msg.payload.area_id ?? null;
+    if (gridId) clearAreaByGridId(gridId, areaID != null ? Number(areaID) : null);
   }
   if (msg.type === "frmapper.resize") {
     requestCanvasResizePass();
@@ -1817,6 +1825,7 @@ function updateStorageIdentity(identity) {
 
   if (loadPersistedMapFromKey(nextKey)) {
     fitToView({ zoom: 1 });
+    state.pendingInitialSnap = true;
     render();
     return;
   }
@@ -2295,9 +2304,10 @@ function wireEvents() {
     const room = state.roomsById.get(roomId);
     if (!room) return;
     const gridId = normalizeGridId(room.gridId);
-    const label = gridId || "default";
-    if (!window.confirm(`Remove all rooms in area "${label}"? This cannot be undone.`)) return;
-    clearAreaByGridId(gridId);
+    const areaID = room.areaID;
+    const areaName = room.area || (areaID != null ? String(areaID) : gridId || "default");
+    if (!window.confirm(`Remove all rooms in area "${areaName}"? This cannot be undone.`)) return;
+    clearAreaByGridId(gridId, areaID);
   });
 
   el.menuClearMap.addEventListener("click", () => {
@@ -2895,7 +2905,23 @@ function ingestRoomInfo(info, durationMs) {
   const infoId = String(info && info.id ? info.id : "").trim();
   const existing = infoId ? state.roomsById.get(infoId) : null;
   const room = roomFromRoomInfo(info, existing || null);
-  if (!room) return;
+  if (!room) {
+    // Coords were null in Room.Info (room not yet BFS-assigned), but if we're
+    // waiting for the initial player snap and we already have this room in the
+    // persisted map with coords, snap to it now.
+    if (state.pendingInitialSnap && existing &&
+        typeof existing.x === 'number' && typeof existing.y === 'number') {
+      state.pendingInitialSnap = false;
+      setActiveLayerFromRoom(existing);
+      const snap = panForRoom(existing);
+      state.panX = snap.x;
+      state.panY = snap.y;
+      state.playerLocation = { x: existing.x, y: existing.y, z: existing.z, gridId: normalizeGridId(existing.gridId), roomId: String(existing.id || '') };
+      state.playerRoomId = existing.id;
+      scheduleRender();
+    }
+    return;
+  }
 
   upsertRoom(room);
 
@@ -3026,6 +3052,85 @@ function partyMemberKey(member, index) {
   const base = String(member && member.name ? member.name : "").trim().toLowerCase();
   if (base) return base;
   return `member-${index}`;
+}
+
+/** Find a party member in state.partyMembers by uid (preferred) or name. */
+function findPartyMember(uid, name) {
+  if (uid != null) {
+    const byUid = state.partyMembers.find((m) => m.uid != null && m.uid === uid);
+    if (byUid) return byUid;
+  }
+  const lname = String(name || "").trim().toLowerCase();
+  if (!lname) return null;
+  return state.partyMembers.find((m) => String(m.name || "").trim().toLowerCase() === lname) || null;
+}
+
+/**
+ * Merge Group.Position into state.partyMembers — updates roomId and coord for each
+ * member in the payload without replacing unknown members or vitals fields.
+ */
+function mergePartyPosition(payload) {
+  const items = Array.isArray(payload && payload.members) ? payload.members : [];
+  if (!items.length) return;
+
+  let changed = false;
+  for (const item of items) {
+    const member = findPartyMember(item.uid != null ? Number(item.uid) : null, item.name);
+    if (!member) continue;
+    const newRoomId = String(item.room_id || "");
+    const coord = item.room_coord && typeof item.room_coord === "object" ? item.room_coord : null;
+    const newCoord = normalizeCoord(coord);
+    if (member.roomId !== newRoomId || JSON.stringify(member.coord) !== JSON.stringify(newCoord)) {
+      member.roomId = newRoomId;
+      member.coord = newCoord;
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    // Re-run trail logic using updated positions (same logic as updatePartyFromGroupInfo)
+    const nextLastPos = new Map();
+    const activeFollowerKeys = new Set();
+    for (let i = 0; i < state.partyMembers.length; i++) {
+      const member = state.partyMembers[i];
+      if (isLocalPlayerPartyMember(member)) continue;
+      const memberKey = partyMemberKey(member, i);
+      const nextPos = resolvePartyMemberPosition(member);
+      if (!nextPos) continue;
+      activeFollowerKeys.add(memberKey);
+      const priorPos = state.partyMemberLastPos.get(memberKey);
+      if (priorPos && didPartyMemberMove(priorPos, nextPos)) {
+        addPartyJellyTrail(memberKey, priorPos, nextPos);
+      }
+      nextLastPos.set(memberKey, nextPos);
+    }
+    for (const [key, follower] of state.jellyFollowers.entries()) {
+      if (!follower || follower.role !== "party") continue;
+      if (activeFollowerKeys.has(key)) continue;
+      state.jellyFollowers.delete(key);
+    }
+    state.partyMemberLastPos = nextLastPos;
+    if (state.jellyFollowers.size > 0) ensureEffectsLoop();
+    scheduleRender();
+  }
+}
+
+/**
+ * Merge Group.Vitals into state.partyMembers — frmapper doesn't render vitals but
+ * stores them so future overlays can use them.
+ */
+function mergePartyVitals(payload) {
+  const items = Array.isArray(payload && payload.members) ? payload.members : [];
+  if (!items.length) return;
+  for (const item of items) {
+    const member = findPartyMember(item.uid != null ? Number(item.uid) : null, item.name);
+    if (!member) continue;
+    member.hpPct   = typeof item.hp_pct   === "number" ? item.hp_pct   : member.hpPct;
+    member.manaPct = typeof item.mana_pct === "number" ? item.mana_pct : member.manaPct;
+    member.mvPct   = typeof item.mv_pct   === "number" ? item.mv_pct   : member.mvPct;
+    member.hp      = typeof item.hp       === "number" ? item.hp       : member.hp;
+    member.maxHp   = typeof item.maxhp    === "number" ? item.maxhp    : member.maxHp;
+  }
 }
 
 function isLocalPlayerPartyMember(member) {
@@ -5267,6 +5372,14 @@ function setPlayerLocationPayload(payload) {
   }
   if (!targetRoom) return;
 
+  if (state.pendingInitialSnap) {
+    state.pendingInitialSnap = false;
+    setActiveLayerFromRoom(targetRoom);
+    const snap = panForRoom(targetRoom);
+    state.panX = snap.x;
+    state.panY = snap.y;
+  }
+
   touchRoomSeen(targetRoom.id);
 
   const prior = state.playerLocation;
@@ -7010,15 +7123,19 @@ function ensureEffectsLoop() {
   anim.effectRafId = requestAnimationFrame(tick);
 }
 
-function clearAreaByGridId(gridId) {
+function clearAreaByGridId(gridId, areaID) {
   const key = normalizeGridId(gridId);
-  const kept = state.mapData.rooms.filter((r) => normalizeGridId(r.gridId) !== key);
+  const kept = state.mapData.rooms.filter((r) => {
+    if (normalizeGridId(r.gridId) !== key) return true;  // different grid — keep
+    if (areaID != null) return r.areaID !== areaID;       // same grid, different area — keep
+    return false;                                          // no areaID provided — remove all in grid
+  });
   if (kept.length === state.mapData.rooms.length) return;
   state.mapData.rooms = kept;
   markStaticLayerDirty();
   if (state.selectedRoomId) {
     const still = state.roomsById.get(state.selectedRoomId);
-    if (!still || normalizeGridId(still.gridId) === key) state.selectedRoomId = null;
+    if (!still || (normalizeGridId(still.gridId) === key && (areaID == null || still.areaID === areaID))) state.selectedRoomId = null;
   }
   rebuildIndexes();
   syncZLevels();
