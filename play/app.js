@@ -3642,7 +3642,7 @@
       + '</div>'
       + statusCard('Stats', [
         'Gold: ' + numOr(w.gold, 0) + ' · Bank: ' + numOr(w.bank_gold, 0),
-        'Cabal Pts: ' + numOr(w.cabal_points, 0),
+        'Cabal Pts: ' + numOr(w.cabal_points, 0) + (numOr(w.caldrach, 0) > 0 ? ' · Caldrachi: ' + numOr(w.caldrach, 0) : ''),
         'Practice/Train: ' + numOr(s.practice, 0) + ' / ' + numOr(s.trains, 0),
         'Hit/Dam: ' + numOr(st.hitroll, 0) + ' / ' + numOr(st.damroll, 0),
         '<span class="stat-row">STR: ' + numOr(st.str, 0) + '<span class="stat-div"> | </span>DEX: ' + numOr(st.dex, 0) + '<span class="stat-div"> | </span>WIS: ' + numOr(st.wis, 0) + '<span class="stat-div"> | </span>INT: ' + numOr(st.int, 0) + '<span class="stat-div"> | </span>CON: ' + numOr(st.con, 0) + '</span>',
