@@ -116,13 +116,12 @@ const PARTY_JELLY_FADE_MS = 1500;
 const PARTY_JELLY_SPRING = 26;
 const PARTY_JELLY_DAMPING = 0.84;
 const PARTY_JELLY_MIN_LAG = 0.003;
-const BLOB_MAX_WAYPOINTS = 48;
+const BLOB_MAX_WAYPOINTS = 100;
 const BLOB_WAYPOINT_EPSILON = 0.02;
-const PARTY_BLOB_SLURP_SPEED = 9.5;
-const TRACKED_BLOB_SLURP_SPEED = 3.5;
-const PLAYER_BLOB_SLURP_SPEED = 11.5;
-const BLOB_SLOWDOWN_DISTANCE = 2.15;
-const BLOB_MIN_SPEED_FACTOR = 0.22;
+const PARTY_BLOB_SLURP_SPEED = 1.8;
+const TRACKED_BLOB_SLURP_SPEED = 1.8;
+const PLAYER_BLOB_SLURP_SPEED = 1.8;
+// Speed multiplier = fractional waypoints remaining (e.g. 2.5 waypoints behind = 2.5x speed). Min = 1x.
 const PLAYER_BLOB_SPRING = 28;
 const PLAYER_BLOB_DAMPING = 0.86;
 const MOB_HINT_FADE_START_MS = 5000;
@@ -297,15 +296,14 @@ const state = {
   playerRoomId: null,
   partyMembers: [],
   partyMemberLastPos: new Map(),
-  partyJellyFollowers: new Map(),
-  playerBlob: null,
+  jellyFollowers: new Map(),
   roomMobs: [],
   roomMobsSeenAt: 0,
   tempMobDotByRoom: new Map(),
   trackedChars: new Map(),   // Map<name, { roomId }>
   trackedMobs:  new Map(),   // Map<name, { roomId, uid }>
   partyMobUids: new Set(),   // Set<number> of mob instance IDs that are party members
-  trackedJellyFollowers: new Map(), // Map<name, jellyFollower> for move trails
+  // jellyFollowers is the unified Map for all blob trails (player, party, tracked)
   roomEdgeVariants: new Map(),
   roomEdgeVariantsDirty: true,
   sessionSocket: null,
@@ -2375,15 +2373,13 @@ function resetToEmptyMap() {
   state.playerLocation = null;
   state.movementTrail = [];
   state.partyMemberLastPos = new Map();
-  state.partyJellyFollowers = new Map();
-  state.playerBlob = null;
+  state.jellyFollowers = new Map();
   state.roomMobs = [];
   state.roomMobsSeenAt = 0;
   state.tempMobDotByRoom = new Map();
   state.trackedChars = new Map();
   state.trackedMobs = new Map();
   state.partyMobUids = new Set();
-  state.trackedJellyFollowers = new Map();
   state.selectedRoomId = null;
   markStaticLayerDirty();
   rebuildIndexes();
@@ -2517,15 +2513,13 @@ function applyMapObject(data) {
   state.playerLocation = null;
   state.movementTrail = [];
   state.partyMemberLastPos = new Map();
-  state.partyJellyFollowers = new Map();
-  state.playerBlob = null;
+  state.jellyFollowers = new Map();
   state.roomMobs = [];
   state.roomMobsSeenAt = 0;
   state.tempMobDotByRoom = new Map();
   state.trackedChars = new Map();
   state.trackedMobs = new Map();
   state.partyMobUids = new Set();
-  state.trackedJellyFollowers = new Map();
   state.selectedRoomId = null;
   rebuildIndexes();
   syncZLevels();
@@ -3016,14 +3010,15 @@ function updatePartyFromGroupInfo(payload) {
     nextLastPos.set(memberKey, nextPos);
   }
 
-  for (const key of state.partyJellyFollowers.keys()) {
+  for (const [key, follower] of state.jellyFollowers.entries()) {
+    if (!follower || follower.role !== 'party') continue;
     if (activeFollowerKeys.has(key)) continue;
-    state.partyJellyFollowers.delete(key);
+    state.jellyFollowers.delete(key);
   }
 
   state.partyMemberLastPos = nextLastPos;
   state.partyMembers = nextMembers;
-  if (state.partyJellyFollowers.size > 0) ensureEffectsLoop();
+  if (state.jellyFollowers.size > 0) ensureEffectsLoop();
   scheduleRender();
 }
 
@@ -3083,7 +3078,7 @@ function ingestTrackedDelta(type, payload) {
   if (!key) return;
   if (action === "remove") {
     map.delete(key);
-    state.trackedJellyFollowers.delete(key);
+    state.jellyFollowers.delete(key);
     scheduleRender();
     return;
   }
@@ -3118,7 +3113,7 @@ function addTrackedJellyTrail(name, from, to, type) {
   const palette = type === "chars" ? TRACKED_CHAR_PALETTE : TRACKED_MOB_PALETTE;
   const dotAnchorY = type === "chars" ? "bottom" : "top";
   const now = performance.now();
-  const existing = state.trackedJellyFollowers.get(name);
+  const existing = state.jellyFollowers.get(name);
   if (!existing) {
     const follower = {
       x: from.x,
@@ -3142,10 +3137,12 @@ function addTrackedJellyTrail(name, from, to, type) {
       anchorY: dotAnchorY,
       wobbleT:   Math.random() * 20,
       wobbleAmp: 0,
-      blobSeed:  Math.random() * 100
+      blobSeed:  Math.random() * 100,
+      speed: TRACKED_BLOB_SLURP_SPEED,
+      role: 'tracked'
     };
     applyFollowerPathUpdate(follower, from, to);
-    state.trackedJellyFollowers.set(name, follower);
+    state.jellyFollowers.set(name, follower);
     ensureEffectsLoop();
     return;
   }
@@ -3154,8 +3151,6 @@ function addTrackedJellyTrail(name, from, to, type) {
   existing.toRoomId = String(to.roomId || "");
   existing.palette = palette;
   existing.anchorY = dotAnchorY;
-  // Reset waypoints before updating so moves don't accumulate into a huge trail.
-  existing.waypoints = [];
   applyFollowerPathUpdate(existing, from, to);
   existing.durationMs = PARTY_JELLY_FADE_MS;
   existing.createdAt = now;
@@ -3868,8 +3863,7 @@ function render() {
   }
 
   if (quality.drawParty) {
-    drawPartyJellyTrails();
-    drawTrackedJellyTrails();
+    drawAllJellyTrails();
   }
 
   drawVisibleRoomWalls(visibleFadedRooms, visibleRooms);
@@ -3892,13 +3886,14 @@ function render() {
       }
     }
 
+    let partyRoomCounts = null;
     if (quality.drawParty) {
-      drawPartyOverlays(visibleRooms);
+      partyRoomCounts = drawPartyOverlays(visibleRooms);
     }
     if (quality.drawMobHints) {
       drawMobHints(visibleRooms);
     }
-    drawTrackedDots(visibleRooms);
+    drawTrackedDots(visibleRooms, partyRoomCounts);
   }
 
   if (quality.drawOneWayOverlays) {
@@ -4261,7 +4256,7 @@ function drawPoiMarker(kind, cx, cy, size) {
 }
 
 function drawPartyOverlays(visibleRooms) {
-  if (!state.showParty || !state.partyMembers.length) return;
+  if (!state.showParty || !state.partyMembers.length) return null;
   const visibleById = new Set(visibleRooms.map((r) => r.id));
   const roomCounts = new Map();
 
@@ -4289,11 +4284,8 @@ function drawPartyOverlays(visibleRooms) {
     drawOffscreenPartyWaypoint(room);
   }
 
-  for (const room of visibleRooms) {
-    const count = roomCounts.get(room.id) || 0;
-    if (count <= 0) continue;
-    drawPartyDotsOnRoom(room, count);
-  }
+  // Dots for visible rooms are drawn by drawTrackedDots (pooled with char dots)
+  return roomCounts;
 }
 
 function buildAxisFallbackWaypoints(from, to) {
@@ -4472,10 +4464,17 @@ function applyFollowerPathUpdate(follower, from, to) {
 
 function advanceBlobFollower(follower, dt, speedRoomsPerSec) {
   if (!follower) return;
-  const headLag = Math.hypot((follower.headX || follower.x) - follower.x, (follower.headY || follower.y) - follower.y);
-  const slowdownT = Math.max(0, Math.min(1, headLag / BLOB_SLOWDOWN_DISTANCE));
-  const speedFactor = BLOB_MIN_SPEED_FACTOR + ((1 - BLOB_MIN_SPEED_FACTOR) * slowdownT);
-  const stepBudget = Math.max(0, speedRoomsPerSec * speedFactor * dt);
+  // Fractional waypoints remaining: integer queue length minus how far we've already
+  // travelled into the current segment (each segment is ~1 room unit).
+  const wps = Array.isArray(follower.waypoints) ? follower.waypoints : [];
+  let fractionalRemaining = 0;
+  if (wps.length > 0) {
+    const first = wps[0];
+    const distToFirst = Math.hypot(first.x - follower.x, first.y - follower.y);
+    fractionalRemaining = (wps.length - 1) + distToFirst;
+  }
+  const speedMultiplier = Math.max(1, fractionalRemaining);
+  const stepBudget = Math.max(0, speedRoomsPerSec * speedMultiplier * dt);
   let remaining = stepBudget;
   let moved = false;
 
@@ -4798,7 +4797,7 @@ function addPartyJellyTrail(memberKey, from, to) {
 
   const waypoints = buildRoomWaypointPath(from, to);
   const now = performance.now();
-  const existing = state.partyJellyFollowers.get(memberKey);
+  const existing = state.jellyFollowers.get(memberKey);
   if (!existing) {
     const follower = {
       x: from.x,
@@ -4820,10 +4819,14 @@ function addPartyJellyTrail(memberKey, from, to) {
       durationMs: PARTY_JELLY_FADE_MS,
       wobbleT:   Math.random() * 20,
       wobbleAmp: 0,
-      blobSeed:  Math.random() * 100
+      blobSeed:  Math.random() * 100,
+      speed: PARTY_BLOB_SLURP_SPEED,
+      palette: PARTY_DOT_PALETTE,
+      anchorY: "bottom",
+      role: 'party'
     };
     applyFollowerPathUpdate(follower, from, to);
-    state.partyJellyFollowers.set(memberKey, follower);
+    state.jellyFollowers.set(memberKey, follower);
     ensureEffectsLoop();
     return;
   }
@@ -4836,20 +4839,8 @@ function addPartyJellyTrail(memberKey, from, to) {
   ensureEffectsLoop();
 }
 
-function drawPartyJellyTrails() {
-  if (!(state.partyJellyFollowers instanceof Map) || state.partyJellyFollowers.size === 0) return;
-
-  for (const follower of state.partyJellyFollowers.values()) {
-    if (!follower) continue;
-    if (follower.z !== state.activeZ) continue;
-    if (normalizeGridId(follower.gridId) !== normalizeGridId(state.activeGridId)) continue;
-    if (!follower.toRoomId || !state.roomsById.has(String(follower.toRoomId))) continue;
-    drawJellyBlobTrail(follower, PARTY_DOT_PALETTE, { anchorY: "bottom" });
-  }
-}
-
-function drawTrackedJellyTrails() {
-  if (!(state.trackedJellyFollowers instanceof Map) || state.trackedJellyFollowers.size === 0) return;
+function drawAllJellyTrails() {
+  if (!state.jellyFollowers.size) return;
 
   // Build exclusion set: player self + party members already have their own dot/trail
   const partyNameSet = new Set();
@@ -4860,22 +4851,25 @@ function drawTrackedJellyTrails() {
     if (n) partyNameSet.add(n);
   }
 
-  for (const [key, follower] of state.trackedJellyFollowers) {
+  for (const [key, follower] of state.jellyFollowers) {
     if (!follower) continue;
+    if (follower.isPlayer) continue; // player drawn by drawActiveMoveLine
     if (follower.z !== state.activeZ) continue;
     if (normalizeGridId(follower.gridId) !== normalizeGridId(state.activeGridId)) continue;
     if (!follower.toRoomId || !state.roomsById.has(String(follower.toRoomId))) continue;
     // Char followers (anchorY==="bottom") — skip if player or party member
-    if (follower.anchorY === "bottom") {
+    if (follower.anchorY === "bottom" && follower.role === 'tracked') {
       if (partyNameSet.has(String(key || "").trim().toLowerCase())) continue;
     }
-    drawJellyBlobTrail(follower, follower.palette || TRACKED_CHAR_PALETTE, { anchorY: follower.anchorY || "bottom" });
+    drawJellyBlobTrail(follower, follower.palette, { anchorY: follower.anchorY });
   }
 }
 
-function drawTrackedDots(visibleRooms) {
+function drawTrackedDots(visibleRooms, partyRoomCounts) {
   if (!visibleRooms || visibleRooms.length === 0) return;
-  if (state.trackedChars.size === 0 && state.trackedMobs.size === 0) return;
+  const hasTracked = state.trackedChars.size > 0 || state.trackedMobs.size > 0;
+  const hasParty = partyRoomCounts && partyRoomCounts.size > 0;
+  if (!hasTracked && !hasParty) return;
 
   // Names that already have a party dot or are the local player — skip pink.
   const partyNameSet = new Set();
@@ -4904,20 +4898,71 @@ function drawTrackedDots(visibleRooms) {
 
   const visibleSet = new Set(visibleRooms.map((r) => r.id));
 
-  const drawCounts = (countMap, palette, anchorY) => {
-    for (const [roomId, count] of countMap) {
-      if (!visibleSet.has(roomId)) continue;
-      const room = state.roomsById.get(roomId);
-      if (!room) continue;
-      if (room.z !== state.activeZ) continue;
-      if (normalizeGridId(room.gridId) !== normalizeGridId(state.activeGridId)) continue;
-      drawDotsOnRoom(room, count, palette, anchorY);
-    }
-  };
+  // Tracked mobs: top row
+  for (const [roomId, count] of mobCounts) {
+    if (!visibleSet.has(roomId)) continue;
+    const room = state.roomsById.get(roomId);
+    if (!room) continue;
+    if (room.z !== state.activeZ) continue;
+    if (normalizeGridId(room.gridId) !== normalizeGridId(state.activeGridId)) continue;
+    drawDotsOnRoom(room, count, TRACKED_MOB_PALETTE, "top");
+  }
 
-  // Tracked mobs share the top row with mob hints; tracked chars share the bottom row with party.
-  drawCounts(mobCounts, TRACKED_MOB_PALETTE, "top");
-  drawCounts(charCounts, TRACKED_CHAR_PALETTE, "bottom");
+  // Bottom row: party + tracked chars pooled together per room
+  const combinedRoomIds = new Set([
+    ...(partyRoomCounts ? partyRoomCounts.keys() : []),
+    ...charCounts.keys()
+  ]);
+  for (const roomId of combinedRoomIds) {
+    if (!visibleSet.has(roomId)) continue;
+    const room = state.roomsById.get(roomId);
+    if (!room) continue;
+    if (room.z !== state.activeZ) continue;
+    if (normalizeGridId(room.gridId) !== normalizeGridId(state.activeGridId)) continue;
+    const pCount = (partyRoomCounts && partyRoomCounts.get(roomId)) || 0;
+    const cCount = charCounts.get(roomId) || 0;
+    drawMixedBottomDotsOnRoom(room, pCount, cCount);
+  }
+}
+
+function drawMixedBottomDotsOnRoom(room, partyCount, charCount) {
+  const total = partyCount + charCount;
+  if (total <= 0) return;
+  const maxVisible = 5;
+  const partyDots = Math.min(partyCount, maxVisible);
+  const charDots  = Math.min(charCount, Math.max(0, maxVisible - partyDots));
+  const visibleDots = partyDots + charDots;
+  const overflow = total - visibleDots;
+
+  const tilePx = TILE_SIZE * state.zoom;
+  const x = state.panX + room.x * tilePx;
+  const y = state.panY + room.y * tilePx;
+  const r = Math.max(3.2, state.zoom * 3.3);
+  const step = Math.max(r * 2.1, state.zoom * 5.0);
+  const margin = Math.max(6, state.zoom * 6);
+  const dotY = y + tilePx - margin;
+  const startX = x + tilePx * 0.5 - ((visibleDots - 1) * step) * 0.5;
+
+  ctx.save();
+  if (partyDots > 0) {
+    const sprite = getDotSprite(r, shouldReduceGlowEffects(), PARTY_DOT_PALETTE);
+    for (let i = 0; i < partyDots; i++) {
+      ctx.drawImage(sprite.canvas, startX + i * step - sprite.center, dotY - sprite.center);
+    }
+  }
+  if (charDots > 0) {
+    const sprite = getDotSprite(r, shouldReduceGlowEffects(), TRACKED_CHAR_PALETTE);
+    for (let i = 0; i < charDots; i++) {
+      ctx.drawImage(sprite.canvas, startX + (partyDots + i) * step - sprite.center, dotY - sprite.center);
+    }
+  }
+  if (overflow > 0) {
+    ctx.fillStyle = "rgba(228, 235, 255, 0.95)";
+    ctx.font = `${Math.max(8, Math.round(8 * state.zoom))}px monospace`;
+    ctx.textBaseline = "middle";
+    ctx.fillText(`+${overflow}`, startX + (visibleDots - 1) * step + r + 2, dotY - r - 2);
+  }
+  ctx.restore();
 }
 
 function drawPartyDot(room) {
@@ -5132,7 +5177,8 @@ function drawDotsOnRoom(room, count, palette, anchorY, alpha) {
     ctx.fillStyle = "rgba(228, 235, 255, 0.95)";
     ctx.font = `${Math.max(8, Math.round(8 * state.zoom))}px monospace`;
     ctx.textBaseline = "middle";
-    ctx.fillText(`+${count - dots}`, startX + (dots - 1) * step + r + 2, dotY);
+    const overflowY = anchorY === "bottom" ? dotY - r - 2 : dotY + r + 2;
+    ctx.fillText(`+${count - dots}`, startX + (dots - 1) * step + r + 2, overflowY);
   }
   ctx.restore();
 }
@@ -5260,11 +5306,11 @@ function setPlayerLocationPayload(payload) {
     addMovementTrail(priorWithRoom, next);
   }
 
-  if (!state.playerBlob
-      || state.playerBlob.z !== next.z
-      || normalizeGridId(state.playerBlob.gridId) !== normalizeGridId(next.gridId)) {
+  if (!state.jellyFollowers.get('__player__')
+      || state.jellyFollowers.get('__player__').z !== next.z
+      || normalizeGridId(state.jellyFollowers.get('__player__').gridId) !== normalizeGridId(next.gridId)) {
     const seed = priorWithRoom || next;
-    state.playerBlob = {
+    state.jellyFollowers.set('__player__', {
       x: seed.x,
       y: seed.y,
       vx: 0,
@@ -5280,31 +5326,31 @@ function setPlayerLocationPayload(payload) {
       waypoints: [],
       wobbleT:   Math.random() * 20,
       wobbleAmp: 0,
-      blobSeed:  Math.random() * 100
-    };
+      blobSeed:  Math.random() * 100,
+      speed: PLAYER_BLOB_SLURP_SPEED,
+      palette: TRAIL_DOT_PALETTE,
+      anchorY: "center",
+      isPlayer: true,
+      role: 'player'
+    });
   }
 
-  if (state.playerBlob) {
+  const playerBlob = state.jellyFollowers.get('__player__');
+  if (playerBlob) {
     if (moved && priorWithRoom) {
-      applyFollowerPathUpdate(state.playerBlob, priorWithRoom, {
+      applyFollowerPathUpdate(playerBlob, priorWithRoom, {
         ...next,
         roomId: String(targetRoom.id || "")
       });
       ensureEffectsLoop();
     } else {
-      state.playerBlob.z = next.z;
-      state.playerBlob.gridId = normalizeGridId(next.gridId);
-      state.playerBlob.roomId = String(targetRoom.id || "");
-      state.playerBlob.headX = next.x;
-      state.playerBlob.headY = next.y;
-      state.playerBlob.headRoomId = String(targetRoom.id || "");
-      state.playerBlob.x = next.x;
-      state.playerBlob.y = next.y;
-      state.playerBlob.vx = 0;
-      state.playerBlob.vy = 0;
-      state.playerBlob.targetX = next.x;
-      state.playerBlob.targetY = next.y;
-      state.playerBlob.waypoints = [];
+      // Non-movement update: refresh metadata only, let blob settle naturally
+      playerBlob.z = next.z;
+      playerBlob.gridId = normalizeGridId(next.gridId);
+      playerBlob.roomId = String(targetRoom.id || "");
+      playerBlob.headX = next.x;
+      playerBlob.headY = next.y;
+      playerBlob.headRoomId = String(targetRoom.id || "");
     }
   }
 
@@ -5440,16 +5486,17 @@ function drawActiveMoveLine(options) {
     }
   }
 
-  const marker = state.playerLocation || state.playerBlob;
+  const playerBlob = state.jellyFollowers.get('__player__');
+  const marker = state.playerLocation || playerBlob;
   if (!marker || marker.z !== state.activeZ) return;
   if (normalizeGridId(marker.gridId) !== normalizeGridId(state.activeGridId)) return;
   const hx = state.panX + (marker.x + 0.5) * tilePx;
   const hy = state.panY + (marker.y + 0.5) * tilePx;
 
-  if (state.playerBlob) {
-    if (state.playerBlob.z === state.activeZ
-        && normalizeGridId(state.playerBlob.gridId) === normalizeGridId(state.activeGridId)) {
-      drawJellyBlobTrail(state.playerBlob, TRAIL_DOT_PALETTE, { anchorY: "center" });
+  if (playerBlob) {
+    if (playerBlob.z === state.activeZ
+        && normalizeGridId(playerBlob.gridId) === normalizeGridId(state.activeGridId)) {
+      drawJellyBlobTrail(playerBlob, TRAIL_DOT_PALETTE, { anchorY: "center" });
     }
     drawPlayerBlobIcon(hx, hy, 0, 0);
     return;
@@ -6869,42 +6916,14 @@ function hasActiveRoomPulseEffect() {
     && normalizeGridId(activeRoom.gridId) === normalizeGridId(state.activeGridId);
 }
 
-function prunePartyJellyTrail(now) {
-  if (!(state.partyJellyFollowers instanceof Map)) return;
-  for (const [key, follower] of state.partyJellyFollowers.entries()) {
-    if (!follower) {
-      state.partyJellyFollowers.delete(key);
-      continue;
-    }
-    if (!follower.toRoomId || !state.roomsById.has(String(follower.toRoomId))) {
-      state.partyJellyFollowers.delete(key);
-      continue;
-    }
-    if (follower.z !== state.activeZ || normalizeGridId(follower.gridId) !== normalizeGridId(state.activeGridId)) {
-      continue;
-    }
-    const dx = (follower.headX != null ? follower.headX : follower.targetX) - follower.x;
-    const dy = (follower.headY != null ? follower.headY : follower.targetY) - follower.y;
-    const speed = Math.hypot(follower.vx || 0, follower.vy || 0);
-    const waypoints = Array.isArray(follower.waypoints) ? follower.waypoints : [];
-    if (waypoints.length === 0 && Math.hypot(dx, dy) < 0.004 && speed < 0.003) {
-      follower.x = follower.headX != null ? follower.headX : follower.targetX;
-      follower.y = follower.headY != null ? follower.headY : follower.targetY;
-      follower.vx = 0;
-      follower.vy = 0;
-    }
-  }
-}
-
-function updatePartyJellyFollowers(dt) {
-  if (!(state.partyJellyFollowers instanceof Map) || state.partyJellyFollowers.size === 0) return;
-
-  for (const follower of state.partyJellyFollowers.values()) {
+function updateAllJellyFollowers(dt) {
+  if (!state.jellyFollowers.size) return;
+  for (const follower of state.jellyFollowers.values()) {
     if (!follower) continue;
     const headX = follower.headX != null ? follower.headX : follower.targetX;
     const headY = follower.headY != null ? follower.headY : follower.targetY;
     const prevLag = Math.hypot(headX - follower.x, headY - follower.y);
-    advanceBlobFollower(follower, dt, PARTY_BLOB_SLURP_SPEED);
+    advanceBlobFollower(follower, dt, follower.speed);
     const newLag  = Math.hypot(headX - follower.x, headY - follower.y);
     if (prevLag > 0.12 && newLag <= 0.12) follower.wobbleAmp = 0.35;
     follower.wobbleT = (follower.wobbleT || 0) + dt * 3.2;
@@ -6916,86 +6935,13 @@ function updatePartyJellyFollowers(dt) {
   }
 }
 
-function updatePlayerBlobFollower(dt) {
-  const blob = state.playerBlob;
-  if (!blob) return;
-  const headX = blob.headX != null ? blob.headX : blob.targetX;
-  const headY = blob.headY != null ? blob.headY : blob.targetY;
-  const prevLag = Math.hypot(headX - blob.x, headY - blob.y);
-  advanceBlobFollower(blob, dt, PLAYER_BLOB_SLURP_SPEED);
-  const newLag  = Math.hypot(headX - blob.x, headY - blob.y);
-  // Trigger settling jiggle the frame the blob arrives
-  if (prevLag > 0.12 && newLag <= 0.12) {
-    blob.wobbleAmp = 0.35;
-  }
-  blob.wobbleT = (blob.wobbleT || 0) + dt * 3.2;
-  if ((blob.wobbleAmp || 0) > 0.001) {
-    blob.wobbleAmp = (blob.wobbleAmp || 0) * Math.exp(-dt * 2.15);
-  } else {
-    blob.wobbleAmp = 0;
-  }
-}
-
-function hasActivePartyJellyFollowers() {
-  if (!(state.partyJellyFollowers instanceof Map) || state.partyJellyFollowers.size === 0) return false;
-  for (const follower of state.partyJellyFollowers.values()) {
-    if (!follower) continue;
-    if (follower.z !== state.activeZ) continue;
-    if (normalizeGridId(follower.gridId) !== normalizeGridId(state.activeGridId)) continue;
-    if ((follower.wobbleAmp || 0) > 0.015) return true;
-    const headX = follower.headX != null ? follower.headX : follower.targetX;
-    const headY = follower.headY != null ? follower.headY : follower.targetY;
-    const lag = Math.hypot(headX - follower.x, headY - follower.y);
-    const speed = Math.hypot(follower.vx || 0, follower.vy || 0);
-    const hasWaypoints = Array.isArray(follower.waypoints) && follower.waypoints.length > 0;
-    if (hasWaypoints || lag > 0.004 || speed > 0.003) return true;
-  }
-  return false;
-}
-
-function hasActivePlayerBlobFollower() {
-  const blob = state.playerBlob;
-  if (!blob) return false;
-  if (blob.z !== state.activeZ) return false;
-  if (normalizeGridId(blob.gridId) !== normalizeGridId(state.activeGridId)) return false;
-  if ((blob.wobbleAmp || 0) > 0.015) return true;
-  const hasWaypoints = Array.isArray(blob.waypoints) && blob.waypoints.length > 0;
-  const lag = Math.hypot((blob.headX || blob.x) - blob.x, (blob.headY || blob.y) - blob.y);
-  const speed = Math.hypot(blob.vx || 0, blob.vy || 0);
-  return hasWaypoints || lag > 0.004 || speed > 0.003;
-}
-
-function updateTrackedJellyFollowers(dt) {
-  if (!(state.trackedJellyFollowers instanceof Map) || state.trackedJellyFollowers.size === 0) return;
-  for (const follower of state.trackedJellyFollowers.values()) {
-    if (!follower) continue;
-    // Measure lag before advancing so we can detect the arrival moment
-    const headX = follower.headX != null ? follower.headX : follower.targetX;
-    const headY = follower.headY != null ? follower.headY : follower.targetY;
-    const prevLag = Math.hypot(headX - follower.x, headY - follower.y);
-    advanceBlobFollower(follower, dt, TRACKED_BLOB_SLURP_SPEED);
-    const newLag  = Math.hypot(headX - follower.x, headY - follower.y);
-    // Trigger settling jiggle the frame the blob crosses the arrival threshold
-    if (prevLag > 0.12 && newLag <= 0.12) {
-      follower.wobbleAmp = 0.35;
-    }
-    // Advance wobble time (drives the noise sampling)
-    follower.wobbleT = (follower.wobbleT || 0) + dt * 3.2;
-    // Decay wobble amplitude (~half-life 0.32 s)
-    if ((follower.wobbleAmp || 0) > 0.001) {
-      follower.wobbleAmp = (follower.wobbleAmp || 0) * Math.exp(-dt * 2.15);
-    } else {
-      follower.wobbleAmp = 0;
-    }
-  }
-}
-
-function pruneTrackedJellyTrails(now) {
-  if (!(state.trackedJellyFollowers instanceof Map)) return;
-  for (const [key, follower] of state.trackedJellyFollowers.entries()) {
-    if (!follower) { state.trackedJellyFollowers.delete(key); continue; }
+function pruneAllJellyTrails(now) {
+  if (!state.jellyFollowers.size) return;
+  for (const [key, follower] of state.jellyFollowers.entries()) {
+    if (!follower) { state.jellyFollowers.delete(key); continue; }
+    if (follower.isPlayer) continue; // player managed by room-update handler
     if (!follower.toRoomId || !state.roomsById.has(String(follower.toRoomId))) {
-      state.trackedJellyFollowers.delete(key); continue;
+      state.jellyFollowers.delete(key); continue;
     }
     if (follower.z !== state.activeZ || normalizeGridId(follower.gridId) !== normalizeGridId(state.activeGridId)) continue;
     const dx = (follower.headX != null ? follower.headX : follower.targetX) - follower.x;
@@ -7011,13 +6957,12 @@ function pruneTrackedJellyTrails(now) {
   }
 }
 
-function hasActiveTrackedJellyFollowers() {
-  if (!(state.trackedJellyFollowers instanceof Map) || state.trackedJellyFollowers.size === 0) return false;
-  for (const follower of state.trackedJellyFollowers.values()) {
+function hasActiveJellyFollowers() {
+  if (!state.jellyFollowers.size) return false;
+  for (const follower of state.jellyFollowers.values()) {
     if (!follower) continue;
     if (follower.z !== state.activeZ) continue;
     if (normalizeGridId(follower.gridId) !== normalizeGridId(state.activeGridId)) continue;
-    // Keep effects loop alive while jelly is moving OR settling
     if ((follower.wobbleAmp || 0) > 0.015) return true;
     const headX = follower.headX != null ? follower.headX : follower.targetX;
     const headY = follower.headY != null ? follower.headY : follower.targetY;
@@ -7040,12 +6985,9 @@ function ensureEffectsLoop() {
     const dt = Math.max(1 / 240, Math.min(0.07, (now - prevTs) / 1000));
     state.animation.lastEffectTs = now;
     updatePanAnimation(now);
-    updatePartyJellyFollowers(dt);
-    updateTrackedJellyFollowers(dt);
-    updatePlayerBlobFollower(dt);
+    updateAllJellyFollowers(dt);
     pruneMovementTrail(now);
-    prunePartyJellyTrail(now);
-    pruneTrackedJellyTrails(now);
+    pruneAllJellyTrails(now);
     pruneMobHintAges(now);
     const targetFrameMs = state.animation.active ? 33 : 16;
     if ((now - anim.lastRenderTs) >= targetFrameMs) {
@@ -7053,7 +6995,7 @@ function ensureEffectsLoop() {
       anim.lastRenderTs = now;
     }
 
-    if (state.animation.active || state.movementTrail.length > 0 || hasActivePartyJellyFollowers() || hasActiveTrackedJellyFollowers() || hasActivePlayerBlobFollower() || hasActiveMobHintEffects(now) || hasActiveRoomPulseEffect()) {
+    if (state.animation.active || state.movementTrail.length > 0 || hasActiveJellyFollowers() || hasActiveMobHintEffects(now) || hasActiveRoomPulseEffect()) {
       anim.effectRafId = requestAnimationFrame(tick);
       return;
     }
