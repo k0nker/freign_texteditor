@@ -2583,20 +2583,20 @@
   function updateVitals(data) {
     var prevHp = state.gmcp.vitals ? numOr(state.gmcp.vitals.hp, 0) : null;
     var hp = numOr(data.hp, 0);
-    var maxHp = Math.max(1, numOr(data.maxhp, hp || 1));
-    var mana = numOr(data.mana != null ? data.mana : data.mp, 0);
-    var maxMana = Math.max(1, numOr(data.maxmana, mana || 1));
-    var move = numOr(data.move != null ? data.move : data.mv, 0);
-    var maxMove = Math.max(1, numOr(data.maxmove, move || 1));
+    var maxHp = Math.max(1, numOr(data.mhp, hp || 1));
+    var mana = numOr(data.mana, 0);
+    var maxMana = Math.max(1, numOr(data.mmana, mana || 1));
+    var move = numOr(data.move, 0);
+    var maxMove = Math.max(1, numOr(data.mmove, move || 1));
 
     state.gmcp.vitals = {
       hp: hp, maxhp: maxHp,
       mana: mana, maxmana: maxMana,
       move: move, maxmove: maxMove,
-      hunger: numOr(data.hunger, 0),
-      thirst: numOr(data.thirst, 0),
-      wimpy: numOr(data.wimpy, 0),
-      position: data.position != null ? data.position : data.pos,
+      hunger: numOr(data.hng, 0),
+      thirst: numOr(data.thr, 0),
+      wimpy: numOr(data.wmp, 0),
+      position: data.pos,
     };
 
     var hpPct = pct(hp, maxHp);
@@ -2607,7 +2607,7 @@
     setSegmentGauge(el.vMpSegs, pct(mana, maxMana), 'mana');
     setSegmentGauge(el.vMvSegs, pct(move, maxMove), 'move');
     if (el.vWimpy) {
-      var wimpy = Math.max(0, numOr(data.wimpy, 0));
+      var wimpy = Math.max(0, numOr(data.wmp, 0));
       var wimpyPct = maxHp > 0 ? Math.max(0, Math.min(100, Math.floor((wimpy * 100) / maxHp))) : 0;
       el.vWimpy.textContent = '';
       el.vWimpy.removeAttribute('data-label');
@@ -2771,7 +2771,7 @@
     var explicit = preferredValue(wt, ['time', 'time12', 'display', 'label', 'clock', 'clock12']);
     if (explicit) return explicit.toUpperCase();
 
-    var hourRaw = wt.hour;
+    var hourRaw = wt.h != null ? wt.h : wt.hour;
     var hour = Number.parseInt(hourRaw, 10);
     if (!Number.isFinite(hour)) {
       hour = Number.parseInt(preferredValue(wt, ['hours', 'hr']), 10);
@@ -2787,7 +2787,7 @@
 
   function formatLightLevelForMapCard(info) {
     var roomInfo = info && typeof info === 'object' ? info : {};
-    return preferredValue(roomInfo, ['lightLevel', 'light_level']) || '--';
+    return preferredValue(roomInfo, ['ll', 'lightLevel', 'light_level']) || '--';
   }
 
   function formatWeatherForMapCard(worldWeather) {
@@ -2796,7 +2796,7 @@
     if (visibleRaw === false || String(visibleRaw).toLowerCase() === 'false' || String(visibleRaw) === '0') {
       return '';
     }
-    var weather = preferredValue(ww, ['weather', 'description', 'desc', 'summary', 'condition', 'sky_name']);
+    var weather = preferredValue(ww, ['weather', 'description', 'desc', 'summary', 'condition', 'skn']);
     return weather;
   }
 
@@ -2820,7 +2820,7 @@
       var cx = coord && typeof coord.x === 'number' ? coord.x : null;
       var cy = coord && typeof coord.y === 'number' ? coord.y : null;
       var cz = coord && typeof coord.z === 'number' ? coord.z : null;
-      var gridId = coord && typeof coord.gridId === 'string' && coord.gridId ? coord.gridId : null;
+      var gridId = coord && (coord.g || (typeof coord.gridId === 'string' && coord.gridId)) ? (coord.g || coord.gridId) : null;
       if (cx !== null && cy !== null && cz !== null) {
         var coordStr = 'X: ' + cx + ' | Y: ' + cy + ' | Z: ' + cz;
         if (gridId) coordStr += ' | ' + gridId;
@@ -2871,8 +2871,8 @@
       return null;
     }
 
-    var row = num(meta.marker_row);
-    var col = num(meta.marker_col);
+    var row = num(meta.mr);
+    var col = num(meta.mc);
     if (row == null && meta.marker && typeof meta.marker === 'object') row = num(meta.marker.row);
     if (col == null && meta.marker && typeof meta.marker === 'object') col = num(meta.marker.col);
     if (row == null || col == null) return null;
@@ -3114,11 +3114,11 @@
   function pushChannelMessage(data) {
     var entry = {
       channel: String(data.channel || 'channel'),
-      talker: String(data.talker || 'Unknown'),
+      talker: String(data.tkr || 'Unknown'),
       text: String(data.text || ''),
-      direction: String(data.direction || ''),
-      language: String(data.language || ''),
-      recipient: data.recipient ? String(data.recipient) : '',
+      direction: String(data.dir || ''),
+      language: String(data.lang || ''),
+      recipient: data.to ? String(data.to) : '',
       timestamp: data.timestamp ? new Date(data.timestamp * 1000) : new Date(),
     };
 
@@ -3318,15 +3318,35 @@
   }
 
   function updateGroupInfo(data) {
+    // Normalize short → internal key names before storing
+    var rawLeader = String(data.ldr || '');
+    var rawMembers = Array.isArray(data.mem) ? data.mem : [];
+    var normalizedData = {
+      leader: rawLeader,
+      members: rawMembers.map(function (m) {
+        return {
+          name:           String(m.n   || ''),
+          uid:            m.uid != null ? Number(m.uid) : null,
+          level:          m.lv  != null ? m.lv  : 0,
+          race:           String(m.r   || ''),
+          class:          String(m.cls || ''),
+          wimpy:          m.wmp != null ? m.wmp : 0,
+          alignment:      m.align != null ? m.align : 0,
+          alignment_name: String(m.aname || ''),
+          ethos:          String(m.ethos || 'none'),
+          is_npc:         !!m.npc,
+          is_leader:      !!m.isl,
+        };
+      })
+    };
     // Preserve vitals / position fields merged by Group.Vitals and Group.Position
-    // so that a Group.Info re-send (e.g. on join/leave) doesn't wipe them.
     var prev = state.gmcp.groupInfo;
-    state.gmcp.groupInfo = data;
-    if (prev && Array.isArray(prev.members) && Array.isArray(data.members)) {
+    state.gmcp.groupInfo = normalizedData;
+    if (prev && Array.isArray(prev.members) && Array.isArray(normalizedData.members)) {
       var CARRY = ['hp','maxhp','mana','maxmana','move','maxmove',
                    'hp_pct','mana_pct','mv_pct','tnl','wimpy_pct',
                    'room_id','room_name','area','room_coord'];
-      data.members.forEach(function (m) {
+      normalizedData.members.forEach(function (m) {
         var old = prev.members.find(function (p) {
           return (m.uid != null && p.uid != null && m.uid === p.uid) ||
                  String(m.name || '').toLowerCase() === String(p.name || '').toLowerCase();
@@ -3359,25 +3379,26 @@
    */
   function updateGroupVitals(data) {
     if (!state.gmcp.groupInfo) state.gmcp.groupInfo = { leader: '', members: [] };
-    var items = Array.isArray(data.members) ? data.members : [];
+    var items = Array.isArray(data.mem) ? data.mem : [];
     for (var i = 0; i < items.length; i++) {
       var item = items[i];
-      var m = findGroupMember(item.uid != null ? Number(item.uid) : null, item.name);
+      var itemName = item.n || '';
+      var m = findGroupMember(item.uid != null ? Number(item.uid) : null, itemName);
       if (!m) {
         // Member not yet in groupInfo — insert a stub so vitals render immediately.
-        m = { name: String(item.name || ''), uid: item.uid != null ? Number(item.uid) : null };
+        m = { name: String(itemName), uid: item.uid != null ? Number(item.uid) : null };
         state.gmcp.groupInfo.members.push(m);
       }
-      if (item.hp_pct   != null) m.hp_pct   = item.hp_pct;
-      if (item.mana_pct != null) m.mana_pct = item.mana_pct;
-      if (item.mv_pct   != null) m.mv_pct   = item.mv_pct;
+      if (item.hpP   != null) m.hp_pct   = item.hpP;
+      if (item.manaP != null) m.mana_pct = item.manaP;
+      if (item.mvP   != null) m.mv_pct   = item.mvP;
       if (item.hp       != null) m.hp       = item.hp;
       if (item.mana     != null) m.mana     = item.mana;
       if (item.maxmana  != null) m.maxmana  = item.maxmana;
       if (item.move     != null) m.move     = item.move;
       if (item.maxmove  != null) m.maxmove  = item.maxmove;
       if (item.tnl      != null) m.tnl      = item.tnl;
-      if (item.wimpy_pct != null) m.wimpy_pct = item.wimpy_pct;
+      if (item.wmpP  != null) m.wimpy_pct = item.wmpP;
     }
     pulsePkgBadge('party', 'Group.Vitals');
     renderPartyPanel();
@@ -3389,18 +3410,19 @@
    */
   function updateGroupPosition(data) {
     if (!state.gmcp.groupInfo) state.gmcp.groupInfo = { leader: '', members: [] };
-    var items = Array.isArray(data.members) ? data.members : [];
+    var items = Array.isArray(data.mem) ? data.mem : [];
     for (var i = 0; i < items.length; i++) {
       var item = items[i];
-      var m = findGroupMember(item.uid != null ? Number(item.uid) : null, item.name);
+      var itemName = item.n || '';
+      var m = findGroupMember(item.uid != null ? Number(item.uid) : null, itemName);
       if (!m) {
-        m = { name: String(item.name || ''), uid: item.uid != null ? Number(item.uid) : null };
+        m = { name: String(itemName), uid: item.uid != null ? Number(item.uid) : null };
         state.gmcp.groupInfo.members.push(m);
       }
-      if (item.room_id   != null) m.room_id   = item.room_id;
-      if (item.room_name != null) m.room_name = item.room_name;
-      if (item.area      != null) m.area      = item.area;
-      if (item.room_coord != null) m.room_coord = item.room_coord;
+      if (item.rid != null) m.room_id   = item.rid;
+      if (item.rn  != null) m.room_name = item.rn;
+      if (item.area != null) m.area = item.area;
+      if (item.rc  != null) m.room_coord = item.rc;
     }
     pulsePkgBadge('party', 'Group.Position');
     renderPartyPanel();
@@ -3468,7 +3490,7 @@
   function updateCurrentTargetVitals() {
     if (!el.vTargetName || !el.vTargetHp || !el.vTargetHpSegs) return;
     var combat = state.gmcp.charCombat || {};
-    var targets = Array.isArray(combat.targets) ? combat.targets : [];
+    var targets = Array.isArray(combat.t) ? combat.t : [];
     var active = targets.length ? targets[0] : null;
 
     if (!active) {
@@ -3478,8 +3500,8 @@
       return;
     }
 
-    var targetName = String(active.name || 'Unknown');
-    var hpPct = Math.max(0, Math.min(100, numOr(active.hp_pct, 0)));
+    var targetName = String(active.n || 'Unknown');
+    var hpPct = Math.max(0, Math.min(100, numOr(active.hpP, 0)));
     el.vTargetName.textContent = targetName;
     el.vTargetHp.textContent = 'HP ' + hpPct + '%';
     setSegmentGauge(el.vTargetHpSegs, hpPct, 'opponent');
@@ -3488,7 +3510,7 @@
   function renderTargetsPanel() {
     if (!el.targetsPanelBody) return;
     var c = state.gmcp.charCombat || {};
-    var targets = Array.isArray(c.targets) ? c.targets : [];
+    var targets = Array.isArray(c.t) ? c.t : [];
     if (!targets.length) {
       el.targetsPanelBody.className = 'panel-body ph-centered';
       el.targetsPanelBody.innerHTML =
@@ -3501,10 +3523,10 @@
     el.targetsPanelBody.className = 'panel-body targets-list';
     el.targetsPanelBody.innerHTML = '';
     targets.forEach(function (t) {
-      var name = String(t.name || 'Unknown');
-      var targeting = String(t.targeting || 'nobody');
-      var condition = String(t.condition || 'unknown');
-      var hpPct = Math.max(0, Math.min(100, numOr(t.hp_pct, 0)));
+      var name = String(t.n || 'Unknown');
+      var targeting = String(t.tgt || 'nobody');
+      var condition = String(t.cond || 'unknown');
+      var hpPct = Math.max(0, Math.min(100, numOr(t.hpP, 0)));
       var card = document.createElement('div');
       card.className = 'target-card';
       card.innerHTML =
@@ -3519,13 +3541,13 @@
   }
 
   function updateInventory(data) {
-    state.gmcp.inventory = Array.isArray(data.items) ? data.items : [];
+    state.gmcp.inventory = Array.isArray(data.i) ? data.i : [];
     pulsePkgBadge('inventory', 'Char.Inventory');
     renderInventoryPanel();
   }
 
   function updateEquipment(data) {
-    state.gmcp.equipment = Array.isArray(data.slots) ? data.slots : [];
+    state.gmcp.equipment = Array.isArray(data.s) ? data.s : [];
     pulsePkgBadge('equipment', 'Char.Equipment');
     renderEquipmentPanel();
   }
@@ -3597,9 +3619,9 @@
     if (!hasAny) return;
 
     el.statusPanelBody.className = 'panel-body status-panel';
-    var groupedAffects = groupAffects(Array.isArray(af.affects) ? af.affects : []);
+    var groupedAffects = groupAffects(Array.isArray(af.aff) ? af.aff : []);
     var affectsCount = groupedAffects.length;
-    var combatCount = Array.isArray(cb.targets) ? cb.targets.length : 0;
+    var combatCount = Array.isArray(cb.t) ? cb.t.length : 0;
     var affectsView = (state.settings && state.settings.affectsView === 'icons') ? 'icons' : 'details';
     var affectsHtml = affectsView === 'icons'
       ? renderAffectsIconGrid(groupedAffects)
@@ -3617,11 +3639,11 @@
     var tnlVal = numOr(s.tnl, 0);
     var xpGoal = Math.max(1, xpVal + tnlVal);
     var xpPct = pct(xpVal, xpGoal);
-    var title = String(s.title || '').trim();
+    var title = String(s.ttl || '').trim();
     var displayName = String(s.name || 'Unknown') + (title ? (' ' + title) : '');
-    var levelRaceClass = 'Level ' + numOr(s.level, 0)
-      + ' ' + escHtml(titleCaseWords(String(s.race || '?')))
-      + ' ' + escHtml(titleCaseWords(String(s.class || '?')));
+    var levelRaceClass = 'Level ' + numOr(s.lv, 0)
+      + ' ' + escHtml(titleCaseWords(String(s.r || '?')))
+      + ' ' + escHtml(titleCaseWords(String(s.cls || '?')));
 
     el.statusPanelBody.innerHTML =
       '<div class="status-grid">'
@@ -3641,10 +3663,10 @@
       + '</div>'
       + '</div>'
       + statusCard('Stats', [
-        'Gold: ' + numOr(w.gold, 0) + ' · Bank: ' + numOr(w.bank_gold, 0),
-        'Cabal Pts: ' + numOr(w.cabal_points, 0) + (numOr(w.caldrach, 0) > 0 ? ' · Caldrachi: ' + numOr(w.caldrach, 0) : ''),
-        'Practice/Train: ' + numOr(s.practice, 0) + ' / ' + numOr(s.trains, 0),
-        'Hit/Dam: ' + numOr(st.hitroll, 0) + ' / ' + numOr(st.damroll, 0),
+        'Gold: ' + numOr(w.gold, 0) + ' · Bank: ' + numOr(w.bgold, 0),
+        'Cabal Pts: ' + numOr(w.cp, 0) + (numOr(w.cald, 0) > 0 ? ' · Caldrachi: ' + numOr(w.cald, 0) : ''),
+        'Practice/Train: ' + numOr(s.prac, 0) + ' / ' + numOr(s.trn, 0),
+        'Hit/Dam: ' + numOr(st.hit, 0) + ' / ' + numOr(st.dam, 0),
         '<span class="stat-row">STR: ' + numOr(st.str, 0) + '<span class="stat-div"> | </span>DEX: ' + numOr(st.dex, 0) + '<span class="stat-div"> | </span>WIS: ' + numOr(st.wis, 0) + '<span class="stat-div"> | </span>INT: ' + numOr(st.int, 0) + '<span class="stat-div"> | </span>CON: ' + numOr(st.con, 0) + '</span>',
         'Affects: ' + affectsCount + ' · Targets: ' + combatCount,
       ])
@@ -3849,8 +3871,8 @@
     var order = [];
 
     affects.forEach(function (a) {
-      var name = String((a && a.name) || 'unknown');
-      var duration = parseInt(a && a.duration, 10);
+      var name = String((a && a.n) || 'unknown');
+      var duration = parseInt(a && a.dur, 10);
       if (isNaN(duration)) duration = 0;
       var kind = String((a && a.kind) || 'spell');
       var key = name.toLowerCase() + '|' + duration;
@@ -3864,19 +3886,19 @@
           durationLabel: affectDurationLabel(duration),
           timerPct: timer.pct,
           permanent: timer.permanent,
-          level: parseInt((a && a.level), 10) || 0,
+          level: parseInt(a && a.lv, 10) || 0,
           mods: [],
           _seenMods: Object.create(null),
         };
         order.push(key);
       }
 
-      if ((parseInt(a && a.level, 10) || 0) > groups[key].level) {
-        groups[key].level = parseInt(a.level, 10) || groups[key].level;
+      if ((parseInt(a && a.lv, 10) || 0) > groups[key].level) {
+        groups[key].level = parseInt(a.lv, 10) || groups[key].level;
       }
 
-      var loc = String((a && a.location) || 'none');
-      var mod = parseInt(a && a.modifier, 10);
+      var loc = String((a && a.loc) || 'none');
+      var mod = parseInt(a && a.mod, 10);
       if (isNaN(mod)) mod = 0;
       var modLine = loc + ' ' + formatSigned(mod);
       var seenKey = loc + '|' + mod;
@@ -3921,7 +3943,7 @@
     Object.keys(worldMoons).forEach(function (name) {
       var moon = worldMoons[name];
       if (!moon || typeof moon !== 'object') return;
-      var phase = moon.phase_name ? String(moon.phase_name) : '';
+      var phase = moon.pn ? String(moon.pn) : '';
       if (!phase) return;
       out.push(name + ': ' + phase);
     });
@@ -3947,8 +3969,8 @@
       row.className = 'item-row';
       row.innerHTML =
         '<span class="item-icon" aria-hidden="true">&#128717;</span>' +
-        '<span class="item-name">' + escHtml(String(it.name || 'Unknown item')) + '</span>' +
-        '<span class="item-meta">' + escHtml(String(it.type || '')) + '</span>';
+        '<span class="item-name">' + escHtml(String(it.n || 'Unknown item')) + '</span>' +
+        '<span class="item-meta">' + escHtml(String(it.t || '')) + '</span>';
       el.inventoryPanelBody.appendChild(row);
     });
   }
@@ -3972,8 +3994,8 @@
       row.className = 'item-row';
       row.innerHTML =
         '<span class="item-icon" aria-hidden="true">&#9876;</span>' +
-        '<span class="item-name">' + escHtml(String(it.name || 'Unknown item')) + '</span>' +
-        '<span class="item-meta">' + escHtml(String(it.slot || '')) + '</span>';
+        '<span class="item-name">' + escHtml(String(it.n || 'Unknown item')) + '</span>' +
+        '<span class="item-meta">' + escHtml(String(it.sl || '')) + '</span>';
       el.equipmentPanelBody.appendChild(row);
     });
   }
@@ -4080,22 +4102,18 @@
 
   function languageSnapshot() {
     var s = state.gmcp.charStatus || {};
-    var selected = String(
-      s.selected_language != null ? s.selected_language
-      : (s.selectedLanguage != null ? s.selectedLanguage
-      : (s.language != null ? s.language : 'Common'))
-    ).trim() || 'Common';
+    var selected = String(s.slang || 'Common').trim() || 'Common';
 
     var list = [];
-    if (Array.isArray(s.languages)) {
-      list = s.languages.map(function (entry) {
+    if (Array.isArray(s.langs)) {
+      list = s.langs.map(function (entry) {
         if (entry == null) return null;
         if (typeof entry === 'string') {
           return { id: entry, proficiency: 0 };
         }
         return {
-          id: String(entry.id != null ? entry.id : (entry.language || '')).trim(),
-          proficiency: Math.max(0, Math.min(100, numOr(entry.proficiency, 0))),
+          id: String(entry.id || '').trim(),
+          proficiency: Math.max(0, Math.min(100, numOr(entry.pct, 0))),
         };
       }).filter(function (entry) {
         return entry && entry.id;

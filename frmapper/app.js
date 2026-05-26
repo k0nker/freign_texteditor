@@ -1600,13 +1600,68 @@ function renderSectorVariantTile(g, baseIcon, sector, variant, size) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Debug log panel
+// ---------------------------------------------------------------------------
+const _dbEntries = [];
+const _DB_MAX = 100;
+
+function _dbLog(level, text) {
+  const ts = new Date().toISOString().slice(11, 23);
+  _dbEntries.push({ ts, level, text });
+  if (_dbEntries.length > _DB_MAX) _dbEntries.shift();
+  _dbRender();
+  if (level === "err") {
+    console.error("[frmapper-debug]", text);
+  } else if (level === "warn") {
+    console.warn("[frmapper-debug]", text);
+  } else {
+    console.info("[frmapper-debug]", text);
+  }
+}
+
+function _dbRender() {
+  const el = document.getElementById("fr-debug-entries");
+  if (!el) return;
+  const colorMap = { info: "#67d789", warn: "#e0c040", err: "#e05050", msg: "#7ab4f5" };
+  el.innerHTML = _dbEntries.map(e => {
+    const color = colorMap[e.level] || "#c8cdd6";
+    return `<div style="padding:1px 0;border-bottom:1px solid #1e1e2a;"><span style="color:#555;margin-right:6px;">${e.ts}</span><span style="color:${color};margin-right:6px;">[${e.level}]</span><span style="word-break:break-all;">${e.text.replace(/&/g,"&amp;").replace(/</g,"&lt;")}</span></div>`;
+  }).join("");
+  el.scrollTop = el.scrollHeight;
+}
+
+(function _initDebugPanel() {
+  function toggle(show) {
+    const panel = document.getElementById("fr-debug-panel");
+    if (!panel) return;
+    panel.style.display = show ? "flex" : "none";
+  }
+  document.addEventListener("DOMContentLoaded", function () {
+    const btnOpen  = document.getElementById("btn-debug-log");
+    const btnClose = document.getElementById("btn-debug-close");
+    const btnClear = document.getElementById("btn-debug-clear");
+    if (btnOpen)  btnOpen.addEventListener("click",  function () { toggle(true);  _dbRender(); });
+    if (btnClose) btnClose.addEventListener("click", function () { toggle(false); });
+    if (btnClear) btnClear.addEventListener("click", function () { _dbEntries.length = 0; _dbRender(); });
+    // Log startup context after state is fully initialized
+    const modeLabel = typeof state !== "undefined" ? state.sessionMode : "?";
+    const wsUrl     = typeof state !== "undefined" ? (state.sessionWsUrl || "(none)") : "?";
+    _dbLog("info", `startup sessionMode=${modeLabel}`);
+    _dbLog("info", `wsUrl=${wsUrl}`);
+  });
+})();
+// ---------------------------------------------------------------------------
+
 function connectSessionSocket() {
   if (!state.sessionWsUrl) return;
   if (state.sessionSocket && state.sessionSocket.readyState !== WebSocket.CLOSED) return;
   let socket;
   try {
+    _dbLog("info", `WS connecting → ${state.sessionWsUrl}`);
     socket = new WebSocket(state.sessionWsUrl);
   } catch (error) {
+    _dbLog("err", `WS new WebSocket threw: ${error && error.message ? error.message : String(error)}`);
     console.warn("frmapper websocket connection failed", error);
     scheduleSessionReconnect();
     return;
@@ -1622,21 +1677,23 @@ function connectSessionSocket() {
       window.clearTimeout(state.sessionSocketReconnectTimer);
       state.sessionSocketReconnectTimer = 0;
     }
+    _dbLog("info", "WS open — handshake complete, waiting for frmapper.attached");
     console.info("frmapper websocket connected");
   });
 
   socket.addEventListener("close", (event) => {
     state.sessionSocketState = "disconnected";
     state.sessionSocket = null;
-    console.warn("frmapper websocket closed", {
-      code: event && typeof event.code === "number" ? event.code : 0,
-      reason: event && event.reason ? event.reason : ""
-    });
+    const code   = event && typeof event.code === "number" ? event.code : 0;
+    const reason = event && event.reason ? event.reason : "";
+    _dbLog("warn", `WS closed code=${code}${reason ? " reason=" + reason : ""}`);
+    console.warn("frmapper websocket closed", { code, reason });
     scheduleSessionReconnect();
   });
 
   socket.addEventListener("error", (event) => {
     state.sessionSocketState = "error";
+    _dbLog("err", "WS error event (connection refused or network failure)");
     console.warn("frmapper websocket error", event);
   });
 
@@ -1664,6 +1721,7 @@ function scheduleSessionReconnect() {
   );
   const jitter = Math.floor(Math.random() * 1000);
   const reconnectDelay = Math.min(state.sessionReconnectMaxMs, baseDelay + jitter);
+  _dbLog("warn", `WS reconnect scheduled attempt=${attempt} delayMs=${reconnectDelay}`);
   console.info("frmapper websocket reconnect scheduled", { attempt, delayMs: reconnectDelay });
 
   state.sessionSocketReconnectTimer = window.setTimeout(() => {
@@ -1690,6 +1748,8 @@ function handleSessionMessage(msg) {
       characterName: payload.characterName,
       realm: payload.testRealm ? "test" : (state.sessionRealm || "public")
     });
+    _dbLog(gmcpEnabled ? "msg" : "warn",
+      `frmapper.attached char=${payload.characterName || "?"} gmcpNegotiated=${gmcpNegotiated} gmcpEnabled=${gmcpEnabled} testRealm=${!!payload.testRealm}`);
     console.info("frmapper attached", { gmcpNegotiated, gmcpEnabled });
     if (!gmcpEnabled) {
       console.warn("frmapper attached but GMCP feed is disabled; run 'frmapper' again in-game (or 'gmcp force') and reopen this page.");
@@ -2658,7 +2718,7 @@ function normalizeKnownMobs(value) {
   return mobs
     .map((m) => {
       if (m && typeof m === "object") {
-        return String(m.name || m.shortDesc || m.short_desc || "").trim();
+        return String(m.n || m.name || m.shortDesc || m.short_desc || "").trim();
       }
       return String(m || "").trim();
     })
@@ -2673,9 +2733,9 @@ function normalizeRoomObjects(value) {
         const name = String(item || "").trim();
         return name ? { name, type: "unknown" } : null;
       }
-      const name = String(item.name || item.shortName || item.short_name || item.shortDesc || item.short_desc || item.desc || item.description || "").trim();
+      const name = String(item.n || item.name || item.shortName || item.short_name || item.shortDesc || item.short_desc || item.desc || item.description || "").trim();
       if (!name) return null;
-      const type = String(item.type || item.itemType || item.item_type || "unknown").trim().toLowerCase() || "unknown";
+      const type = String(item.t || item.type || item.itemType || item.item_type || "unknown").trim().toLowerCase() || "unknown";
       return { name, type };
     })
     .filter((item) => !!item);
@@ -2718,7 +2778,7 @@ function detectWaterSource(objects) {
 }
 
 function buildMarkersFromInfo(info, existingRoom) {
-  const base = info.markers || {};
+  const base = info.mk || info.markers || {};
   const roomObjects = (info && (info.objects || info.items || info.obj_list))
     || (existingRoom && Array.isArray(existingRoom.objects) ? existingRoom.objects : []);
   const waterSource = detectWaterSource(roomObjects);
@@ -2739,8 +2799,8 @@ function normalizeNearbyMobs(value) {
 
 function parseNearbyMobsEntry(entry) {
   if (entry && typeof entry === "object") {
-    const count = Number.parseInt(entry.count ?? entry.mobs ?? entry.total ?? 0, 10);
-    const distance = Number.parseInt(entry.distance ?? entry.range ?? entry.scanRange ?? entry.scan_range ?? 0, 10);
+    const count = Number.parseInt(entry.n ?? entry.count ?? entry.mobs ?? entry.total ?? 0, 10);
+    const distance = Number.parseInt(entry.d ?? entry.distance ?? entry.range ?? entry.scanRange ?? entry.scan_range ?? 0, 10);
     return {
       count: Number.isFinite(count) && count > 0 ? count : 0,
       distance: Number.isFinite(distance) && distance > 0 ? distance : null
@@ -2815,8 +2875,8 @@ function deriveFallbackCoord(info, roomId, existingRoom) {
   const previousRoom = playerRoomId ? state.roomsById.get(playerRoomId) : null;
   if (previousRoom && previousRoom.exits && typeof previousRoom.exits === "object") {
     const fallbackGrid = normalizeGridId(
-      info && info.coord && info.coord.gridId !== undefined
-        ? info.coord.gridId
+      info && info.coord && (info.coord.g !== undefined || info.coord.gridId !== undefined)
+        ? (info.coord.g || info.coord.gridId)
         : previousRoom.gridId
     );
     for (const [dir, ex] of Object.entries(previousRoom.exits)) {
@@ -2842,7 +2902,7 @@ function deriveFallbackCoord(info, roomId, existingRoom) {
     x: 0,
     y: 0,
     z: 0,
-    gridId: normalizeGridId(info && info.coord ? info.coord.gridId : "")
+    gridId: normalizeGridId(info && info.coord ? (info.coord.g || info.coord.gridId) : "")
   };
 }
 
@@ -2854,7 +2914,7 @@ function roomFromRoomInfo(info, existingRoom) {
   const rawX = coordInfo ? Number.parseInt(coordInfo.x, 10) : Number.NaN;
   const rawY = coordInfo ? -Number.parseInt(coordInfo.y, 10) : Number.NaN;
   const rawZ = coordInfo ? Number.parseInt(coordInfo.z, 10) : Number.NaN;
-  const gridId = normalizeGridId(coordInfo && coordInfo.gridId);
+  const gridId = normalizeGridId(coordInfo && (coordInfo.g || coordInfo.gridId));
   const hasCoord = Number.isFinite(rawX) && Number.isFinite(rawY) && Number.isFinite(rawZ) && !!gridId;
   if (!hasCoord) return null;
 
@@ -2874,9 +2934,9 @@ function roomFromRoomInfo(info, existingRoom) {
         y,
         z,
         gridId,
-        ephNum: info.ephNum ?? existingRoom.ephNum,
-        areaID: info.areaID ?? info.areaId ?? existingRoom.areaID,
-        localID: info.localID ?? info.localId ?? existingRoom.localID,
+        ephNum: info.eph ?? info.ephNum ?? existingRoom.ephNum,
+        areaID: info.aid ?? info.areaID ?? info.areaId ?? existingRoom.areaID,
+        localID: info.lid ?? info.localID ?? info.localId ?? existingRoom.localID,
         area: existingRoom.area || String(info.area || ""),
         visibleNow: false,
         darkUnknown: !existingRoom.discovered
@@ -2896,9 +2956,9 @@ function roomFromRoomInfo(info, existingRoom) {
       nearbyMobs: {},
       knownMobs: [],
       notes: "",
-      ephNum: info.ephNum ?? null,
-      areaID: info.areaID ?? info.areaId ?? null,
-      localID: info.localID ?? info.localId ?? null,
+      ephNum: info.eph ?? info.ephNum ?? null,
+      areaID: info.aid ?? info.areaID ?? info.areaId ?? null,
+      localID: info.lid ?? info.localID ?? info.localId ?? null,
       visibleNow: false,
       discovered: false,
       darkUnknown: true,
@@ -2907,14 +2967,15 @@ function roomFromRoomInfo(info, existingRoom) {
   }
 
   const exits = {};
-  if (Array.isArray(info.exits)) {
-    for (const entry of info.exits) {
+  const exitsArr = info.ex || info.exits;
+  if (Array.isArray(exitsArr)) {
+    for (const entry of exitsArr) {
       const dir = normalizeDirectionToken(entry && entry.dir);
       if (!dir) continue;
       exits[dir] = {
         to: String(entry && entry.to ? entry.to : ""),
-        state: entry && entry.locked ? "locked" : entry && entry.closed ? "closed" : "open",
-        door: !!(entry && entry.door)
+        state: (entry && (entry.lk ?? entry.locked)) ? "locked" : (entry && (entry.cl ?? entry.closed)) ? "closed" : "open",
+        door: !!(entry && (entry.dr ?? entry.door))
       };
     }
   }
@@ -2926,7 +2987,7 @@ function roomFromRoomInfo(info, existingRoom) {
     y,
     z,
     gridId,
-    sector: info.terrain,
+    sector: info.ter || info.terrain,
     area: info.area,
     exits,
     markers: buildMarkersFromInfo(info, existingRoom),
@@ -2934,9 +2995,9 @@ function roomFromRoomInfo(info, existingRoom) {
     nearbyMobs: info.nearby_mobs || info.nearbyMobs || {},
     knownMobs: [],
     scanRange: info.scan_range ?? info.scanRange ?? info.scan_dist ?? info.scanDistance,
-    ephNum: info.ephNum ?? (existingRoom ? existingRoom.ephNum : null),
-    areaID: info.areaID ?? info.areaId ?? (existingRoom ? existingRoom.areaID : null),
-    localID: info.localID ?? info.localId ?? (existingRoom ? existingRoom.localID : null),
+    ephNum: info.eph ?? info.ephNum ?? (existingRoom ? existingRoom.ephNum : null),
+    areaID: info.aid ?? info.areaID ?? info.areaId ?? (existingRoom ? existingRoom.areaID : null),
+    localID: info.lid ?? info.localID ?? info.localId ?? (existingRoom ? existingRoom.localID : null),
     notes: info.area ? `area=${String(info.area)}` : "",
     visibleNow: true,
     discovered: true,
@@ -3042,7 +3103,7 @@ function ingestRoomInfo(info, durationMs) {
 
 function ingestRoomObjects(payload) {
   const roomId = String(payload && (payload.roomId || payload.room_id || payload.id) || "").trim();
-  const objects = normalizeRoomObjects(payload && (payload.objects || payload.items || payload.obj_list || []));
+  const objects = normalizeRoomObjects(payload && (payload.o || payload.objects || payload.items || payload.obj_list || []));
   if (!roomId) return;
   const existing = state.roomsById.get(roomId);
   if (!existing) return;
@@ -3054,9 +3115,10 @@ function ingestRoomObjects(payload) {
 
 function ingestRoomScannedMobs(payload) {
   const roomId = String(payload && (payload.roomId || payload.room_id || payload.id) || "").trim();
-  const scanSightings = Array.isArray(payload && payload.scan_mobs)
-    ? payload.scan_mobs
-    : (Array.isArray(payload && payload.scanned_mobs) ? payload.scanned_mobs : (Array.isArray(payload && payload.mobs) ? payload.mobs : []));
+  const scanSightings = Array.isArray(payload && payload.sm)
+    ? payload.sm
+    : (Array.isArray(payload && payload.scan_mobs) ? payload.scan_mobs
+    : (Array.isArray(payload && payload.scanned_mobs) ? payload.scanned_mobs : (Array.isArray(payload && payload.mobs) ? payload.mobs : [])));
   if (!scanSightings.length) return;
   const now = performance.now();
   const existing = roomId ? state.roomsById.get(roomId) : null;
@@ -3070,17 +3132,18 @@ function ingestRoomScannedMobs(payload) {
 }
 
 function updatePartyFromGroupInfo(payload) {
-  const members = Array.isArray(payload && payload.members) ? payload.members : [];
+  const members = Array.isArray(payload.mem) ? payload.mem : [];
   const nextMembers = members.map((m) => {
-    const roomId = String(m && m.room_id ? m.room_id : "");
-    const coord = m && m.room_coord && typeof m.room_coord === "object" ? m.room_coord : null;
+    const roomId = String(m.rid || "");
+    const rawCoord = m.rc;
+    const coord = rawCoord && typeof rawCoord === "object" ? rawCoord : null;
     return {
-      name: String(m && m.name ? m.name : ""),
+      name: String(m.n || ""),
       roomId,
       coord: normalizeCoord(coord),
-      isLeader: !!(m && m.is_leader),
-      isNpc: !!(m && m.is_npc),
-      uid: m && m.uid != null ? Number(m.uid) : null
+      isLeader: !!m.isl,
+      isNpc: !!m.npc,
+      uid: m.uid != null ? Number(m.uid) : null
     };
   });
 
@@ -3141,15 +3204,16 @@ function findPartyMember(uid, name) {
  * member in the payload without replacing unknown members or vitals fields.
  */
 function mergePartyPosition(payload) {
-  const items = Array.isArray(payload && payload.members) ? payload.members : [];
+  const items = Array.isArray(payload.mem) ? payload.mem : [];
   if (!items.length) return;
 
   let changed = false;
   for (const item of items) {
-    const member = findPartyMember(item.uid != null ? Number(item.uid) : null, item.name);
+    const member = findPartyMember(item.uid != null ? Number(item.uid) : null, item.n);
     if (!member) continue;
-    const newRoomId = String(item.room_id || "");
-    const coord = item.room_coord && typeof item.room_coord === "object" ? item.room_coord : null;
+    const newRoomId = String(item.rid || "");
+    const rawCoord = item.rc;
+    const coord = rawCoord && typeof rawCoord === "object" ? rawCoord : null;
     const newCoord = normalizeCoord(coord);
     if (member.roomId !== newRoomId || JSON.stringify(member.coord) !== JSON.stringify(newCoord)) {
       member.roomId = newRoomId;
@@ -3191,16 +3255,19 @@ function mergePartyPosition(payload) {
  * stores them so future overlays can use them.
  */
 function mergePartyVitals(payload) {
-  const items = Array.isArray(payload && payload.members) ? payload.members : [];
+  const items = Array.isArray(payload.mem) ? payload.mem : [];
   if (!items.length) return;
   for (const item of items) {
-    const member = findPartyMember(item.uid != null ? Number(item.uid) : null, item.name);
+    const member = findPartyMember(item.uid != null ? Number(item.uid) : null, item.n);
     if (!member) continue;
-    member.hpPct   = typeof item.hp_pct   === "number" ? item.hp_pct   : member.hpPct;
-    member.manaPct = typeof item.mana_pct === "number" ? item.mana_pct : member.manaPct;
-    member.mvPct   = typeof item.mv_pct   === "number" ? item.mv_pct   : member.mvPct;
-    member.hp      = typeof item.hp       === "number" ? item.hp       : member.hp;
-    member.maxHp   = typeof item.maxhp    === "number" ? item.maxhp    : member.maxHp;
+    const hpPct   = item.hpP;
+    const manaPct = item.manaP;
+    const mvPct   = item.mvP;
+    member.hpPct   = typeof hpPct   === "number" ? hpPct   : member.hpPct;
+    member.manaPct = typeof manaPct === "number" ? manaPct : member.manaPct;
+    member.mvPct   = typeof mvPct   === "number" ? mvPct   : member.mvPct;
+    member.hp      = typeof item.hp    === "number" ? item.hp    : member.hp;
+    member.maxHp   = typeof item.maxhp === "number" ? item.maxhp : member.maxHp;
   }
 }
 
@@ -3236,9 +3303,17 @@ function didPartyMemberMove(from, to) {
 }
 
 function updateRoomMobs(payload) {
-  state.roomMobs = Array.isArray(payload && payload.mobs) ? payload.mobs : [];
+  const mobList = payload && (payload.m || payload.mobs);
+  state.roomMobs = Array.isArray(mobList) ? mobList : [];
   state.roomMobsSeenAt = state.roomMobs.length > 0 ? performance.now() : 0;
   if (state.roomMobsSeenAt > 0) ensureEffectsLoop();
+  // Mirror to current room so the hover tooltip shows the correct mob list.
+  const roomId = state.playerLocation && state.playerLocation.roomId
+    ? String(state.playerLocation.roomId) : null;
+  if (roomId) {
+    const room = state.roomsById.get(roomId);
+    if (room) room.knownMobs = normalizeKnownMobs(state.roomMobs);
+  }
   scheduleRender();
 }
 
@@ -3253,9 +3328,9 @@ function ingestRoomMobHint(payload) {
 
   // Mirror what the old Room.Info path did: store on the room then fire showTempMobDot
   // for every adjacent room that has mobs, so the minimap dots appear.
-  const nearbyMobs = normalizeNearbyMobs(payload.nearby_mobs || payload.nearbyMobs || {});
+  const nearbyMobs = normalizeNearbyMobs(payload.nm || payload.nearby_mobs || payload.nearbyMobs || {});
   room.nearbyMobs = nearbyMobs;
-  const sr = payload.scan_range ?? payload.scanRange ?? null;
+  const sr = payload.sr ?? payload.scan_range ?? payload.scanRange ?? null;
   room.scanRange = Number.isFinite(Number(sr)) && Number(sr) > 0 ? Number(sr) : null;
 
   for (const [dir, entry] of Object.entries(nearbyMobs)) {
@@ -3275,9 +3350,9 @@ function ingestRoomMobHint(payload) {
 function ingestTrackedDelta(type, payload) {
   const isMobs = type === "mobs";
   const map = isMobs ? state.trackedMobs : state.trackedChars;
-  const action = String((payload && payload.action) || "");
+  const action = String((payload && payload.act) || "");
   if (action === "clear") { map.clear(); scheduleRender(); return; }
-  const name = String((payload && payload.name) || "").trim();
+  const name = String((payload && payload.n) || "").trim();
   const uid = payload && payload.uid != null ? Number(payload.uid) : null;
   // Mobs are keyed by UID string to avoid name-collision overwrites. Chars keep name as key.
   const key = (isMobs && uid != null) ? String(uid) : name;
@@ -3289,13 +3364,13 @@ function ingestTrackedDelta(type, payload) {
     return;
   }
   if (action === "add") {
-    map.set(key, { roomId: String((payload && payload.roomId) || ""), uid, name });
+    map.set(key, { roomId: String((payload && payload.rid) || ""), uid, name });
     scheduleRender();
     return;
   }
   if (action === "move") {
-    const fromRoomId = String((payload && payload.fromRoomId) || "");
-    const toRoomId   = String((payload && payload.toRoomId)   || "");
+    const fromRoomId = String((payload && payload.from) || "");
+    const toRoomId   = String((payload && payload.to)   || "");
     map.set(key, { roomId: toRoomId, uid, name });
     const fromRoom = fromRoomId ? state.roomsById.get(fromRoomId) : null;
     const toRoom   = toRoomId   ? state.roomsById.get(toRoomId)   : null;
@@ -3462,17 +3537,17 @@ function applyScanMobSightings(scanSightings, seenAt) {
     const coord = normalizeCoord(entry.coord);
     if (!coord) continue;
 
-    const roomId = String(entry.room_id || entry.roomId || entry.id || "").trim()
+    const roomId = String(entry.rid || entry.room_id || entry.roomId || entry.id || "").trim()
       || coordKey(coord.x, -coord.y, coord.z, normalizeGridId(coord.gridId));
     const mappedY = -coord.y;
-    const mobs = normalizeKnownMobs(entry.mobs || []);
+    const mobs = normalizeKnownMobs(entry.m || entry.mobs || []);
 
     const existing = state.roomsById.get(roomId);
     if (existing) {
       upsertRoom(Object.assign({}, existing, {
         knownMobs: mobs,
         area: existing.area || String(entry.area || ""),
-        name: existing.name || String(entry.room_name || entry.roomName || "")
+        name: existing.name || String(entry.rn || entry.room_name || entry.roomName || "")
       }));
       if (mobs.length > 0) {
         showTempMobDot(roomId, mobs.length);
@@ -3482,7 +3557,7 @@ function applyScanMobSightings(scanSightings, seenAt) {
 
     upsertRoom({
       id: roomId,
-      name: String(entry.room_name || entry.roomName || ""),
+      name: String(entry.rn || entry.room_name || entry.roomName || ""),
       x: coord.x,
       y: mappedY,
       z: coord.z,
@@ -5635,7 +5710,7 @@ function normalizeCoord(value) {
   const y = Number.parseInt(value.y, 10);
   const z = Number.parseInt(value.z, 10);
   if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null;
-  return { x, y, z, gridId: normalizeGridId(value.gridId) };
+  return { x, y, z, gridId: normalizeGridId(value.g || value.gridId) };
 }
 
 function panForRoom(room) {

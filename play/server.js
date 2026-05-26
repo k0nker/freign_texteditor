@@ -184,7 +184,12 @@ function startFrmapperTunnel(ws, sessionToken, realm) {
   try {
     upstream = new WebSocket(upstreamUrl, {
       handshakeTimeout: 10000,
-      perMessageDeflate: false,
+      perMessageDeflate: ENABLE_WS_COMPRESSION
+        ? {
+            threshold: WS_COMPRESSION_THRESHOLD,
+            zlibDeflateOptions: { level: WS_COMPRESSION_LEVEL },
+          }
+        : false,
       followRedirects: false,
     });
   } catch (err) {
@@ -588,11 +593,11 @@ function enableMccp2(ws, state) {
     processPlainTelnet(ws, state, chunk, false);
   });
 
-  inflater.on('error', () => {
+  inflater.on('error', (err) => {
     telnet.mccpFailed = true;
     telnet.mccp2Active = false;
     telnet.inflater = null;
-    ws.send(json({ type: 'status', message: 'MCCP2 decode failed; continuing without compression.' }));
+    ws.send(json({ type: 'status', message: `MCCP2 decode failed (${err.code || err.message}); continuing without compression.` }));
   });
 }
 
@@ -605,11 +610,11 @@ function feedMccp2(ws, state, buf) {
 
   try {
     telnet.inflater.write(buf);
-  } catch {
+  } catch (err) {
     telnet.mccpFailed = true;
     telnet.mccp2Active = false;
     telnet.inflater = null;
-    ws.send(json({ type: 'status', message: 'MCCP2 stream error; continuing without compression.' }));
+    ws.send(json({ type: 'status', message: `MCCP2 stream error (${err.message}); continuing without compression.` }));
   }
 }
 

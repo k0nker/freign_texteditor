@@ -31,6 +31,7 @@
     <header class="topbar">
       <div class="brand">frmapper</div>
       <div class="topbar-actions">
+        <button id="btn-debug-log" type="button" title="Toggle connection debug log">Debug</button>
         <label class="file-button" for="file-input">Load JSON</label>
         <input id="file-input" type="file" accept="application/json" />
         <button id="btn-export" type="button">Export JSON</button>
@@ -110,6 +111,17 @@
         </div>
       </main>
     </div>
+  </div>
+
+  <div id="fr-debug-panel" style="display:none;position:fixed;bottom:10px;right:10px;z-index:9999;width:480px;max-height:320px;background:var(--fm-panel,#111118);border:1px solid var(--fm-panel-border,#2a2a38);border-radius:6px;font-family:monospace;font-size:11px;color:var(--fm-text,#c8cdd6);box-shadow:0 4px 20px rgba(0,0,0,.6);flex-direction:column;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 8px;border-bottom:1px solid var(--fm-panel-border,#2a2a38);flex-shrink:0;">
+      <span style="font-weight:bold;letter-spacing:.04em;">frmapper debug log</span>
+      <div style="display:flex;gap:6px;">
+        <button id="btn-debug-clear" type="button" style="background:none;border:1px solid var(--fm-panel-border,#2a2a38);color:inherit;border-radius:3px;padding:1px 6px;cursor:pointer;font-size:10px;">Clear</button>
+        <button id="btn-debug-close" type="button" style="background:none;border:none;color:inherit;cursor:pointer;font-size:14px;padding:0 2px;" title="Close">&times;</button>
+      </div>
+    </div>
+    <div id="fr-debug-entries" style="overflow-y:auto;flex:1;padding:4px 8px;"></div>
   </div>
 
   <script src="../site-themes.js?v=1"></script>
