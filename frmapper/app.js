@@ -18,6 +18,7 @@ const PLANNED_PATH_CONSUME_PULSE_MS = 340;
 const PLANNED_PATH_PREVIEW_LIMIT = 15;
 const FOG_STALE_START_MS = 8 * 60 * 1000;
 const FOG_STALE_FULL_MS = 40 * 60 * 1000;
+const FOG_TOGGLE_FADE_MS = 260;
 const TRAIL_SPRITE_SIZE = 64;
 const DECOR_SPRITE_SIZE = 96;
 const TRAIL_DIR_BITS = { n: 1, e: 2, s: 4, w: 8 };
@@ -81,11 +82,11 @@ const TEXTURED_SECTORS = new Set([
   "planar"
 ]);
 const MOB_DOT_PALETTE = {
-  glowInner: "rgba(255, 70, 70, 0.56)",
-  glowOuter: "rgba(255, 20, 20, 0)",
-  coreHighlight: "rgba(255, 125, 125, 0.98)",
-  coreMid: "rgba(220, 40, 40, 0.98)",
-  coreOuter: "rgba(126, 8, 8, 0.98)"
+  glowInner: "rgba(255, 150, 50, 0.55)",
+  glowOuter: "rgba(255, 110, 20, 0)",
+  coreHighlight: "rgba(255, 220, 160, 0.99)",
+  coreMid: "rgba(240, 140, 30, 0.99)",
+  coreOuter: "rgba(160, 70, 0, 0.99)"
 };
 const PARTY_DOT_PALETTE = {
   glowInner: "rgba(146, 180, 255, 0.62)",
@@ -116,11 +117,11 @@ const TRACKED_CHAR_PALETTE = {
   coreOuter: "rgba(170, 30, 110, 0.99)"
 };
 const TRACKED_MOB_PALETTE = {
-  glowInner: "rgba(255, 150, 50, 0.55)",
-  glowOuter: "rgba(255, 110, 20, 0)",
-  coreHighlight: "rgba(255, 220, 160, 0.99)",
-  coreMid: "rgba(240, 140, 30, 0.99)",
-  coreOuter: "rgba(160, 70, 0, 0.99)"
+  glowInner: "rgba(214, 184, 86, 0.56)",
+  glowOuter: "rgba(174, 136, 34, 0)",
+  coreHighlight: "rgba(246, 224, 156, 0.99)",
+  coreMid: "rgba(188, 150, 58, 0.99)",
+  coreOuter: "rgba(106, 79, 24, 0.99)"
 };
 const PARTY_NEON_COLOR = "rgba(150, 166, 255, 0.94)";
 const PARTY_NEON_GLOW = "rgba(164, 150, 255, 0.97)";
@@ -297,6 +298,9 @@ const state = {
   showMobHints: true,
   showTraveledPath: true,
   showFogOfWar: true,
+  fogToggleAlpha: 1,
+  fogToggleTargetAlpha: 1,
+  fogToggleLastTs: 0,
   showGridOutline: false,
   showPerfStats: false,
   showLocalIds: false,
@@ -2342,7 +2346,11 @@ function wireEvents() {
 
   if (el.toggleFog) {
     el.toggleFog.addEventListener("change", () => {
-      state.showFogOfWar = !!el.toggleFog.checked;
+      const enabled = !!el.toggleFog.checked;
+      state.showFogOfWar = enabled;
+      state.fogToggleTargetAlpha = enabled ? 1 : 0;
+      state.fogToggleLastTs = performance.now();
+      ensureEffectsLoop();
       scheduleRender();
     });
   }
@@ -3201,14 +3209,40 @@ function ingestMapperPlannedPath(payload) {
   let receivedAt = now;
 
   if (prev && Array.isArray(prev.roomIds) && prev.roomIds.length > 0 && rooms.length > 0) {
-    // Carry progress across shifted paths, but cap it to avoid jump-to-end snaps.
+    // Carry progress across shifted paths, but use best overlap matching so
+    // repeated room IDs (loops) don't cause reveal backtracking or jump-ahead.
     const prevProgressRaw = plannedPathRevealProgress(prev, now);
     const prevProgress = Math.min(prev.roomIds.length + 0.999, Math.max(0, prevProgressRaw));
-    const firstSharedIdx = prev.roomIds.indexOf(rooms[0]);
-    if (firstSharedIdx >= 0) {
+    const targetShift = Math.max(0, Math.floor(prevProgress) - 1);
+
+    let bestShift = -1;
+    let bestLen = 0;
+    let bestDist = Number.POSITIVE_INFINITY;
+
+    for (let shift = 0; shift < prev.roomIds.length; shift++) {
+      if (prev.roomIds[shift] !== rooms[0]) continue;
+      let len = 0;
+      while ((shift + len) < prev.roomIds.length
+          && len < rooms.length
+          && prev.roomIds[shift + len] === rooms[len]) {
+        len += 1;
+      }
+      if (len <= 0) continue;
+      const dist = Math.abs(shift - targetShift);
+      const better = len > bestLen
+        || (len === bestLen && dist < bestDist)
+        || (len === bestLen && dist === bestDist && shift > bestShift);
+      if (better) {
+        bestShift = shift;
+        bestLen = len;
+        bestDist = dist;
+      }
+    }
+
+    if (bestShift >= 0) {
       const carriedProgress = Math.min(
         rooms.length + 0.999,
-        Math.max(0, prevProgress - firstSharedIdx)
+        Math.max(0, prevProgress - bestShift)
       );
       receivedAt = now - Math.max(0, (carriedProgress - 1) * stepMs);
     }
@@ -3228,21 +3262,21 @@ function ingestMapperPlannedPath(payload) {
 function consumePlannedPathForRoom(roomId) {
   const rid = String(roomId || "").trim();
   if (!rid || !state.plannedPath || !Array.isArray(state.plannedPath.roomIds)) return;
-  const idx = state.plannedPath.roomIds.indexOf(rid);
-  if (idx < 0) return;
-  const consumedRoomIds = state.plannedPath.roomIds.slice(0, idx + 1);
+  if (state.plannedPath.roomIds.length === 0) return;
+  const nextStepRoomId = String(state.plannedPath.roomIds[0] || "").trim();
+  // Step-identity consume: only clear the immediate next step.
+  // This prevents duplicate future rooms in looped paths from clearing multiple steps.
+  if (!nextStepRoomId || nextStepRoomId !== rid) return;
+
   const now = performance.now();
-  for (const consumedIdRaw of consumedRoomIds) {
-    const consumedId = String(consumedIdRaw || "").trim();
-    if (!consumedId) continue;
-    const existing = state.plannedPathConsumeFx.find((fx) => fx && fx.roomId === consumedId);
-    if (existing) {
-      existing.startedAt = now;
-    } else {
-      state.plannedPathConsumeFx.push({ roomId: consumedId, startedAt: now });
-    }
+
+  const existing = state.plannedPathConsumeFx.find((fx) => fx && fx.roomId === rid);
+  if (existing) {
+    existing.startedAt = now;
+  } else {
+    state.plannedPathConsumeFx.push({ roomId: rid, startedAt: now });
   }
-  state.plannedPath.roomIds.splice(0, idx + 1);
+  state.plannedPath.roomIds.splice(0, 1);
   state.plannedPath.lastUpdateAt = now;
   state.jellyFollowers.delete("__planned_path__");
   ensureEffectsLoop();
@@ -4144,7 +4178,7 @@ function updatePerfStatsPanel(force) {
 function getRenderQualityProfile(visibleRoomCount) {
   const quality = {
     tier: qualityTierName(visibleRoomCount),
-    drawFog: state.showFogOfWar,
+    drawFog: state.showFogOfWar || state.fogToggleAlpha > 0.001,
     drawTrailOverlay: state.showTraveledPath,
     drawTrailPath: state.showTraveledPath,
     drawParty: state.showParty,
@@ -4447,7 +4481,7 @@ function render() {
   if (quality.drawFog) {
     const now = Date.now();
     for (const room of visibleRooms) {
-      drawFogOfWarHaze(room, now);
+      drawFogOfWarHaze(room, now, state.fogToggleAlpha);
     }
   }
 
@@ -4619,8 +4653,43 @@ function drawPlannedPathOverlay(visibleRooms, nowMs) {
 
     const x = state.panX + room.x * tilePx;
     const y = state.panY + room.y * tilePx;
-    const inset = 1 + (1 - eased) * Math.max(0.9, tilePx * 0.1);
+    const inset = 1;
     const size = Math.max(2, tilePx - inset * 2);
+
+    let incomingDir = null;
+    const prevRef = i === 0
+      ? state.roomsById.get(String(state.playerRoomId || ""))
+      : state.roomsById.get(String(path.roomIds[i - 1] || ""));
+    if (prevRef) {
+      const dx = room.x - prevRef.x;
+      const dy = room.y - prevRef.y;
+      if (dx === 0 && dy === -1) incomingDir = "n";
+      else if (dx === 0 && dy === 1) incomingDir = "s";
+      else if (dx === -1 && dy === 0) incomingDir = "w";
+      else if (dx === 1 && dy === 0) incomingDir = "e";
+    }
+
+    let revealX = x + inset;
+    let revealY = y + inset;
+    let revealW = size;
+    let revealH = size;
+    if (incomingDir === "n") {
+      // Moving north into this room: reveal from south edge upward.
+      revealH = Math.max(1, size * eased);
+      revealY = y + inset + (size - revealH);
+    } else if (incomingDir === "s") {
+      // Moving south: reveal from north edge downward.
+      revealH = Math.max(1, size * eased);
+      revealY = y + inset;
+    } else if (incomingDir === "w") {
+      // Moving west: reveal from east edge leftward.
+      revealW = Math.max(1, size * eased);
+      revealX = x + inset + (size - revealW);
+    } else if (incomingDir === "e") {
+      // Moving east: reveal from west edge rightward.
+      revealW = Math.max(1, size * eased);
+      revealX = x + inset;
+    }
 
     const fillAlpha = (0.045 + eased * 0.095) * idleAlpha;
     const glowAlpha = (0.11 + eased * 0.19) * idleAlpha;
@@ -4634,6 +4703,10 @@ function drawPlannedPathOverlay(visibleRooms, nowMs) {
       y,
       inset,
       size,
+      revealX,
+      revealY,
+      revealW,
+      revealH,
       fillAlpha,
       glowAlpha,
       edgeAlpha,
@@ -4654,6 +4727,10 @@ function drawPlannedPathOverlay(visibleRooms, nowMs) {
       y,
       inset,
       size,
+      revealX,
+      revealY,
+      revealW,
+      revealH,
       fillAlpha,
       glowAlpha,
       edgeAlpha,
@@ -4672,11 +4749,16 @@ function drawPlannedPathOverlay(visibleRooms, nowMs) {
 
     ctx.save();
     ctx.fillStyle = `rgba(255, 214, 122, ${fillAlpha})`;
-    ctx.fillRect(x + inset, y + inset, size, size);
+    ctx.fillRect(revealX, revealY, revealW, revealH);
 
     // Clip glow to the highlighted tile interior so edges feel neon and wispy, not outlined.
     ctx.beginPath();
     ctx.rect(x + inset, y + inset, size, size);
+    ctx.clip();
+
+    // Directional reveal mask: slide in from incoming edge instead of center expansion.
+    ctx.beginPath();
+    ctx.rect(revealX, revealY, revealW, revealH);
     ctx.clip();
 
     if (drawTop) {
@@ -6714,7 +6796,7 @@ function drawRoomTile(room, options) {
   ctx.restore();
 }
 
-function drawFogOfWarHaze(room, nowMs) {
+function drawFogOfWarHaze(room, nowMs, transitionAlpha) {
   if (!room || !room.discovered) return;
   const seenAt = Number.isFinite(room.lastSeenAt) ? room.lastSeenAt : nowMs;
   const age = nowMs - seenAt;
@@ -6722,13 +6804,16 @@ function drawFogOfWarHaze(room, nowMs) {
 
   const intensity = Math.max(0, Math.min(1, (age - FOG_STALE_START_MS) / (FOG_STALE_FULL_MS - FOG_STALE_START_MS)));
   const alpha = 0.12 + intensity * 0.26;
+  const fadeScale = Math.max(0, Math.min(1, Number.isFinite(transitionAlpha) ? transitionAlpha : 1));
+  const fogAlpha = alpha * fadeScale;
+  if (fogAlpha <= 0.001) return;
   const tilePx = TILE_SIZE * state.zoom;
   const x = state.panX + room.x * tilePx;
   const y = state.panY + room.y * tilePx;
 
   // Lightweight fog overlay: flat tile tint instead of per-room radial cloud gradients.
   ctx.save();
-  ctx.fillStyle = `rgba(9, 12, 15, ${alpha})`;
+  ctx.fillStyle = `rgba(9, 12, 15, ${fogAlpha})`;
   ctx.fillRect(x, y, tilePx, tilePx);
   ctx.restore();
 }
@@ -7757,6 +7842,27 @@ function updatePanAnimation(now) {
   }
 }
 
+function updateFogToggleTransition(now) {
+  const target = state.fogToggleTargetAlpha;
+  const current = state.fogToggleAlpha;
+  if (Math.abs(target - current) <= 0.001) {
+    state.fogToggleAlpha = target;
+    state.fogToggleLastTs = now;
+    return;
+  }
+
+  const lastTs = Number.isFinite(state.fogToggleLastTs) && state.fogToggleLastTs > 0
+    ? state.fogToggleLastTs
+    : now;
+  const dtMs = Math.max(0, now - lastTs);
+  const step = dtMs / Math.max(1, FOG_TOGGLE_FADE_MS);
+  const next = target > current
+    ? Math.min(target, current + step)
+    : Math.max(target, current - step);
+  state.fogToggleAlpha = Math.max(0, Math.min(1, next));
+  state.fogToggleLastTs = now;
+}
+
 function pruneMovementTrail(now) {
   state.movementTrail = state.movementTrail.filter((segment) => {
     const holdMs = Number.isFinite(segment.holdMs) ? segment.holdMs : TRAIL_DOT_HOLD_MS;
@@ -7805,6 +7911,10 @@ function hasActiveRoomPulseEffect() {
   if (!activeRoom) return false;
   return activeRoom.z === state.activeZ
     && normalizeGridId(activeRoom.gridId) === normalizeGridId(state.activeGridId);
+}
+
+function hasActiveFogToggleEffect() {
+  return Math.abs(state.fogToggleTargetAlpha - state.fogToggleAlpha) > 0.001;
 }
 
 function hasActivePlannedPathEffect(now) {
@@ -7893,6 +8003,7 @@ function ensureEffectsLoop() {
     const dt = Math.max(1 / 240, Math.min(0.07, (now - prevTs) / 1000));
     state.animation.lastEffectTs = now;
     updatePanAnimation(now);
+    updateFogToggleTransition(now);
     updateAllJellyFollowers(dt);
     pruneMovementTrail(now);
     pruneAllJellyTrails(now);
@@ -7903,7 +8014,7 @@ function ensureEffectsLoop() {
       anim.lastRenderTs = now;
     }
 
-    if (state.animation.active || state.movementTrail.length > 0 || hasActiveJellyFollowers() || hasActiveMobHintEffects(now) || hasActiveRoomPulseEffect() || hasActivePlannedPathEffect(now)) {
+    if (state.animation.active || state.movementTrail.length > 0 || hasActiveJellyFollowers() || hasActiveMobHintEffects(now) || hasActiveRoomPulseEffect() || hasActivePlannedPathEffect(now) || hasActiveFogToggleEffect()) {
       anim.effectRafId = requestAnimationFrame(tick);
       return;
     }
