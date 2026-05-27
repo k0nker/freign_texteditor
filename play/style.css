@@ -2381,6 +2381,26 @@ body:has(#workspace[data-layout="rounded"]) #settings-drawer {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--panel-border) 20%, transparent);
 }
 
+.party-card--offline {
+  opacity: 0.55;
+  filter: saturate(0.4);
+  border-style: dashed;
+}
+
+.party-offline-tag {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  margin-left: 6px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--muted) 12%, transparent);
+  display: inline-block;
+  vertical-align: middle;
+}
+
 .party-head {
   display: flex;
   align-items: center;
@@ -2858,4 +2878,132 @@ body:has(#workspace[data-layout="rounded"]) #settings-drawer {
   font-size: 10px;
   color: var(--muted);
   margin-bottom: 6px;
+}
+
+/* ── GMCP Debug Window ─────────────────────────────────────── */
+
+#gmcp-debug-window {
+  position: fixed;
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 620px;
+  max-width: calc(100vw - 32px);
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--panel) 94%, var(--bg) 6%) 0%,
+    color-mix(in srgb, var(--panel) 88%, var(--bg) 12%) 100%
+  );
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 24px color-mix(in srgb, var(--bg) 70%, transparent);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+}
+
+#gmcp-debug-window[hidden] { display: none !important; }
+
+#gmcp-debug-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--panel-border);
+  cursor: move;
+  flex-shrink: 0;
+}
+
+#gmcp-debug-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+#gmcp-debug-controls {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+#gmcp-debug-controls button {
+  background: none;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 10px;
+  padding: 2px 7px;
+  line-height: 1.4;
+  font-family: inherit;
+}
+
+#gmcp-debug-controls button:hover { color: var(--text); border-color: var(--accent); }
+
+#gmcp-debug-body {
+  overflow: hidden;
+  transition: max-height 200ms ease;
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
+}
+
+#gmcp-debug-window.collapsed #gmcp-debug-body {
+  max-height: 0;
+}
+
+#gmcp-debug-window.collapsed #gmcp-debug-collapse {
+  transform: rotate(-90deg);
+}
+
+#gmcp-debug-log {
+  overflow-y: auto;
+  flex: 1;
+  padding: 6px 8px;
+  font-family: var(--terminal-font, 'JetBrains Mono', monospace);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--terminal-text);
+  user-select: text;
+}
+
+.gmcp-debug-entry {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 40%, transparent);
+  word-break: break-all;
+}
+
+.gmcp-debug-entry:last-child { border-bottom: none; }
+
+.gmcp-debug-ts {
+  color: var(--muted);
+  flex-shrink: 0;
+  font-size: 10px;
+}
+
+.gmcp-debug-pkg {
+  color: var(--accent);
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.gmcp-debug-data {
+  color: var(--terminal-text);
+  opacity: 0.8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  cursor: pointer;
+}
+
+.gmcp-debug-data.expanded {
+  white-space: pre-wrap;
+  overflow: visible;
+  text-overflow: unset;
 }

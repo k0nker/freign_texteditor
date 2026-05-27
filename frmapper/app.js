@@ -289,6 +289,7 @@ const state = {
   showPerfStats: false,
   showLocalIds: false,
   followPlayer: true,
+  followTrackedPlayer: false,   // imm mode: center on single tracked char instead of self
   pendingInitialSnap: false,
   themeHighlightColor: "#d9b05f",
   scanDistance: DEFAULT_SCAN_DISTANCE,
@@ -1974,6 +1975,7 @@ const el = {
   embedRoomEph: document.getElementById("embed-room-eph"),
   embedLocalIdToggle: document.getElementById("embed-localid-toggle"),
   embedFollow: document.getElementById("embed-follow"),
+  embedFollowTracked: document.getElementById("embed-follow-tracked"),
   embedQuickTooltip: document.getElementById("embed-quick-tooltip"),
   canvas: document.getElementById("map-canvas"),
   zoomRange: document.getElementById("zoom-range"),
@@ -2122,6 +2124,12 @@ function updateEmbedQuickControls() {
       state.followPlayer ? "Follow player enabled" : "Follow player disabled"
     );
   }
+  if (el.embedFollowTracked) {
+    const singleTracked = state.trackedChars.size === 1 && state.trackedMobs.size === 0;
+    el.embedFollowTracked.hidden = !singleTracked;
+    el.embedFollowTracked.classList.toggle("active", !!state.followTrackedPlayer && singleTracked);
+    el.embedFollowTracked.setAttribute("aria-pressed", (!!state.followTrackedPlayer && singleTracked) ? "true" : "false");
+  }
 }
 
 function showEmbedQuickTooltip(sourceEl, message) {
@@ -2251,6 +2259,31 @@ function wireEvents() {
       showEmbedQuickTooltip(el.embedFollow, msg);
     });
     el.embedFollow.addEventListener("mouseleave", hideEmbedQuickTooltip);
+  }
+
+  if (state.isEmbedMode && el.embedFollowTracked) {
+    el.embedFollowTracked.addEventListener("click", () => {
+      state.followTrackedPlayer = !state.followTrackedPlayer;
+      updateEmbedQuickControls();
+      if (state.followTrackedPlayer && state.trackedChars.size === 1) {
+        const entry = state.trackedChars.values().next().value;
+        if (entry && entry.roomId) {
+          const room = state.roomsById.get(entry.roomId);
+          if (room) {
+            setActiveLayerFromRoom(room);
+            const targetPan = panForRoom(room);
+            startPanAnimation(targetPan.x, targetPan.y, 250, null, null);
+          }
+        }
+      }
+    });
+    el.embedFollowTracked.addEventListener("mouseenter", () => {
+      const msg = state.followTrackedPlayer
+        ? "Center on tracked player enabled: map follows their movement"
+        : "Center on tracked player: map will follow their movement";
+      showEmbedQuickTooltip(el.embedFollowTracked, msg);
+    });
+    el.embedFollowTracked.addEventListener("mouseleave", hideEmbedQuickTooltip);
   }
 
   if (state.isEmbedMode && el.embedQuickControls) {
@@ -3351,7 +3384,13 @@ function ingestTrackedDelta(type, payload) {
   const isMobs = type === "mobs";
   const map = isMobs ? state.trackedMobs : state.trackedChars;
   const action = String((payload && payload.act) || "");
-  if (action === "clear") { map.clear(); scheduleRender(); return; }
+  if (action === "clear") {
+    map.clear();
+    if (!isMobs) { state.followTrackedPlayer = false; }
+    updateEmbedQuickControls();
+    scheduleRender();
+    return;
+  }
   const name = String((payload && payload.n) || "").trim();
   const uid = payload && payload.uid != null ? Number(payload.uid) : null;
   // Mobs are keyed by UID string to avoid name-collision overwrites. Chars keep name as key.
@@ -3360,11 +3399,17 @@ function ingestTrackedDelta(type, payload) {
   if (action === "remove") {
     map.delete(key);
     state.jellyFollowers.delete(key);
+    // If this was the single tracked char, disable follow-tracked mode
+    if (!isMobs && state.trackedChars.size !== 1) state.followTrackedPlayer = false;
+    updateEmbedQuickControls();
     scheduleRender();
     return;
   }
   if (action === "add") {
     map.set(key, { roomId: String((payload && payload.rid) || ""), uid, name });
+    // If we now have >1 tracked char, disable follow-tracked mode
+    if (!isMobs && state.trackedChars.size !== 1) state.followTrackedPlayer = false;
+    updateEmbedQuickControls();
     scheduleRender();
     return;
   }
@@ -3380,6 +3425,12 @@ function ingestTrackedDelta(type, payload) {
       addTrackedJellyTrail(key, fromPos, toPos, type);
     }
     scheduleRender();
+    // Pan to follow single tracked player when that mode is on
+    if (!isMobs && state.followTrackedPlayer && state.trackedChars.size === 1 && toRoom) {
+      setActiveLayerFromRoom(toRoom);
+      const targetPan = panForRoom(toRoom);
+      startPanAnimation(targetPan.x, targetPan.y, 250, null, null);
+    }
   }
 }
 
@@ -5643,7 +5694,7 @@ function setPlayerLocationPayload(payload) {
     }
   }
 
-  if (state.followPlayer) {
+  if (state.followPlayer && !state.followTrackedPlayer) {
     setActiveLayerFromRoom(targetRoom);
     const targetPan = panForRoom(targetRoom);
     startPanAnimation(targetPan.x, targetPan.y, durationMs, moved ? priorWithRoom : null, moved ? next : null);

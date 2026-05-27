@@ -497,6 +497,10 @@
               <div class="field-row">
                 <button id="btn-renegotiate-gmcp" type="button">Renegotiate GMCP</button>
               </div>
+              <div class="field-row" style="margin-top:8px">
+                <label for="cfg-gmcp-debug">GMCP Debug Log</label>
+                <input id="cfg-gmcp-debug" type="checkbox" />
+              </div>
             </div>
 
           </div><!-- /dpane-config -->
@@ -572,6 +576,21 @@
       </div>
 
     </div><!-- /right-settings-rail -->
+
+    <!-- GMCP debug floating window -->
+    <div id="gmcp-debug-window" hidden>
+      <div id="gmcp-debug-header">
+        <span id="gmcp-debug-title">GMCP Debug</span>
+        <div id="gmcp-debug-controls">
+          <button id="gmcp-debug-clear" type="button" title="Clear log">Clear</button>
+          <button id="gmcp-debug-collapse" type="button" title="Collapse/expand">&#x25BC;</button>
+          <button id="gmcp-debug-close" type="button" title="Close">&#x2715;</button>
+        </div>
+      </div>
+      <div id="gmcp-debug-body">
+        <div id="gmcp-debug-log"></div>
+      </div>
+    </div>
 
   </div><!-- /workspace -->
 

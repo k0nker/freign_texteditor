@@ -212,6 +212,7 @@
     tsSelectable:   true,
     logTimestamps:  true,
     affectsView:    'details',
+    gmcpDebug:      false,
   };
 
   function cloneDefaultSettings() {
@@ -798,6 +799,13 @@
     el.logPopupSave      = document.getElementById('log-popup-save');
     el.logPopupClose     = document.getElementById('log-popup-close');
     el.floatingTooltip   = null;
+
+    el.cfgGmcpDebug      = document.getElementById('cfg-gmcp-debug');
+    el.gmcpDebugWindow   = document.getElementById('gmcp-debug-window');
+    el.gmcpDebugLog      = document.getElementById('gmcp-debug-log');
+    el.gmcpDebugClear    = document.getElementById('gmcp-debug-clear');
+    el.gmcpDebugCollapse = document.getElementById('gmcp-debug-collapse');
+    el.gmcpDebugClose    = document.getElementById('gmcp-debug-close');
   }
 
   function bindUi() {
@@ -1068,6 +1076,33 @@
         sendWs({ type: 'input', data: 'gmcp webclient on\n' });
       });
     }
+
+    if (el.cfgGmcpDebug) {
+      el.cfgGmcpDebug.addEventListener('change', function () {
+        state.settings.gmcpDebug = !!el.cfgGmcpDebug.checked;
+        applyGmcpDebugState();
+        saveSettings();
+      });
+    }
+    if (el.gmcpDebugClear) {
+      el.gmcpDebugClear.addEventListener('click', function () {
+        if (el.gmcpDebugLog) el.gmcpDebugLog.innerHTML = '';
+      });
+    }
+    if (el.gmcpDebugCollapse) {
+      el.gmcpDebugCollapse.addEventListener('click', function () {
+        if (el.gmcpDebugWindow) el.gmcpDebugWindow.classList.toggle('collapsed');
+      });
+    }
+    if (el.gmcpDebugClose) {
+      el.gmcpDebugClose.addEventListener('click', function () {
+        state.settings.gmcpDebug = false;
+        if (el.cfgGmcpDebug) el.cfgGmcpDebug.checked = false;
+        applyGmcpDebugState();
+        saveSettings();
+      });
+    }
+    initGmcpDebugDrag();
     el.cfgConsoleWidth.addEventListener('change', function () {
       state.settings.consoleWidth = Math.max(320, Math.min(1920, parseInt(el.cfgConsoleWidth.value, 10) || 1000));
       el.cfgConsoleWidth.value = state.settings.consoleWidth;
@@ -1948,6 +1983,8 @@
     el.cfgStackSep.value     = sanitizeStackSep(state.settings.stackSeparator);
     el.cfgTsSelectable.checked  = state.settings.tsSelectable !== false;
     applyTsSelectable();
+    if (el.cfgGmcpDebug) el.cfgGmcpDebug.checked = !!state.settings.gmcpDebug;
+    applyGmcpDebugState();
 
     el.terminal.classList.toggle('nowrap', !state.settings.wrapLines);
     applyWrapWidth();
@@ -2439,8 +2476,89 @@
     if (msg.type === 'gmcp')         { handleGmcp(msg.package, msg.data); return; }
   }
 
+  // ── GMCP Debug Window ────────────────────────────────────────────────────
+
+  function applyGmcpDebugState() {
+    var on = !!state.settings.gmcpDebug;
+    if (el.gmcpDebugWindow) el.gmcpDebugWindow.hidden = !on;
+    if (el.cfgGmcpDebug) el.cfgGmcpDebug.checked = on;
+  }
+
+  var GMCP_DEBUG_MAX = 300;
+
+  function logGmcpDebugEntry(pkg, data) {
+    if (!el.gmcpDebugLog) return;
+    var now = new Date();
+    var ts = now.toTimeString().slice(0, 8) + '.' + String(now.getMilliseconds()).padStart(3, '0');
+    var dataStr = '';
+    try { dataStr = JSON.stringify(data); } catch (_) { dataStr = String(data); }
+
+    var entry = document.createElement('div');
+    entry.className = 'gmcp-debug-entry';
+
+    var tsSpan = document.createElement('span');
+    tsSpan.className = 'gmcp-debug-ts';
+    tsSpan.textContent = ts;
+
+    var pkgSpan = document.createElement('span');
+    pkgSpan.className = 'gmcp-debug-pkg';
+    pkgSpan.textContent = pkg;
+
+    var dataSpan = document.createElement('span');
+    dataSpan.className = 'gmcp-debug-data';
+    dataSpan.textContent = dataStr;
+    dataSpan.title = 'Click to expand/collapse';
+    dataSpan.addEventListener('click', function () {
+      dataSpan.classList.toggle('expanded');
+    });
+
+    entry.appendChild(tsSpan);
+    entry.appendChild(pkgSpan);
+    entry.appendChild(dataSpan);
+    el.gmcpDebugLog.appendChild(entry);
+
+    // Trim old entries
+    while (el.gmcpDebugLog.children.length > GMCP_DEBUG_MAX) {
+      el.gmcpDebugLog.removeChild(el.gmcpDebugLog.firstChild);
+    }
+
+    // Auto-scroll to bottom unless user has scrolled up
+    var body = el.gmcpDebugLog.parentElement;
+    if (body) {
+      var atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
+      if (atBottom) body.scrollTop = body.scrollHeight;
+    }
+  }
+
+  function initGmcpDebugDrag() {
+    var win = el.gmcpDebugWindow;
+    var header = document.getElementById('gmcp-debug-header');
+    if (!win || !header) return;
+    var dragging = false, ox = 0, oy = 0, wx = 0, wy = 0;
+    header.addEventListener('mousedown', function (e) {
+      if (e.target.tagName === 'BUTTON') return;
+      dragging = true;
+      var rect = win.getBoundingClientRect();
+      // Switch from centered transform positioning to absolute
+      win.style.left = rect.left + 'px';
+      win.style.top  = rect.top  + 'px';
+      win.style.bottom = 'auto';
+      win.style.transform = 'none';
+      ox = e.clientX; oy = e.clientY;
+      wx = rect.left; wy = rect.top;
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', function (e) {
+      if (!dragging) return;
+      win.style.left = (wx + e.clientX - ox) + 'px';
+      win.style.top  = (wy + e.clientY - oy) + 'px';
+    });
+    document.addEventListener('mouseup', function () { dragging = false; });
+  }
+
   function handleGmcp(pkg, data) {
     if (!pkg) return;
+    if (state.settings.gmcpDebug) logGmcpDebugEntry(pkg, data);
     var canonicalPkg = canonicalGmcpPackageName(pkg);
     if (canonicalPkg === 'char.vitals') { updateVitals(data || {}); return; }
     if (canonicalPkg === 'room.info')   { updateRoomInfo(data || {}); return; }
@@ -3325,17 +3443,19 @@
       leader: rawLeader,
       members: rawMembers.map(function (m) {
         return {
-          name:           String(m.n   || ''),
-          uid:            m.uid != null ? Number(m.uid) : null,
-          level:          m.lv  != null ? m.lv  : 0,
-          race:           String(m.r   || ''),
-          class:          String(m.cls || ''),
-          wimpy:          m.wmp != null ? m.wmp : 0,
-          alignment:      m.align != null ? m.align : 0,
-          alignment_name: String(m.aname || ''),
-          ethos:          String(m.ethos || 'none'),
-          is_npc:         !!m.npc,
-          is_leader:      !!m.isl,
+          name:                    String(m.n   || ''),
+          uid:                     m.uid != null ? Number(m.uid) : null,
+          level:                   m.lv  != null ? m.lv  : 0,
+          race:                    String(m.r   || ''),
+          class:                   String(m.cls || ''),
+          wimpy:                   m.wmp != null ? m.wmp : 0,
+          alignment:               m.align != null ? m.align : 0,
+          alignment_name:          String(m.aname || ''),
+          ethos:                   String(m.ethos || 'none'),
+          is_npc:                  !!m.npc,
+          is_leader:               !!m.isl,
+          online:                  m.online !== false,
+          disconnect_ticks_remaining: m.online !== false ? null : (m.dtk != null ? Number(m.dtk) : null),
         };
       })
     };
@@ -3555,7 +3675,10 @@
   function renderPartyPanel() {
     if (!el.partyList) return;
     var grp = state.gmcp.groupInfo;
-    if (!grp || !Array.isArray(grp.members) || !grp.members.length) return;
+    if (!grp || !Array.isArray(grp.members) || !grp.members.length) {
+      el.partyList.innerHTML = '';
+      return;
+    }
 
     var leader = String(grp.leader || '');
     el.partyList.className = 'panel-body party-list';
@@ -3579,6 +3702,7 @@
       var area = String(m.area || 'Unknown Area');
       var roomName = String(m.room_name || m.room_id || 'Unknown Room');
       var leadMark = (leader && leader === name) ? ' ★' : '';
+      var isOnline = m.online !== false;
       var hpPct   = m.hp_pct   != null ? pct(numOr(m.hp_pct,   0), 100)
                                         : pct(numOr(m.hp,   0), Math.max(1, numOr(m.maxhp,   1)));
       var mpPct   = m.mana_pct != null ? pct(numOr(m.mana_pct, 0), 100)
@@ -3588,11 +3712,21 @@
 
       var wimpyPct = Math.max(0, Math.min(100, numOr(m.wimpy_pct, 0)));
 
+      var offlineTag = '';
+      if (!isOnline) {
+        var dtk = m.disconnect_ticks_remaining;
+        var secsLeft = dtk != null ? dtk * 30 : null;
+        var graceLabel = secsLeft != null
+          ? (secsLeft >= 60 ? Math.ceil(secsLeft / 60) + 'm' : secsLeft + 's') + ' grace'
+          : 'grace timer running';
+        offlineTag = '<span class="party-offline-tag">Offline · ' + escHtml(graceLabel) + '</span>';
+      }
+
       var card = document.createElement('div');
-      card.className = 'party-card';
+      card.className = 'party-card' + (isOnline ? '' : ' party-card--offline');
       card.innerHTML =
         '<div class="party-head">' +
-          '<span class="party-name">' + escHtml(name + leadMark) + '</span>' +
+          '<span class="party-name">' + escHtml(name + leadMark) + offlineTag + '</span>' +
           '<span class="party-tags">Lv ' + lvl + ' · ' + escHtml(race) + ' · ' + escHtml(cls) + '</span>' +
         '</div>' +
         '<div class="party-substats">TNL ' + tnl + ' · ' + escHtml(align) + ' · ' + escHtml(ethos) + '</div>' +
