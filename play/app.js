@@ -276,7 +276,7 @@
   }
 
   function loadProfileStore() {
-    var store = { profiles: {} };
+    var store = { profiles: {}, lastConnections: {} };
     store.profiles[DEFAULT_PROFILE_NAME] = cloneProfileSettings({});
 
     try {
@@ -295,6 +295,19 @@
       } else if (parsed.settings && typeof parsed.settings === 'object') {
         store.profiles[DEFAULT_PROFILE_NAME] = cloneProfileSettings(parsed.settings);
       }
+
+      var lastConnections = parsed.lastConnections && typeof parsed.lastConnections === 'object'
+        ? parsed.lastConnections
+        : null;
+      if (lastConnections) {
+        Object.keys(lastConnections).forEach(function (name) {
+          var profileName = normalizeProfileName(name);
+          if (!profileName) return;
+          var mudId = normalizeMudId(lastConnections[name]);
+          if (!mudId) return;
+          store.lastConnections[profileName] = mudId;
+        });
+      }
     } catch (_) {}
 
     if (!store.profiles[DEFAULT_PROFILE_NAME]) {
@@ -307,7 +320,8 @@
   function _profileStorePayload() {
     return JSON.stringify({
       version: 1,
-      profiles: state.profileStore ? state.profileStore.profiles : { Default: cloneProfileSettings({}) }
+      profiles: state.profileStore ? state.profileStore.profiles : { Default: cloneProfileSettings({}) },
+      lastConnections: state.profileStore && state.profileStore.lastConnections ? state.profileStore.lastConnections : {}
     });
   }
 
@@ -343,6 +357,42 @@
     var name = normalizeProfileName(profileName) || DEFAULT_PROFILE_NAME;
     if (!state.profileStore || !state.profileStore.profiles) return cloneProfileSettings({});
     return cloneProfileSettings(state.profileStore.profiles[name] || {});
+  }
+
+  function normalizeMudId(mudId) {
+    var normalized = String(mudId || '').trim().toLowerCase();
+    if (!normalized) return '';
+    return LOCKED_MUDS.some(function (mud) { return mud.id === normalized; }) ? normalized : '';
+  }
+
+  function getProfileLastMudId(profileName) {
+    var name = normalizeProfileName(profileName) || DEFAULT_PROFILE_NAME;
+    if (!state.profileStore || !state.profileStore.lastConnections) return '';
+    return normalizeMudId(state.profileStore.lastConnections[name]);
+  }
+
+  function rememberProfileLastMudId(profileName, mudId) {
+    var name = normalizeProfileName(profileName) || DEFAULT_PROFILE_NAME;
+    var normalizedMudId = normalizeMudId(mudId);
+    if (!normalizedMudId) return false;
+    if (!state.profileStore) state.profileStore = loadProfileStore();
+    if (!state.profileStore.lastConnections || typeof state.profileStore.lastConnections !== 'object') {
+      state.profileStore.lastConnections = {};
+    }
+    if (state.profileStore.lastConnections[name] === normalizedMudId) return true;
+    state.profileStore.lastConnections[name] = normalizedMudId;
+    saveProfileStore();
+    return true;
+  }
+
+  function autoConnectProfileLastMud(profileName) {
+    var mudId = getProfileLastMudId(profileName);
+    if (!mudId) return false;
+    if (state.connected && state.selectedMudId === mudId && state.ws && state.ws.readyState === WebSocket.OPEN) {
+      return true;
+    }
+    connectMud(mudId, false);
+    return true;
   }
 
   function chooseStartupProfileName(profileNames) {
@@ -393,10 +443,11 @@
     var picked = normalizeProfileName(profileName) || DEFAULT_PROFILE_NAME;
     var names = getProfileNames();
     if (names.indexOf(picked) < 0) picked = DEFAULT_PROFILE_NAME;
+    var hasStoredConnection = !!getProfileLastMudId(picked);
 
-    setActiveProfile(picked, { render: true, persist: true });
+    setActiveProfile(picked, { render: true, persist: true, autoConnectLastMud: true });
     hideStartupProfilePicker();
-    appendSystem('Client ready — choose a server to connect.');
+    if (!hasStoredConnection) appendSystem('Client ready — choose a server to connect.');
   }
 
   function setActiveProfile(profileName, options) {
@@ -422,6 +473,9 @@
     state.gmcp.channels = [];
     state.gmcp.channelTab = 'all';
     loadCommHistory();
+    if (opts.autoConnectLastMud) {
+      autoConnectProfileLastMud(next);
+    }
     if (opts.render !== false) renderAll();
     if (opts.persist !== false) saveSettings();
   }
@@ -1003,7 +1057,7 @@
 
     if (el.profileSelect) {
       el.profileSelect.addEventListener('change', function () {
-        setActiveProfile(el.profileSelect.value || DEFAULT_PROFILE_NAME, { render: true, persist: true });
+        setActiveProfile(el.profileSelect.value || DEFAULT_PROFILE_NAME, { render: true, persist: true, autoConnectLastMud: true });
       });
     }
     if (el.profileNew) {
@@ -2358,6 +2412,9 @@
     state.userDisconnected = false;
     if (!isReconnect) state.reconnectAttempts = 0;
     state.selectedMudId = mudId;
+    if (!isReconnect) {
+      rememberProfileLastMudId(state.activeProfileName, mudId);
+    }
     setConnectionState('connecting');
     appendSystem('Connecting to ' + mud.name + ' (' + mud.host + ':' + mud.port + ')\u2026');
     var wsId = ++state.wsGeneration;

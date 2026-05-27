@@ -16,6 +16,7 @@ const PLANNED_PATH_IDLE_FADE_START_MS = 5000;
 const PLANNED_PATH_IDLE_FADE_END_MS = 6200;
 const PLANNED_PATH_CONSUME_PULSE_MS = 340;
 const PLANNED_PATH_PREVIEW_LIMIT = 15;
+const PLANNED_PATH_TILE_REVEAL_MS = 230;
 const FOG_STALE_START_MS = 8 * 60 * 1000;
 const FOG_STALE_FULL_MS = 40 * 60 * 1000;
 const FOG_TOGGLE_FADE_MS = 260;
@@ -297,6 +298,7 @@ const state = {
   showParty: true,
   showMobHints: true,
   showTraveledPath: true,
+  showHighlightedPath: true,
   showFogOfWar: true,
   fogToggleAlpha: 1,
   fogToggleTargetAlpha: 1,
@@ -337,7 +339,9 @@ const state = {
     roomIds: [],
     receivedAt: 0,
     lastUpdateAt: 0,
-    stepMs: PLANNED_PATH_STEP_MS_DEFAULT
+    stepMs: PLANNED_PATH_STEP_MS_DEFAULT,
+    consumedCount: 0,
+    revealStartByAbsIndex: Object.create(null)
   },
   plannedPathConsumeFx: [],
   animation: {
@@ -2014,6 +2018,7 @@ const el = {
   toggleParty: document.getElementById("toggle-party"),
   toggleMobs: document.getElementById("toggle-mobs"),
   toggleTraveledPath: document.getElementById("toggle-traveled-path"),
+  toggleHighlightedPath: document.getElementById("toggle-highlighted-path"),
   toggleFog: document.getElementById("toggle-fog"),
   toggleGridOutline: document.getElementById("toggle-grid-outline"),
   togglePerfStats: document.getElementById("toggle-perf-stats"),
@@ -2344,6 +2349,16 @@ function wireEvents() {
     });
   }
 
+  if (el.toggleHighlightedPath) {
+    el.toggleHighlightedPath.addEventListener("change", () => {
+      state.showHighlightedPath = !!el.toggleHighlightedPath.checked;
+      if (state.showHighlightedPath) {
+        ensureEffectsLoop();
+      }
+      scheduleRender();
+    });
+  }
+
   if (el.toggleFog) {
     el.toggleFog.addEventListener("change", () => {
       const enabled = !!el.toggleFog.checked;
@@ -2583,7 +2598,9 @@ function resetToEmptyMap() {
     roomIds: [],
     receivedAt: 0,
     lastUpdateAt: 0,
-    stepMs: PLANNED_PATH_STEP_MS_DEFAULT
+    stepMs: PLANNED_PATH_STEP_MS_DEFAULT,
+    consumedCount: 0,
+    revealStartByAbsIndex: Object.create(null)
   };
   state.plannedPathConsumeFx = [];
   state.partyMemberLastPos = new Map();
@@ -2730,7 +2747,9 @@ function applyMapObject(data) {
     roomIds: [],
     receivedAt: 0,
     lastUpdateAt: 0,
-    stepMs: PLANNED_PATH_STEP_MS_DEFAULT
+    stepMs: PLANNED_PATH_STEP_MS_DEFAULT,
+    consumedCount: 0,
+    revealStartByAbsIndex: Object.create(null)
   };
   state.plannedPathConsumeFx = [];
   state.partyMemberLastPos = new Map();
@@ -3207,8 +3226,11 @@ function ingestMapperPlannedPath(payload) {
   const now = performance.now();
   const prev = state.plannedPath;
   let receivedAt = now;
+  let carriedConsumedCount = 0;
+  const revealStartByAbsIndex = Object.create(null);
 
   if (prev && Array.isArray(prev.roomIds) && prev.roomIds.length > 0 && rooms.length > 0) {
+    ensurePlannedPathRuntimeState(prev);
     // Carry progress across shifted paths, but use best overlap matching so
     // repeated room IDs (loops) don't cause reveal backtracking or jump-ahead.
     const prevProgressRaw = plannedPathRevealProgress(prev, now);
@@ -3245,6 +3267,16 @@ function ingestMapperPlannedPath(payload) {
         Math.max(0, prevProgress - bestShift)
       );
       receivedAt = now - Math.max(0, (carriedProgress - 1) * stepMs);
+      carriedConsumedCount = Math.max(0, prev.consumedCount + bestShift);
+
+      for (let i = 0; i < rooms.length; i++) {
+        const prevAbsIndex = prev.consumedCount + bestShift + i;
+        const nextAbsIndex = carriedConsumedCount + i;
+        const prevRevealStart = prev.revealStartByAbsIndex[prevAbsIndex];
+        if (Number.isFinite(prevRevealStart)) {
+          revealStartByAbsIndex[nextAbsIndex] = prevRevealStart;
+        }
+      }
     }
   }
 
@@ -3252,8 +3284,11 @@ function ingestMapperPlannedPath(payload) {
     roomIds: rooms,
     receivedAt,
     lastUpdateAt: now,
-    stepMs
+    stepMs,
+    consumedCount: carriedConsumedCount,
+    revealStartByAbsIndex
   };
+  prunePlannedPathRevealStarts(state.plannedPath, Math.max(0, carriedConsumedCount - 2));
   state.jellyFollowers.delete("__planned_path__");
   ensureEffectsLoop();
   scheduleRender();
@@ -3262,6 +3297,7 @@ function ingestMapperPlannedPath(payload) {
 function consumePlannedPathForRoom(roomId) {
   const rid = String(roomId || "").trim();
   if (!rid || !state.plannedPath || !Array.isArray(state.plannedPath.roomIds)) return;
+  ensurePlannedPathRuntimeState(state.plannedPath);
   if (state.plannedPath.roomIds.length === 0) return;
   const nextStepRoomId = String(state.plannedPath.roomIds[0] || "").trim();
   // Step-identity consume: only clear the immediate next step.
@@ -3277,6 +3313,8 @@ function consumePlannedPathForRoom(roomId) {
     state.plannedPathConsumeFx.push({ roomId: rid, startedAt: now });
   }
   state.plannedPath.roomIds.splice(0, 1);
+  state.plannedPath.consumedCount += 1;
+  prunePlannedPathRevealStarts(state.plannedPath, Math.max(0, state.plannedPath.consumedCount - 2));
   state.plannedPath.lastUpdateAt = now;
   state.jellyFollowers.delete("__planned_path__");
   ensureEffectsLoop();
@@ -4621,24 +4659,80 @@ function plannedPathRevealProgress(path, nowMs) {
   return Math.max(0, (elapsed / stepMs) + 1);
 }
 
+function ensurePlannedPathRuntimeState(path) {
+  if (!path || typeof path !== "object") return;
+  if (!Number.isFinite(path.consumedCount) || path.consumedCount < 0) {
+    path.consumedCount = 0;
+  }
+  if (!path.revealStartByAbsIndex || typeof path.revealStartByAbsIndex !== "object") {
+    path.revealStartByAbsIndex = Object.create(null);
+  }
+}
+
+function prunePlannedPathRevealStarts(path, minAbsIndex) {
+  if (!path || !path.revealStartByAbsIndex || typeof path.revealStartByAbsIndex !== "object") return;
+  const minKeep = Number.isFinite(minAbsIndex) ? minAbsIndex : 0;
+  const maxKeep = (Number.isFinite(path.consumedCount) ? path.consumedCount : 0)
+    + PLANNED_PATH_PREVIEW_LIMIT + 6;
+
+  for (const key of Object.keys(path.revealStartByAbsIndex)) {
+    const idx = Number.parseInt(key, 10);
+    if (!Number.isFinite(idx) || idx < minKeep || idx > maxKeep) {
+      delete path.revealStartByAbsIndex[key];
+    }
+  }
+}
+
 function drawPlannedPathOverlay(visibleRooms, nowMs) {
   state.jellyFollowers.delete("__planned_path__");
+  if (!state.showHighlightedPath) return;
   const path = state.plannedPath;
   if (!path || !Array.isArray(path.roomIds) || path.roomIds.length === 0) return;
+  ensurePlannedPathRuntimeState(path);
+  prunePlannedPathRevealStarts(path, Math.max(0, path.consumedCount - 2));
 
   const idleAlpha = plannedPathIdleAlpha(nowMs);
   if (idleAlpha <= 0) return;
 
-  const revealProgress = plannedPathRevealProgress(path, nowMs);
-  if (revealProgress <= 0) return;
-
   const visibleIds = new Set((visibleRooms || []).map((room) => String(room && room.id ? room.id : "")));
   const tilePx = TILE_SIZE * state.zoom;
   const highlighted = [];
+  const cappedSteps = [];
+  let nonPlayerStepOffset = 0;
 
   for (let i = 0; i < path.roomIds.length; i++) {
     const roomId = String(path.roomIds[i] || "").trim();
     if (!roomId || roomId === String(state.playerRoomId || "")) continue;
+    cappedSteps.push({
+      roomId,
+      absoluteIndex: path.consumedCount + nonPlayerStepOffset
+    });
+    nonPlayerStepOffset += 1;
+    // Keep one extra for interpolation reveal into the next room.
+    if (cappedSteps.length >= (PLANNED_PATH_PREVIEW_LIMIT + 1)) break;
+  }
+
+  // Stagger only tiles that are first entering the visible preview window.
+  // Initial batches crawl in sequence, while later tail tiles usually animate immediately.
+  const revealStaggerMs = Number.isFinite(path.stepMs) && path.stepMs > 0
+    ? Math.max(40, Math.min(220, path.stepMs))
+    : PLANNED_PATH_STEP_MS_DEFAULT;
+  const newlyVisibleSteps = cappedSteps.filter((step) => {
+    return !Number.isFinite(path.revealStartByAbsIndex[step.absoluteIndex]);
+  });
+  for (let i = 0; i < newlyVisibleSteps.length; i++) {
+    const step = newlyVisibleSteps[i];
+    let revealStart = nowMs + (i * revealStaggerMs);
+    const prevRevealStart = path.revealStartByAbsIndex[step.absoluteIndex - 1];
+    if (Number.isFinite(prevRevealStart)) {
+      revealStart = Math.max(revealStart, prevRevealStart + PLANNED_PATH_TILE_REVEAL_MS);
+    }
+    path.revealStartByAbsIndex[step.absoluteIndex] = revealStart;
+  }
+
+  for (let i = 0; i < cappedSteps.length; i++) {
+    const step = cappedSteps[i];
+    const roomId = step.roomId;
     if (!visibleIds.has(roomId)) continue;
 
     const room = state.roomsById.get(roomId);
@@ -4646,8 +4740,14 @@ function drawPlannedPathOverlay(visibleRooms, nowMs) {
     if (room.z !== state.activeZ) continue;
     if (normalizeGridId(room.gridId) !== normalizeGridId(state.activeGridId)) continue;
 
-    // Ease in each room quickly, but not instant, to keep the highlight ahead of movement.
-    const localProgress = clamp01((revealProgress - i) / 1.25);
+    let revealStart = path.revealStartByAbsIndex[step.absoluteIndex];
+    if (!Number.isFinite(revealStart)) {
+      revealStart = nowMs;
+      path.revealStartByAbsIndex[step.absoluteIndex] = revealStart;
+    }
+
+    // Each step animates when it first enters the preview window.
+    const localProgress = clamp01((nowMs - revealStart) / PLANNED_PATH_TILE_REVEAL_MS);
     if (localProgress <= 0) continue;
     const eased = smoothstep01(localProgress);
 
@@ -4659,7 +4759,7 @@ function drawPlannedPathOverlay(visibleRooms, nowMs) {
     let incomingDir = null;
     const prevRef = i === 0
       ? state.roomsById.get(String(state.playerRoomId || ""))
-      : state.roomsById.get(String(path.roomIds[i - 1] || ""));
+      : state.roomsById.get(String(cappedSteps[i - 1].roomId || ""));
     if (prevRef) {
       const dx = room.x - prevRef.x;
       const dy = room.y - prevRef.y;
@@ -7918,6 +8018,7 @@ function hasActiveFogToggleEffect() {
 }
 
 function hasActivePlannedPathEffect(now) {
+  if (!state.showHighlightedPath) return false;
   const path = state.plannedPath;
   const hasPath = !!(path && Array.isArray(path.roomIds) && path.roomIds.length > 0);
   const hasConsumeFx = Array.isArray(state.plannedPathConsumeFx)
